@@ -1,0 +1,50 @@
+# yamllint configuration for Kubernetes YAML files
+# This config follows Kubernetes best practices
+
+extends: default
+
+rules:
+  # Allow longer lines for Kubernetes resources
+  line-length:
+    max: 120
+    level: warning
+
+  # Kubernetes uses 2-space indentation
+  indentation:
+    spaces: 2
+    indent-sequences: true
+
+  # Allow comments without space from content
+  comments:
+    min-spaces-from-content: 1
+
+  # Allow document start markers (helpful for multi-resource files)
+  document-start: disable
+
+  # Allow truthy values like "yes", "on" (common in K8s)
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+
+  # Kubernetes YAMLs often have long lines in annotations/labels
+  comments-indentation: {}
+
+  # Allow empty values (common in K8s for optional fields)
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+
+  # K8s uses hyphens in resource names
+  key-duplicates: {}
+
+  # Allow trailing spaces in comments
+  trailing-spaces: {}
+
+  # Be strict about new lines at end of file
+  new-line-at-end-of-file: enable
+
+  # K8s resources often have complex nested structures
+  braces:
+    max-spaces-inside: 1
+
+  brackets:
+    max-spaces-inside: 1

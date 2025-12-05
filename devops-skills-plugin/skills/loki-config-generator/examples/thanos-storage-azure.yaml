@@ -1,0 +1,166 @@
+# Loki Configuration with Thanos Object Storage Client - Azure (Loki 3.4+)
+# Simple Scalable deployment using the new Thanos-based storage clients
+# The Thanos client provides consistent storage configuration across Grafana's databases
+# Reference: https://grafana.com/docs/loki/latest/configure/examples/thanos-storage-configs/
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  graceful_shutdown_timeout: 30s
+
+# Thanos Object Storage Client Configuration (Loki 3.4+)
+# Note: use_thanos_objstore is mutually exclusive with legacy storage config
+storage_config:
+  use_thanos_objstore: true
+  object_store:
+    # Storage prefix for all objects (optional)
+    # Note: Cannot contain dashes (-), use underscores instead
+    storage_prefix: "loki_prod"
+    azure:
+      account_name: ${AZURE_STORAGE_ACCOUNT}
+      container_name: loki-container
+
+      # Authentication options (choose one):
+      # Option 1: Account Key (simple but less secure)
+      account_key: ${AZURE_STORAGE_KEY}
+
+      # Option 2: Managed Identity (recommended for Azure-hosted workloads)
+      # use_managed_identity: true
+      # user_assigned_id: <optional-user-assigned-identity-client-id>
+
+      # Option 3: Service Principal (for non-Azure environments)
+      # tenant_id: ${AZURE_TENANT_ID}
+      # client_id: ${AZURE_CLIENT_ID}
+      # client_secret: ${AZURE_CLIENT_SECRET}
+
+      # Azure-specific settings
+      max_retries: 5
+      # endpoint_suffix: blob.core.windows.net  # Default, change for sovereign clouds
+
+# Ruler storage must be configured separately when using Thanos
+ruler_storage:
+  backend: azure
+  azure:
+    account_name: ${AZURE_STORAGE_ACCOUNT}
+    account_key: ${AZURE_STORAGE_KEY}
+    container_name: loki-ruler-container
+
+common:
+  path_prefix: /loki
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  join_members:
+    - loki-memberlist
+
+schema_config:
+  configs:
+    - from: "2025-01-01"
+      store: tsdb
+      object_store: azure
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+limits_config:
+  # Ingestion limits
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # Stream limits
+  max_streams_per_user: 100000
+  max_global_streams_per_user: 1000000
+
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h
+  max_query_parallelism: 32
+  max_query_series: 500
+
+  # Retention
+  retention_period: 90d
+
+  # Chunks
+  max_chunks_per_query: 2000000
+
+  # Structured metadata (Loki 2.9+)
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+
+  # Volume API
+  volume_enabled: true
+
+  # OTLP Configuration (Loki 3.0+)
+  # IMPORTANT: k8s.pod.name and service.instance.id are NOT index labels (high cardinality)
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: false
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - service.namespace
+            - deployment.environment
+        - action: structured_metadata
+          attributes:
+            - k8s.pod.name
+            - service.instance.id
+    log_attributes:
+      - action: structured_metadata
+        attributes:
+          - trace_id
+          - span_id
+
+  # Time Sharding for out-of-order ingestion (Loki 3.4+)
+  shard_streams:
+    time_sharding_enabled: true
+
+# Pattern Ingester (Loki 3.0+)
+pattern_ingester:
+  enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: azure
+
+ingester:
+  chunk_encoding: snappy
+  chunk_idle_period: 30m
+  chunk_retain_period: 15m
+  max_chunk_age: 2h
+  chunk_target_size: 1572864  # 1.5MB
+
+querier:
+  max_concurrent: 4
+  query_timeout: 5m
+
+query_frontend:
+  max_outstanding_per_tenant: 4096
+  compress_responses: true
+  encoding: protobuf
+
+query_range:
+  parallelise_shardable_queries: true
+  cache_results: true
+
+# Key Migration Notes from Legacy Storage:
+# - use_thanos_objstore: true is MUTUALLY EXCLUSIVE with legacy storage config
+# - Legacy config is silently ignored when Thanos is enabled
+# - Managed identity is recommended for Azure-hosted workloads (AKS, VMs)
+# - Storage prefix cannot contain dashes (-) - use underscores
+# - Ruler storage MUST be configured separately under ruler_storage

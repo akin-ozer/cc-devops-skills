@@ -1,0 +1,97 @@
+---
+# Example of a well-written Ansible playbook
+# This playbook follows best practices and should pass all validation
+
+- name: Configure web server
+  hosts: webservers
+  become: true
+  vars:
+    nginx_port: 80
+    nginx_user: www-data
+    app_version: "1.0.0"
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      tags:
+        - packages
+
+    - name: Install nginx web server
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+      when: ansible_os_family == "Debian"
+      tags:
+        - packages
+        - nginx
+
+    - name: Create nginx configuration directory
+      ansible.builtin.file:
+        path: /etc/nginx/sites-available
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      tags:
+        - configuration
+        - nginx
+
+    - name: Configure nginx virtual host
+      ansible.builtin.template:
+        src: templates/vhost.conf.j2
+        dest: /etc/nginx/sites-available/default
+        owner: root
+        group: root
+        mode: '0644'
+        validate: nginx -t -c %s
+      notify:
+        - Reload nginx
+      tags:
+        - configuration
+        - nginx
+
+    - name: Enable nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/default
+        dest: /etc/nginx/sites-enabled/default
+        state: link
+      notify:
+        - Reload nginx
+      tags:
+        - configuration
+        - nginx
+
+    - name: Ensure nginx is started and enabled
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: true
+      tags:
+        - services
+        - nginx
+
+    - name: Configure firewall to allow HTTP
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ nginx_port }}"
+        jump: ACCEPT
+        comment: Allow HTTP traffic
+      when: ansible_os_family == "Debian"
+      tags:
+        - security
+        - firewall
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Restart nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted

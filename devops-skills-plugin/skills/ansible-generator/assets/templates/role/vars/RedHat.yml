@@ -1,0 +1,6 @@
+---
+# OS-specific variables for RHEL/CentOS/Rocky
+
+[role_name]_package_name: [redhat_package_name]
+[role_name]_service_name: [redhat_service_name]
+[role_name]_config_dir: /etc/[service_name]

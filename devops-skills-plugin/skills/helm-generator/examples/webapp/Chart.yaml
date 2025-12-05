@@ -1,0 +1,25 @@
+apiVersion: v2
+name: webapp
+description: A production-ready Helm chart for deploying web applications
+
+# Chart version (follows Semantic Versioning)
+version: 0.1.0
+
+# Application version being deployed
+appVersion: "1.0.0"
+
+type: application
+
+# Minimum Kubernetes version required
+kubeVersion: ">=1.24.0-0"
+
+keywords:
+  - web
+  - application
+  - nginx
+
+home: https://example.com
+
+maintainers:
+  - name: DevOps Team
+    email: devops@example.com

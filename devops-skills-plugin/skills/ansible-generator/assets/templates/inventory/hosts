@@ -1,0 +1,25 @@
+# Ansible Inventory: [ENVIRONMENT]
+# Format: INI-style inventory file
+
+[webservers]
+web1.example.com ansible_host=192.168.1.10
+web2.example.com ansible_host=192.168.1.11
+
+[databases]
+db1.example.com ansible_host=192.168.1.20
+db2.example.com ansible_host=192.168.1.21
+
+[loadbalancers]
+lb1.example.com ansible_host=192.168.1.30
+
+# Group of groups
+[production:children]
+webservers
+databases
+loadbalancers
+
+# Group variables (can also be in group_vars/)
+[production:vars]
+ansible_user=deploy
+ansible_python_interpreter=/usr/bin/python3
+env=production

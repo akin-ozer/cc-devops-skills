@@ -1,0 +1,42 @@
+name: '[ACTION_NAME]'
+description: '[ACTION_DESCRIPTION]'
+author: '[AUTHOR_NAME]'
+
+# Define inputs that users can provide
+inputs:
+  [input-name]:
+    description: '[INPUT_DESCRIPTION]'
+    required: [true/false]
+    default: '[DEFAULT_VALUE]'
+
+  [input-name-2]:
+    description: '[INPUT_DESCRIPTION]'
+    required: [true/false]
+
+# Define outputs that the action produces
+outputs:
+  [output-name]:
+    description: '[OUTPUT_DESCRIPTION]'
+
+# Branding (optional - for GitHub Marketplace)
+branding:
+  icon: '[ICON_NAME]'  # Feather icon name
+  color: '[COLOR]'     # white, yellow, blue, green, orange, red, purple, gray-dark
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  # Optional: Use pre-built image instead
+  # image: 'docker://[REGISTRY]/[IMAGE]:[TAG]'
+
+  # Arguments passed to container entrypoint
+  args:
+    - ${{ inputs.[input-name] }}
+    - ${{ inputs.[input-name-2] }}
+
+  # Environment variables
+  env:
+    [ENV_VAR]: ${{ inputs.[input-name] }}
+
+  # Optional: Override entrypoint
+  # entrypoint: '/entrypoint.sh'

@@ -1,0 +1,23 @@
+# Configuration file for {{ [role_name]_service_name }}
+# Managed by Ansible - DO NOT EDIT MANUALLY
+# Generated on: {{ ansible_date_time.iso8601 }}
+# Host: {{ ansible_hostname }}
+
+[section]
+port = {{ [role_name]_port }}
+bind_address = {{ [role_name]_bind_address }}
+max_connections = {{ [role_name]_max_connections }}
+
+{% if [role_name]_enable_ssl %}
+[ssl]
+enabled = true
+cert_path = {{ [role_name]_ssl_cert }}
+key_path = {{ [role_name]_ssl_key }}
+{% endif %}
+
+[logging]
+log_dir = {{ [role_name]_log_dir }}
+log_level = {{ [role_name]_log_level | default('info') }}
+
+[data]
+data_dir = {{ [role_name]_data_dir }}

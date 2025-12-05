@@ -1,0 +1,33 @@
+name: '[ACTION_NAME]'
+description: '[ACTION_DESCRIPTION]'
+author: '[AUTHOR_NAME]'
+
+# Define inputs that users can provide
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: false
+    default: ${{ github.token }}
+
+  [input-name]:
+    description: '[INPUT_DESCRIPTION]'
+    required: [true/false]
+    default: '[DEFAULT_VALUE]'
+
+# Define outputs that the action produces
+outputs:
+  [output-name]:
+    description: '[OUTPUT_DESCRIPTION]'
+
+# Branding (optional - for GitHub Marketplace)
+branding:
+  icon: '[ICON_NAME]'  # Feather icon name
+  color: '[COLOR]'     # white, yellow, blue, green, orange, red, purple, gray-dark
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+  # Optional: Run code before action
+  # pre: 'dist/pre.js'
+  # Optional: Run code after action
+  # post: 'dist/post.js'

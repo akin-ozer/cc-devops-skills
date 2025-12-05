@@ -1,0 +1,403 @@
+# Workflow Orchestration Example
+# Demonstrates: workflow_run trigger, workflow chaining, artifact passing, secure external PR handling
+
+# This is the MAIN CI workflow that runs on all PRs
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # Standard CI jobs - safe for external PRs
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [test]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        env:
+          NODE_ENV: production
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 30
+
+  ci-status:
+    name: CI Status Check
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Check CI status
+        run: |
+          if [[ "${{ needs.test.result }}" == "failure" ]] || [[ "${{ needs.build.result }}" == "failure" ]]; then
+            echo "❌ CI failed"
+            exit 1
+          fi
+          echo "✅ CI passed"
+
+---
+# SEPARATE WORKFLOW FILE: .github/workflows/security-scan.yml
+# This workflow runs AFTER CI completes, triggered by workflow_run
+# It's safe for external PRs because it runs with the target branch's code
+
+name: Security Scan
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+
+# Critical: These permissions are safe because this workflow
+# uses code from the target branch, not the PR
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  security-scan:
+    name: Run Security Scan
+    # Only scan if CI passed
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # Important: Check out the PR's code explicitly
+      # This is safe because we're in workflow_run (target branch context)
+      - name: Checkout PR code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dependency audit
+        run: |
+          npm audit --audit-level=high || true
+          npm audit --json > audit-results.json || true
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: security-scan
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            audit-results.json
+          retention-days: 30
+
+      - name: Comment on PR with results
+        if: github.event.workflow_run.event == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Get PR number from workflow run
+            const prNumber = context.payload.workflow_run.pull_requests[0]?.number;
+
+            if (!prNumber) {
+              console.log('Not a PR, skipping comment');
+              return;
+            }
+
+            // Read audit results
+            let auditResults = {};
+            try {
+              auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
+            } catch (error) {
+              console.log('No audit results found');
+            }
+
+            const vulnerabilities = auditResults.metadata?.vulnerabilities || {};
+            const total = Object.values(vulnerabilities).reduce((a, b) => a + b, 0);
+
+            let message = '## 🔒 Security Scan Results\n\n';
+
+            if (total === 0) {
+              message += '✅ No vulnerabilities found!\n';
+            } else {
+              message += '⚠️ Found vulnerabilities:\n\n';
+              message += `- Critical: ${vulnerabilities.critical || 0}\n`;
+              message += `- High: ${vulnerabilities.high || 0}\n`;
+              message += `- Moderate: ${vulnerabilities.moderate || 0}\n`;
+              message += `- Low: ${vulnerabilities.low || 0}\n`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: message
+            });
+
+---
+# SEPARATE WORKFLOW FILE: .github/workflows/deploy.yml
+# This workflow deploys to staging/production AFTER CI completes successfully
+
+name: Deploy Application
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main, staging]
+
+permissions:
+  contents: read
+  deployments: write
+  id-token: write
+
+jobs:
+  determine-environment:
+    name: Determine Deployment Environment
+    runs-on: ubuntu-latest
+    # Only deploy if CI passed
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 5
+
+    outputs:
+      environment: ${{ steps.determine.outputs.environment }}
+      should-deploy: ${{ steps.determine.outputs.should-deploy }}
+
+    steps:
+      - name: Determine environment
+        id: determine
+        run: |
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+
+          case "$BRANCH" in
+            main)
+              echo "environment=production" >> $GITHUB_OUTPUT
+              echo "should-deploy=true" >> $GITHUB_OUTPUT
+              ;;
+            staging)
+              echo "environment=staging" >> $GITHUB_OUTPUT
+              echo "should-deploy=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "environment=none" >> $GITHUB_OUTPUT
+              echo "should-deploy=false" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+          echo "Deploying to: ${{ steps.determine.outputs.environment }}"
+
+  deploy:
+    name: Deploy to ${{ needs.determine-environment.outputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [determine-environment]
+    if: needs.determine-environment.outputs.should-deploy == 'true'
+    timeout-minutes: 20
+
+    environment:
+      name: ${{ needs.determine-environment.outputs.environment }}
+      url: https://${{ needs.determine-environment.outputs.environment }}.example.com
+
+    steps:
+      # Download artifacts from the CI workflow
+      - name: Download build artifacts from CI
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: build-artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Display downloaded files
+        run: |
+          echo "Downloaded artifacts:"
+          ls -lah
+
+      - name: Deploy to environment
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+        run: |
+          echo "Deploying to $ENVIRONMENT"
+          echo "Commit SHA: ${{ github.event.workflow_run.head_sha }}"
+          echo "Branch: ${{ github.event.workflow_run.head_branch }}"
+
+          # Deployment commands here
+          # Example: Upload to S3, deploy to Kubernetes, etc.
+
+      - name: Run smoke tests
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+        run: |
+          URL="https://$ENVIRONMENT.example.com"
+          echo "Running smoke tests against $URL"
+
+          # Basic health check
+          curl -f "$URL/health" || exit 1
+
+          echo "✅ Smoke tests passed"
+
+      - name: Create deployment summary
+        run: |
+          cat <<EOF >> $GITHUB_STEP_SUMMARY
+          ## 🚀 Deployment Complete
+
+          **Environment:** ${{ needs.determine-environment.outputs.environment }}
+          **Commit:** ${{ github.event.workflow_run.head_sha }}
+          **Branch:** ${{ github.event.workflow_run.head_branch }}
+          **URL:** https://${{ needs.determine-environment.outputs.environment }}.example.com
+
+          ### CI Workflow Details
+          - **Workflow:** ${{ github.event.workflow_run.name }}
+          - **Run ID:** ${{ github.event.workflow_run.id }}
+          - **Conclusion:** ${{ github.event.workflow_run.conclusion }}
+
+          ✅ Deployment successful!
+          EOF
+
+---
+# SEPARATE WORKFLOW FILE: .github/workflows/performance-test.yml
+# Run performance tests after CI completes (only on main branch)
+
+name: Performance Tests
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  performance-test:
+    name: Run Performance Tests
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download build artifacts from CI
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: build-artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run performance benchmarks
+        run: |
+          echo "Running performance tests..."
+          # Performance test commands here
+          # Example: k6, lighthouse, etc.
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: performance-results
+          path: performance-results/
+          retention-days: 30
+
+      - name: Comment with performance results
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const message = `## ⚡ Performance Test Results
+
+            **Commit:** ${{ github.event.workflow_run.head_sha }}
+
+            ✅ Performance tests completed
+
+            [View detailed results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: '${{ github.event.workflow_run.head_sha }}',
+              body: message
+            });

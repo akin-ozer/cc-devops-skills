@@ -1,0 +1,739 @@
+# Common LogQL Query Examples
+# These queries demonstrate typical use cases for log analysis with Grafana Loki
+
+## === BASIC LOG QUERIES ===
+
+# Find all error logs
+{job="app"} |= "error"
+
+# Find logs containing "error" or "fatal"
+{job="app"} |~ "error|fatal"
+
+# Find errors NOT containing "timeout"
+{job="app"} |= "error" != "timeout"
+
+# Regex pattern matching
+{job="nginx"} |~ "HTTP/[0-9.]+ (4|5)[0-9]{2}"
+
+## === JSON LOG PARSING ===
+
+# Parse JSON logs and filter by level
+{app="api"} | json | level="error"
+
+# Parse JSON and filter by multiple fields
+{app="api"} | json | method="POST" | status_code >= 400
+
+# Parse nested JSON fields
+{app="api"} | json request.method="POST", response.status_code >= 500
+
+# Extract and display specific JSON fields
+{app="api"} | json | line_format "{{.level}}: {{.message}}"
+
+## === LOGFMT PARSING ===
+
+# Parse logfmt format
+{app="app"} | logfmt
+
+# Parse and filter logfmt logs
+{app="app"} | logfmt | level="error" | caller="database.go"
+
+## === LOGFMT PARSER FLAGS (Loki 3.x) ===
+
+# Basic logfmt parsing
+{app="api"} | logfmt
+
+# Strict mode - fail on malformed key=value pairs (stops on error)
+{app="api"} | logfmt --strict
+
+# Keep standalone keys as labels with empty string value
+{app="api"} | logfmt --keep-empty
+
+# Combine flags for strict parsing with empty key retention
+{app="api"} | logfmt --strict --keep-empty
+
+# Strict mode with label extraction parameters
+{app="api"} | logfmt --strict host, fwd_ip="fwd"
+
+# Detect malformed log entries using strict mode
+{app="api"} | logfmt --strict | __error__ != ""
+
+# Production query - strict mode with error filtering
+{app="api"} | logfmt --strict | __error__="" | level="error"
+
+## === JSON PARSER WITH PARAMETER EXTRACTION ===
+
+# Extract all fields (default behavior)
+{app="api"} | json
+
+# Extract specific fields by name (more efficient)
+{app="api"} | json status, method, duration
+
+# Extract with custom label names using expressions
+{app="api"} | json first_server="servers[0]", ua="request.headers[\"User-Agent\"]"
+
+# Extract arrays/objects as JSON strings
+{app="api"} | json server_list="servers", headers="request.headers"
+
+# Shorthand - label name equals field name
+{app="api"} | json servers
+
+# Extract nested request fields using dot notation
+{app="api"} | json method="request.method", status="response.status_code"
+
+# Extract nested fields with array access
+{app="api"} | json first_item="items[0].name", last_item="items[-1].name"
+
+# Combined with bracket notation for special characters
+{app="api"} | json content_type="headers[\"Content-Type\"]"
+
+# Combined with filtering on extracted fields
+{app="api"} | json status="response.status" | status >= 400
+
+# Extract only what you need for performance
+{app="api"} | json level, message, trace_id | level="error"
+
+## === PATTERN EXTRACTION ===
+
+# Extract fields using pattern syntax
+{job="nginx"} | pattern "<ip> - - [<timestamp>] \"<method> <path> <protocol>\" <status> <size>"
+
+# Pattern extraction with filtering
+{job="nginx"} | pattern "<ip> - - [<_>] \"<method> <_>\" <status> <_>" | status >= 400
+
+# Pattern with wildcards
+{service_name="distributor"} |> "<_> level=debug <_> msg=\"POST /push <_>\""
+
+## === REGEX PARSING ===
+
+# Extract fields with named capture groups
+{app="app"} | regexp "(?P<level>\\w+): (?P<message>.+)"
+
+# Extract IP addresses and HTTP codes
+{job="nginx"} | regexp "(?P<ip>\\d+\\.\\d+\\.\\d+\\.\\d+) .* (?P<status>\\d{3})"
+
+## === ERROR ANALYSIS ===
+
+# Count errors over time
+count_over_time({app="api"} | json | level="error" [5m])
+
+# Error rate per second
+sum(rate({app="api"} | json | level="error" [5m]))
+
+# Error percentage
+(
+  sum(rate({app="api"} | json | level="error" [5m]))
+  /
+  sum(rate({app="api"}[5m]))
+) * 100
+
+# Errors by type
+sum by (error_type) (
+  count_over_time({app="api"} | json | level="error" [5m])
+)
+
+# Top 10 error messages
+topk(10,
+  sum by (error_message) (
+    count_over_time({app="api"} | json | level="error" [1h])
+  )
+)
+
+## === PERFORMANCE MONITORING ===
+
+# Find slow requests (>1 second)
+{app="api"} | json | duration > 1
+
+# Average response time
+avg_over_time({app="api"} | json | unwrap duration [5m])
+
+# 95th percentile latency
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m])
+
+# 99th percentile latency
+quantile_over_time(0.99, {app="api"} | json | unwrap duration [5m])
+
+# Max response time in last 5 minutes
+max_over_time({app="api"} | json | unwrap duration [5m])
+
+# Requests by latency bucket
+sum by (le) (
+  count_over_time({app="api"} | json | duration > 0 [5m])
+)
+
+## === TRAFFIC ANALYSIS ===
+
+# Total log volume (logs per second)
+sum(rate({namespace="production"}[5m]))
+
+# Logs per second by application
+sum by (app) (rate({namespace="production"}[5m]))
+
+# Bytes per second
+sum(bytes_rate({job="app"}[5m]))
+
+# Request rate by endpoint
+sum by (endpoint) (rate({app="api"} | json [5m]))
+
+# HTTP status code distribution
+sum by (status_code) (
+  count_over_time({app="api"} | json [5m])
+)
+
+# Requests per second by method
+sum by (method) (rate({app="api"} | json [5m]))
+
+## === SECURITY MONITORING ===
+
+# Failed login attempts
+{app="auth"} | json | event="login_failed"
+
+# Failed logins by user
+sum by (username) (
+  count_over_time({app="auth"} | json | event="login_failed" [1h])
+)
+
+# Top 10 users with failed logins
+topk(10,
+  sum by (username) (
+    count_over_time({app="auth"} | json | event="login_failed" [1h])
+  )
+)
+
+# Suspicious activity (unauthorized access attempts)
+{app="api"} | json | (status_code == 401 or status_code == 403)
+
+# Access from external IPs
+{app="api"} | json !ip("10.0.0.0/8") !ip("172.16.0.0/12") !ip("192.168.0.0/16")
+
+# SQL injection attempts
+{app="api"} |~ "union.*select|select.*from.*where"
+
+## === USER BEHAVIOR TRACKING ===
+
+# Top 10 users by activity
+topk(10,
+  sum by (user_id) (rate({app="api"}[5m]))
+)
+
+# User sessions by endpoint
+sum by (user_id, endpoint) (
+  count_over_time({app="api"} | json [1h])
+)
+
+# User actions per minute
+sum by (user_id, action) (
+  rate({app="api"} | json [1m])
+)
+
+## === APPLICATION DEBUGGING ===
+
+# Logs from specific trace ID
+{app="api"} | json | trace_id="abc123xyz"
+
+# Logs for specific user session
+{app="api"} | json | session_id="sess_12345"
+
+# Debug logs with context
+{app="api", level="debug"} | json | line_format "{{.timestamp}} [{{.trace_id}}] {{.message}}"
+
+# Stack traces (multi-line logs)
+{app="api"} |= "Exception" | json
+
+# Database query errors
+{app="api"} | json | component="database" | level="error"
+
+## === LOG VOLUME AND RATES ===
+
+# Total logs in last hour
+sum(count_over_time({namespace="production"}[1h]))
+
+# Peak log rate in last 24 hours
+max_over_time(
+  sum(rate({namespace="production"}[5m]))[24h:5m]
+)
+
+# Average log rate by hour
+avg_over_time(
+  sum(rate({namespace="production"}[5m]))[1h:5m]
+)
+
+# Logs by namespace
+sum by (namespace) (rate({job="kubernetes-pods"}[5m]))
+
+## === FILTERING AND TRANSFORMATION ===
+
+# Remove ANSI color codes
+{app="app"} | decolorize
+
+# Keep only specific labels
+{app="api"} | json | keep namespace, pod, level, message
+
+# Drop noisy labels
+{app="api"} | json | drop instance, pod
+
+# Rename labels
+{app="api"} | json | label_format env=`{{.environment}}`, svc=`{{.service}}`
+
+# NOTE: LogQL does NOT have a native `dedup` operator
+# Deduplication is a UI-level feature in Grafana's Explore panel
+# For programmatic deduplication, use metric aggregations:
+# sum by (message) (count_over_time({app="api"} | json [5m])) > 0
+
+## === IP ADDRESS FILTERING ===
+
+# The ip() function filters based on a label value containing an IP address
+# It supports: single IPs, CIDR notation, and IP ranges
+
+# Logs from specific IP (exact match)
+{app="api"} | json | client_ip="192.168.1.100"
+
+# Logs from IP range using CIDR notation (apply ip() to a specific label)
+{job="nginx"} | logfmt | remote_addr = ip("192.168.1.0/24")
+
+# Logs NOT from internal network (negate with !=)
+{job="nginx"} | logfmt | remote_addr != ip("10.0.0.0/8")
+
+# Logs from IP range (start-end format)
+{job="nginx"} | logfmt | remote_addr = ip("192.168.4.5-192.168.4.20")
+
+# Logs from multiple IP ranges (combine with or)
+{job="nginx"} | logfmt | remote_addr = ip("192.168.0.0/16") or remote_addr = ip("10.0.0.0/8")
+
+# Exclude specific IP within a range
+{job="nginx"} | logfmt | remote_addr = ip("192.168.4.0/24") | remote_addr != ip("192.168.4.2")
+
+# IPv6 address range filtering
+{job="nginx"} | logfmt | remote_addr = ip("2001:db8::1-2001:db8::8")
+
+# Line filter with IP (less precise, may have false positives)
+{job="nginx"} |= ip("192.168.4.5/16")
+
+## === TIME-BASED COMPARISONS ===
+
+# Current error rate vs 1 hour ago
+sum(rate({app="api"} | json | level="error" [5m]))
+-
+sum(rate({app="api"} | json | level="error" [5m] offset 1h))
+
+# Current vs yesterday same time
+sum(rate({app="api"}[5m]))
+/
+sum(rate({app="api"}[5m] offset 1d))
+
+# Week-over-week comparison
+sum(rate({app="api"} | json | level="error" [5m]))
+/
+sum(rate({app="api"} | json | level="error" [5m] offset 1w))
+
+## === AGGREGATION EXAMPLES ===
+
+# Sum of request durations
+sum(sum_over_time({app="api"} | json | unwrap duration [5m]))
+
+# Average by pod
+avg by (pod) (
+  avg_over_time({app="api"} | json | unwrap duration [5m])
+)
+
+# Maximum without specific labels
+max without (instance, pod) (
+  max_over_time({app="api"} | json | unwrap response_size [5m])
+)
+
+# Count distinct values (approximate)
+count(
+  count by (user_id) (
+    {app="api"} | json
+  )
+)
+
+## === ALERTING EXAMPLES ===
+
+# High error rate (>5%)
+(
+  sum(rate({app="api"} | json | level="error" [5m]))
+  /
+  sum(rate({app="api"}[5m]))
+) > 0.05
+
+# Low log volume (potential issue)
+sum(rate({app="api"}[5m])) < 0.1
+
+# High latency (95th percentile >2s)
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m]) > 2
+
+# No logs received (dead service)
+absent_over_time({app="api"}[5m])
+
+# Too many failed logins
+sum(rate({app="auth"} | json | event="login_failed" [5m])) > 10
+
+## === ADVANCED QUERIES ===
+
+# Complex filtering with multiple conditions
+{app="api"}
+| json
+| (status_code >= 400 and status_code < 500)
+  or
+  (status_code >= 500 and duration > 1)
+| method != "HEAD"
+| path !~ "/health|/metrics"
+
+# Multi-stage parsing and formatting
+{job="nginx"}
+| pattern "<ip> - - [<timestamp>] \"<method> <path> <_>\" <status> <size>"
+| json
+| label_format status_class="{{if ge .status 500}}5xx{{else if ge .status 400}}4xx{{else}}ok{{end}}"
+| line_format "{{.status_class}}: {{.method}} {{.path}}"
+
+# Probabilistic top K (for large datasets)
+approx_topk(10,
+  sum by (endpoint) (rate({app="api"}[5m]))
+)
+
+# Vector matching for percentage
+sum by (status_code) (rate({app="api"} | json [5m]))
+/
+on(instance) group_left
+sum by (instance) (rate({app="api"}[5m]))
+
+## === STRUCTURED METADATA (Loki 3.x) ===
+
+# Structured metadata is NOT in stream selector - it comes AFTER the selector
+# This enables high-cardinality data without index bloat
+
+# Query logs with structured metadata (correct syntax)
+{app="api"} | trace_id="abc123"
+
+# Combine structured metadata with other filters
+{app="api"} | trace_id="abc123" | json | level="error"
+
+# Multiple structured metadata filters
+{app="api"} | user_id="12345" | request_id="req-abc"
+
+# WRONG: Don't put structured metadata in stream selector!
+# {app="api", trace_id="abc123"}  # This won't work!
+
+## === QUERY ACCELERATION (Loki 3.x) ===
+
+# ACCELERATED: Structured metadata filter BEFORE parser (bloom filters used)
+{cluster="prod"} | detected_level="error" | logfmt | json
+
+# NOT ACCELERATED: Filter AFTER parser (bloom filters skipped)
+{cluster="prod"} | logfmt | json | detected_level="error"
+
+# Accelerated with multiple conditions
+{app="api"} | trace_id="abc123" | service="payment" | json | level="error"
+
+# Accelerated with OR conditions
+{app="api"} | detected_level="error" or detected_level="warn" | json
+
+## === APPROX_TOPK (Probabilistic Top-K) ===
+
+# Faster alternative to topk for high-cardinality data
+# Returns approximate results, great for large datasets
+
+# Approximate top 10 endpoints by request rate
+approx_topk(10,
+  sum by (endpoint) (rate({app="api"}[5m]))
+)
+
+# Approximate top 20 users by error count
+approx_topk(20,
+  sum by (user_id) (count_over_time({app="api"} | json | level="error" [1h]))
+)
+
+# Use when topk times out or hits series limits
+approx_topk(50,
+  sum by (trace_id) (rate({app="api"}[5m]))
+)
+
+## === VECTOR() FOR RELIABLE ALERTING ===
+
+# Ensures a value is always returned (prevents "no data" alert states)
+
+# Always returns a value (0 when no matches)
+sum(count_over_time({app="api"} | json | level="error" [5m])) or vector(0)
+
+# Use in alerting rules
+sum(rate({app="api"} | json | level="error" [5m])) or vector(0) > 10
+
+# Percentage calculation with fallback
+(
+  sum(rate({app="api"} | json | level="error" [5m])) or vector(0)
+)
+/
+(
+  sum(rate({app="api"}[5m])) or vector(1)
+) * 100
+
+## === __ERROR__ LABEL DEBUGGING ===
+
+# Show only lines that failed to parse
+{app="api"} | json | __error__ != ""
+
+# Show only successfully parsed lines (production use)
+{app="api"} | json | __error__="" | level="error"
+
+# Debug parse errors with details
+{app="api"} | json | __error__ != "" | line_format "ERROR: {{.__error__}} LINE: {{.__line__}}"
+
+# Count errors by parser error type
+sum by (__error__) (count_over_time({app="api"} | json | __error__ != "" [5m]))
+
+## === TEMPLATE FUNCTIONS ===
+
+# String manipulation
+{app="api"} | json | line_format "{{.path | replace \" \" \"_\" | trunc 50 | upper}}"
+
+# Trim whitespace
+{app="api"} | json | line_format "IP: {{.client_ip | trim}}"
+
+# Indent vs nindent
+# indent: indents every line in a string
+{app="api"} | json | line_format "Message:{{indent 4 .message}}"
+
+# nindent: prepends a newline BEFORE indenting (useful for YAML-like output)
+{app="api"} | json | line_format "Details:{{nindent 4 .stack_trace}}"
+
+# nindent is particularly useful for multi-line content
+{app="api"} | json | line_format "Error Report:{{nindent 2 .error}}{{nindent 2 .context}}"
+
+# Date formatting
+{app="api"} | json | line_format "{{__timestamp__ | date \"2006-01-02T15:04:05\"}}: {{.message}}"
+
+# Math operations
+{app="api"} | json | line_format "Duration: {{div .duration_ms 1000}}s"
+
+# Conditional formatting
+{app="api"} | json | label_format severity="{{if ge .status_code 500}}critical{{else if ge .status_code 400}}warning{{else}}info{{end}}"
+
+# Access original line
+{app="api"} | json | line_format "ORIGINAL: {{__line__ | lower}}"
+
+# Printf formatting
+{app="api"} | json | line_format "{{printf \"%-40.40s\" .request_uri}} {{printf \"%5.5s\" .method}}"
+
+# Iterate over JSON array in log
+{job="api"} | json | line_format "{{ range $item := fromJson .items }}{{ $item.name }} {{ end }}"
+
+## === LINE MATCH PATTERN OPERATOR (|>) ===
+
+# Faster than regex for pattern matching with wildcards
+# <_> is a wildcard for any arbitrary text
+
+# Match pattern with wildcards
+{service_name="distributor"} |> "<_> level=debug <_> msg=\"POST /push <_>\""
+
+# Filter out debug logs with pattern
+{service_name="api"} !> "<_> level=debug <_>"
+
+# Match HTTP request patterns
+{job="nginx"} |> "<_> \"GET /api/<_>\" 200 <_>"
+
+## === DECOLORIZE ===
+
+# Remove ANSI color codes from terminal output
+{app="app"} | decolorize
+
+# Decolorize before parsing
+{app="app"} | decolorize | json | level="error"
+
+## === UNPACK PARSER ===
+
+# Unpack data that was packed by Promtail's pack stage
+{cluster="us-central1", job="myjob"} | unpack
+
+# Unpack and filter by embedded label
+{cluster="us-central1", job="myjob"} | unpack | container="myapp"
+
+# Unpack, filter, then parse the original log
+{cluster="us-central1", job="myjob"} | unpack | container="myapp" | json
+
+## === ADDITIONAL UNWRAPPED RANGE FUNCTIONS ===
+
+# First value in interval (useful for starting values)
+first_over_time({app="api"} | json | unwrap request_count [5m])
+
+# Last value in interval (useful for ending values)
+last_over_time({app="api"} | json | unwrap request_count [5m])
+
+# Standard deviation of durations (useful for detecting variability)
+stddev_over_time({app="api"} | json | unwrap duration [5m])
+
+# Standard variance of durations
+stdvar_over_time({app="api"} | json | unwrap duration [5m])
+
+# Rate counter - treats values as a counter metric (for monotonically increasing values)
+rate_counter({app="api"} | json | unwrap total_requests [5m])
+
+# Bytes over time - total bytes in a time range
+bytes_over_time({app="api"}[5m])
+
+## === SORTING AND ORDERING ===
+
+# Sort results ascending by value
+sort(sum by (app) (rate({job="api"}[5m])))
+
+# Sort results descending by value
+sort_desc(sum by (app) (rate({job="api"}[5m])))
+
+# Combine sort with topk for ordered top results
+sort_desc(topk(10, sum by (endpoint) (rate({app="api"}[5m]))))
+
+## === LABEL_REPLACE FUNCTION ===
+
+# Extract service name from label using regex capture group
+label_replace(
+  rate({job="api-server", service="payment:v2"} |= "err" [1m]),
+  "service_name", "$1", "service", "(.*):.*"
+)
+
+# Add environment label based on namespace pattern
+label_replace(
+  sum by (namespace) (rate({job="app"}[5m])),
+  "env", "$1", "namespace", "(prod|staging|dev).*"
+)
+
+# Create simplified label from complex one
+label_replace(
+  sum by (pod) (rate({job="kubernetes-pods"}[5m])),
+  "app", "$1", "pod", "([a-z-]+)-[a-z0-9]+-[a-z0-9]+"
+)
+
+## === LABEL_REPLACE CHAINING (Advanced) ===
+
+# Chain multiple label_replace calls for complex transformations
+# Example: Extract app, version, and region from pod name "myapp-v2-us-east-1-abc123-xyz789"
+label_replace(
+  label_replace(
+    label_replace(
+      sum by (pod) (rate({job="kubernetes-pods"}[5m])),
+      "app", "$1", "pod", "([a-z-]+)-v[0-9]+-.*"
+    ),
+    "version", "$1", "pod", "[a-z-]+-v([0-9]+)-.*"
+  ),
+  "region", "$1", "pod", "[a-z-]+-v[0-9]+-([a-z]+-[a-z]+-[0-9]+)-.*"
+)
+
+# Extract team and service from job label like "team-platform/service-api"
+label_replace(
+  label_replace(
+    sum by (job) (rate({namespace="production"}[5m])),
+    "team", "$1", "job", "team-([^/]+)/.*"
+  ),
+  "service", "$1", "job", "[^/]+/service-(.*)"
+)
+
+# Create environment label from namespace and add severity from level
+label_replace(
+  label_replace(
+    sum by (namespace, level) (rate({job="app"} | json [5m])),
+    "env", "production", "namespace", "prod.*"
+  ),
+  "severity", "critical", "level", "error|fatal"
+)
+
+# Extract domain from URL-based endpoint labels
+label_replace(
+  sum by (endpoint) (rate({app="api"} | json [5m])),
+  "domain", "$1", "endpoint", "https?://([^/]+)/.*"
+)
+
+# Transform pod names to deployment names (strip replicaset hash)
+label_replace(
+  sum by (pod) (rate({namespace="prod"}[5m])),
+  "deployment", "$1", "pod", "(.*)-[a-f0-9]+-[a-z0-9]+"
+)
+
+## === CONVERSION FUNCTIONS ===
+
+# Convert duration strings like "1.5s" or "150ms" to seconds
+avg_over_time({app="api"} | json | unwrap duration_seconds(response_time) [5m])
+
+# Convert byte strings like "1.5KB" or "10MB" to bytes
+sum_over_time({app="api"} | json | unwrap bytes(payload_size) [5m])
+
+## === FLOAT TEMPLATE FUNCTIONS ===
+
+# Division with float result
+{app="api"} | json | line_format "Duration: {{divf .duration_ns 1000000}}ms"
+
+# Subtraction with floats
+{app="api"} | json | line_format "Change: {{subf .current .previous}}"
+
+# Floor and ceiling
+{app="api"} | json | line_format "Floor: {{floor .value}} Ceil: {{ceil .value}}"
+
+# Round to 2 decimal places
+{app="api"} | json | line_format "Rounded: {{round .percentage 2}}%"
+
+## === REGEX TEMPLATE FUNCTIONS ===
+
+# Replace with regex capture groups
+{app="api"} | json | line_format "{{regexReplaceAll \"user_(\\\\d+)\" .message \"User ID: $1\"}}"
+
+# Literal replacement (no capture group expansion)
+{app="api"} | json | line_format "{{regexReplaceAllLiteral \"error\" .message \"ERROR\"}}"
+
+## === AUTOMATIC LABELS (service_name and detected_level) ===
+
+# Loki automatically populates certain labels to improve log exploration
+
+## service_name Label (Auto-populated)
+# - Auto-populated by Loki when no service name is provided
+# - Uses container name as fallback if not specified
+# - Used in Grafana's Logs Drilldown feature
+# - Can be customized via discover_service_name in limits_config
+
+# Query by auto-generated service_name
+{service_name="my-api"}
+
+# Combine service_name with other filters
+{service_name="my-api"} | json | level="error"
+
+# Error rate by service_name
+sum by (service_name) (rate({namespace="production"} | json | level="error" [5m]))
+
+# Top services by error count
+topk(10, sum by (service_name) (count_over_time({namespace="prod"} | json | level="error" [1h])))
+
+## detected_level Label (Structured Metadata - Auto-detected)
+# - Auto-detected when discover_log_levels: true is configured
+# - Stored as structured metadata (NOT indexed)
+# - Values: debug, info, warn, error, critical, fatal
+# - Requires allow_structured_metadata: true in limits_config
+# - Place BEFORE parsers for query acceleration with bloom filters!
+
+# Query by auto-detected log level (accelerated with bloom filters)
+{cluster="prod"} | detected_level="error" | json
+
+# Combine detected_level with other structured metadata
+{app="api"} | detected_level="warn" | trace_id="abc123" | json
+
+# Multiple detected_level values with OR (accelerated)
+{app="api"} | detected_level="error" or detected_level="critical" | json
+
+# Error count using detected_level
+sum(count_over_time({namespace="prod"} | detected_level="error" | json [5m]))
+
+# Error rate by detected_level
+sum by (detected_level) (rate({app="api"} | detected_level!="" | json [5m]))
+
+# WRONG: detected_level AFTER parser loses acceleration!
+# {cluster="prod"} | json | detected_level="error"  # NOT accelerated
+
+# CORRECT: detected_level BEFORE parser (accelerated)
+{cluster="prod"} | detected_level="error" | json
+
+## === GRAFANA ALLOY / PROMTAIL MIGRATION ===
+
+# Note: Promtail is deprecated in favor of Grafana Alloy
+# Commercial support for Promtail ends February 28, 2026
+# For new deployments, use Grafana Alloy instead of Promtail
+
+# Query logs collected by Alloy (same LogQL syntax)
+{collector="alloy"}
+
+# Query logs with Alloy-specific labels
+{job="alloy"} | json | level="error"

@@ -1,0 +1,319 @@
+# Docker Build and Push Pipeline Template
+# Builds Docker images and pushes to GitLab Container Registry
+#
+# Usage: Copy this template and customize for your needs
+# - Replace [PLACEHOLDERS] with actual values
+# - Choose between Docker-in-Docker or Kaniko
+# - Adjust image tags and build arguments
+# - Validate with gitlab-ci-validator skill
+
+stages:
+  - build
+  - scan
+  - push
+
+# Global variables
+variables:
+  # Docker configuration
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+  # Image naming
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+
+  # Build configuration
+  DOCKERFILE_PATH: "Dockerfile"         # [PLACEHOLDER: Set your Dockerfile path]
+  BUILD_CONTEXT: "."                    # [PLACEHOLDER: Set your build context]
+
+# ============================================================================
+# BUILD WITH DOCKER-IN-DOCKER
+# ============================================================================
+
+build-docker-dind:
+  stage: build
+
+  image: docker:24-dind
+
+  services:
+    - docker:24-dind
+
+  before_script:
+    # Login to GitLab Container Registry
+    - echo "Logging in to $CI_REGISTRY"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+  script:
+    # Build Docker image with cache
+    - echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+    - docker build
+        --cache-from ${IMAGE_NAME}:latest
+        --tag ${IMAGE_NAME}:${IMAGE_TAG}
+        --tag ${IMAGE_NAME}:latest
+        --build-arg VERSION=${CI_COMMIT_SHORT_SHA}
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        --file ${DOCKERFILE_PATH}
+        ${BUILD_CONTEXT}
+
+    # Push images
+    - echo "Pushing images to registry"
+    - docker push ${IMAGE_NAME}:${IMAGE_TAG}
+    - docker push ${IMAGE_NAME}:latest
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: always
+    - if: $CI_MERGE_REQUEST_ID
+      when: manual
+    - when: never
+
+  # Retry on network issues
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+# ============================================================================
+# BUILD WITH KANIKO (Rootless, more secure)
+# ============================================================================
+
+build-docker-kaniko:
+  stage: build
+
+  image:
+    name: gcr.io/kaniko-project/executor:v1.21.0-debug
+    entrypoint: [""]
+
+  script:
+    # Create Docker config for authentication
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+
+    # Build and push with Kaniko
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}/${BUILD_CONTEXT}"
+        --dockerfile "${CI_PROJECT_DIR}/${DOCKERFILE_PATH}"
+        --destination "${IMAGE_NAME}:${IMAGE_TAG}"
+        --destination "${IMAGE_NAME}:latest"
+        --cache=true
+        --cache-ttl=24h
+        --build-arg VERSION=${CI_COMMIT_SHORT_SHA}
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: always
+    - if: $CI_MERGE_REQUEST_ID
+      when: manual
+    - when: never
+
+# ============================================================================
+# MULTI-PLATFORM BUILD
+# ============================================================================
+
+build-multiarch:
+  stage: build
+
+  image: docker:24-dind
+
+  services:
+    - docker:24-dind
+
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+    # Set up buildx for multi-platform builds
+    - docker buildx create --use --name multiarch-builder
+    - docker buildx inspect --bootstrap
+
+  script:
+    # Build for multiple platforms
+    - docker buildx build
+        --platform linux/amd64,linux/arm64
+        --tag ${IMAGE_NAME}:${IMAGE_TAG}
+        --tag ${IMAGE_NAME}:latest
+        --build-arg VERSION=${CI_COMMIT_SHORT_SHA}
+        --file ${DOCKERFILE_PATH}
+        --push
+        ${BUILD_CONTEXT}
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+    - when: never
+
+# ============================================================================
+# SECURITY SCANNING
+# ============================================================================
+
+scan-trivy:
+  stage: scan
+
+  image: aquasec/trivy:0.49.0
+
+  # Start after build completes
+  needs: [build-docker-dind]
+
+  script:
+    # Scan for vulnerabilities
+    - trivy image
+        --severity HIGH,CRITICAL
+        --exit-code 0
+        --format json
+        --output trivy-report.json
+        ${IMAGE_NAME}:${IMAGE_TAG}
+
+    # Also output to console
+    - trivy image
+        --severity HIGH,CRITICAL
+        --exit-code 1
+        ${IMAGE_NAME}:${IMAGE_TAG}
+
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+    when: always
+
+  # Allow to fail but warn
+  allow_failure: true
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: always
+    - when: never
+
+# ============================================================================
+# ALTERNATIVE: GITLAB CONTAINER SCANNING TEMPLATE
+# ============================================================================
+# To use GitLab's built-in container scanning, add the following at the ROOT
+# level of your .gitlab-ci.yml file (NOT inside a job):
+#
+# include:
+#   - template: Security/Container-Scanning.gitlab-ci.yml
+#
+# Then override the container_scanning job:
+#
+# container_scanning:
+#   variables:
+#     CS_IMAGE: ${IMAGE_NAME}:${IMAGE_TAG}
+#   needs: [build-docker-dind]
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#       when: always
+#     - when: never
+
+# ============================================================================
+# TAG AND PUSH RELEASE
+# ============================================================================
+
+push-release:
+  stage: push
+
+  image: docker:24-dind
+
+  services:
+    - docker:24-dind
+
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+  script:
+    # Pull the image built from commit
+    - docker pull ${IMAGE_NAME}:${IMAGE_TAG}
+
+    # Tag with release version
+    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${CI_COMMIT_TAG}
+    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:stable
+
+    # Push release tags
+    - docker push ${IMAGE_NAME}:${CI_COMMIT_TAG}
+    - docker push ${IMAGE_NAME}:stable
+
+  # Only run on version tags
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    - when: never
+
+  # Depends on successful security scan
+  needs: [build-docker-dind, scan-trivy]
+
+# ============================================================================
+# PUSH TO EXTERNAL REGISTRY (Optional)
+# ============================================================================
+
+push-dockerhub:
+  stage: push
+
+  image: docker:24-dind
+
+  services:
+    - docker:24-dind
+
+  before_script:
+    # Login to GitLab registry
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+    # Login to Docker Hub (requires $DOCKERHUB_USER and $DOCKERHUB_TOKEN variables)
+    - docker login -u $DOCKERHUB_USER -p $DOCKERHUB_TOKEN
+
+  script:
+    # Pull from GitLab registry
+    - docker pull ${IMAGE_NAME}:${IMAGE_TAG}
+
+    # Tag for Docker Hub
+    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_USER}/[IMAGE-NAME]:${CI_COMMIT_TAG}
+    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_USER}/[IMAGE-NAME]:latest
+
+    # Push to Docker Hub
+    - docker push ${DOCKERHUB_USER}/[IMAGE-NAME]:${CI_COMMIT_TAG}
+    - docker push ${DOCKERHUB_USER}/[IMAGE-NAME]:latest
+
+  when: manual
+
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+    - when: never
+
+# ============================================================================
+# EXAMPLE DOCKERFILE REFERENCE
+# ============================================================================
+#
+# Multi-stage Dockerfile example:
+#
+# # Build stage
+# FROM node:20-alpine AS builder
+# WORKDIR /app
+# COPY package*.json ./
+# RUN npm ci --only=production
+# COPY . .
+# RUN npm run build
+#
+# # Production stage
+# FROM node:20-alpine
+#
+# # Security: Create non-root user
+# RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+#
+# WORKDIR /app
+#
+# # Copy dependencies and build artifacts
+# COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+# COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+# COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
+#
+# # Switch to non-root user
+# USER nodejs
+#
+# # Metadata
+# ARG VERSION
+# ARG BUILD_DATE
+# LABEL version="${VERSION}" \
+#       build-date="${BUILD_DATE}"
+#
+# EXPOSE 3000
+#
+# CMD ["node", "dist/server.js"]

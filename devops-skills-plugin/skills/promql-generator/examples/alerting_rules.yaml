@@ -1,0 +1,331 @@
+# Prometheus Alerting Rules Examples
+#
+# This file contains production-ready alerting rules following best practices.
+# Save to a .yaml or .yml file and reference it in prometheus.yml:
+#   rule_files:
+#     - "alerting_rules.yaml"
+#
+# References:
+# - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+# - https://prometheus.io/docs/practices/alerting/
+
+groups:
+  # ===== APPLICATION ALERTS =====
+  - name: application_alerts
+    interval: 30s
+    rules:
+      # High error rate (RED method)
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job, service)
+            /
+            sum(rate(http_requests_total[5m])) by (job, service)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Service {{ $labels.service }} has error rate of {{ $value | humanizePercentage }} (threshold: 5%)"
+          runbook_url: "https://wiki.example.com/runbooks/high-error-rate"
+
+      # High latency (P95 > 1 second)
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency detected"
+          description: "P95 latency for {{ $labels.job }} is {{ $value | humanizeDuration }} (threshold: 1s)"
+
+      # Low request rate (possible outage)
+      - alert: LowRequestRate
+        expr: |
+          sum(rate(http_requests_total{job="api-server"}[5m])) < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low request rate - possible service issue"
+          description: "Request rate is {{ $value }} req/s (expected: > 10 req/s)"
+
+      # Service down (no successful scrapes)
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service is down"
+          description: "{{ $labels.job }} on {{ $labels.instance }} has been down for more than 2 minutes"
+
+  # ===== SLO / BURN RATE ALERTS =====
+  - name: slo_alerts
+    rules:
+      # Multi-window, multi-burn-rate alert (Page level - 2% budget in 1h)
+      - alert: SLOBurnRateCritical
+        expr: |
+          (
+            (
+              sum(rate(http_requests_total{status_code=~"5.."}[1h])) by (service)
+              /
+              sum(rate(http_requests_total[1h])) by (service)
+            ) > 14.4 * 0.001
+          )
+          and
+          (
+            (
+              sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+              /
+              sum(rate(http_requests_total[5m])) by (service)
+            ) > 14.4 * 0.001
+          )
+        for: 2m
+        labels:
+          severity: critical
+          alert_type: slo
+        annotations:
+          summary: "SLO burn rate critical"
+          description: "Service {{ $labels.service }} is consuming error budget at 14.4x rate (2% budget in 1 hour)"
+          runbook_url: "https://wiki.example.com/runbooks/slo-burn-rate"
+
+      # Multi-window, multi-burn-rate alert (Ticket level - 5% budget in 6h)
+      - alert: SLOBurnRateHigh
+        expr: |
+          (
+            (
+              sum(rate(http_requests_total{status_code=~"5.."}[6h])) by (service)
+              /
+              sum(rate(http_requests_total[6h])) by (service)
+            ) > 6 * 0.001
+          )
+          and
+          (
+            (
+              sum(rate(http_requests_total{status_code=~"5.."}[30m])) by (service)
+              /
+              sum(rate(http_requests_total[30m])) by (service)
+            ) > 6 * 0.001
+          )
+        for: 5m
+        labels:
+          severity: warning
+          alert_type: slo
+        annotations:
+          summary: "SLO burn rate elevated"
+          description: "Service {{ $labels.service }} is consuming error budget at 6x rate (5% budget in 6 hours)"
+
+  # ===== NODE / INFRASTRUCTURE ALERTS =====
+  - name: node_alerts
+    rules:
+      # High CPU utilization (USE method)
+      - alert: HighCPUUsage
+        expr: |
+          (
+            1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+          ) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}% (threshold: 80%)"
+
+      # High memory utilization
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+            /
+            node_memory_MemTotal_bytes
+          ) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanize }}% (threshold: 90%)"
+
+      # Low disk space
+      - alert: LowDiskSpace
+        expr: |
+          (
+            (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+            /
+            node_filesystem_size_bytes
+          ) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk usage on {{ $labels.mountpoint }} is {{ $value | humanize }}% (threshold: 85%)"
+
+      # Disk space prediction (will be full in 4 hours)
+      - alert: DiskWillFillSoon
+        expr: |
+          predict_linear(node_filesystem_avail_bytes[6h], 4*3600) < 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk will be full within 4 hours"
+          description: "Disk {{ $labels.mountpoint }} on {{ $labels.instance }} is predicted to fill up"
+
+      # Network errors
+      - alert: NetworkErrors
+        expr: |
+          (
+            rate(node_network_receive_errs_total[5m])
+            +
+            rate(node_network_transmit_errs_total[5m])
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network errors detected on {{ $labels.instance }}"
+          description: "Network errors rate is {{ $value | humanize }}/s on {{ $labels.device }}"
+
+  # ===== KUBERNETES ALERTS =====
+  - name: kubernetes_alerts
+    rules:
+      # Pod not ready
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod not ready"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been not ready for more than 5 minutes"
+
+      # Container restarting frequently
+      - alert: ContainerRestartingFrequently
+        expr: |
+          increase(kube_pod_container_status_restarts_total[1h]) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container restarting frequently"
+          description: "Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has restarted {{ $value }} times in the last hour"
+
+      # Pod CrashLoopBackOff
+      - alert: PodCrashLoopBackOff
+        expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod in CrashLoopBackOff"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is in CrashLoopBackOff state"
+
+      # Deployment replicas mismatch
+      - alert: DeploymentReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas
+          !=
+          kube_deployment_status_replicas_available
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deployment replicas mismatch"
+          description: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has {{ $value }} unavailable replicas"
+
+      # Node not ready
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kubernetes node not ready"
+          description: "Node {{ $labels.node }} has been not ready for more than 5 minutes"
+
+      # PVC pending
+      - alert: PVCPending
+        expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PVC pending"
+          description: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} has been pending for more than 15 minutes"
+
+  # ===== ABSENT METRIC ALERTS =====
+  - name: absent_alerts
+    rules:
+      # Critical service metric missing
+      - alert: CriticalMetricMissing
+        expr: absent(up{job="critical-service"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical service metric missing"
+          description: "No metrics received from critical-service for 5 minutes - possible scrape failure"
+
+      # Prometheus target missing
+      - alert: TargetMissing
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target down"
+          description: "Target {{ $labels.job }}/{{ $labels.instance }} is down"
+
+  # ===== PROMETHEUS SELF-MONITORING =====
+  - name: prometheus_alerts
+    rules:
+      # Prometheus configuration reload failed
+      - alert: PrometheusConfigurationReloadFailure
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus configuration reload failed"
+          description: "Prometheus configuration reload has failed"
+
+      # Prometheus rule evaluation failures
+      - alert: PrometheusRuleEvaluationFailures
+        expr: rate(prometheus_rule_evaluation_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus rule evaluation failures"
+          description: "Prometheus has {{ $value }} rule evaluation failures per second"
+
+      # Prometheus TSDB compaction failures
+      - alert: PrometheusTSDBCompactionsFailing
+        expr: rate(prometheus_tsdb_compactions_failed_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus TSDB compactions failing"
+          description: "Prometheus TSDB compactions are failing"
+
+      # Prometheus storage is filling up
+      - alert: PrometheusStorageFilling
+        expr: |
+          (
+            prometheus_tsdb_storage_blocks_bytes
+            /
+            prometheus_tsdb_retention_limit_bytes
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus storage filling up"
+          description: "Prometheus storage is {{ $value | humanizePercentage }} full"

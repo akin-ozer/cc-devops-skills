@@ -1,0 +1,406 @@
+# Multi-Environment Deployment Example
+# Demonstrates: Environment protection rules, approval gates, deployment strategies, rollback
+
+name: Multi-Environment Deployment
+
+on:
+  push:
+    branches: [main, develop, staging]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        default: 'dev'
+      skip-tests:
+        description: 'Skip pre-deployment tests'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+  id-token: write  # For OIDC authentication
+
+concurrency:
+  # Prevent concurrent deployments to same environment
+  group: deploy-${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # Determine deployment environment based on trigger
+  determine-environment:
+    name: Determine Deployment Environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      environment: ${{ steps.determine.outputs.environment }}
+      deploy: ${{ steps.determine.outputs.deploy }}
+
+    steps:
+      - name: Determine environment
+        id: determine
+        run: |
+          # Manual dispatch takes precedence
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "deploy=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Release event goes to production
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "deploy=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Branch-based deployment
+          case "${{ github.ref }}" in
+            refs/heads/main)
+              echo "environment=production" >> $GITHUB_OUTPUT
+              echo "deploy=true" >> $GITHUB_OUTPUT
+              ;;
+            refs/heads/staging)
+              echo "environment=staging" >> $GITHUB_OUTPUT
+              echo "deploy=true" >> $GITHUB_OUTPUT
+              ;;
+            refs/heads/develop)
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              echo "deploy=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              echo "deploy=false" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+  # Build application
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [determine-environment]
+    if: needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 20
+
+    outputs:
+      artifact-name: ${{ steps.build.outputs.artifact-name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        if: github.event.inputs.skip-tests != 'true'
+        run: npm test
+
+      - name: Build application
+        id: build
+        env:
+          NODE_ENV: production
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+        run: |
+          npm run build
+          ARTIFACT_NAME="build-${{ github.sha }}"
+          echo "artifact-name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: ${{ steps.build.outputs.artifact-name }}
+          path: dist/
+          retention-days: 30
+
+  # Deploy to Development
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [determine-environment, build]
+    if: needs.determine-environment.outputs.environment == 'dev' && needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 15
+
+    environment:
+      name: dev
+      url: https://dev.example.com
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          role-session-name: github-actions-dev-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync dist/ s3://${{ secrets.S3_BUCKET_DEV }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_DEV }} \
+            --paths "/*"
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against dev environment..."
+          curl -f https://dev.example.com/health || exit 1
+          echo "✅ Smoke tests passed"
+
+  # Deploy to Staging (with approval requirement)
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [determine-environment, build]
+    if: needs.determine-environment.outputs.environment == 'staging' && needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 20
+
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_STAGING }}
+          role-session-name: github-actions-staging-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync dist/ s3://${{ secrets.S3_BUCKET_STAGING }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_STAGING }} \
+            --paths "/*"
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging environment..."
+          curl -f https://staging.example.com/health || exit 1
+          echo "✅ Smoke tests passed"
+
+      - name: Run integration tests
+        run: |
+          echo "Running integration tests..."
+          # Add your integration test commands here
+          echo "✅ Integration tests passed"
+
+  # Deploy to Production (with approval requirement and blue-green strategy)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [determine-environment, build]
+    if: needs.determine-environment.outputs.environment == 'production' && needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 30
+
+    environment:
+      name: production
+      url: https://example.com
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_PRODUCTION }}
+          role-session-name: github-actions-prod-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Backup current deployment
+        id: backup
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_BUCKET="s3://${{ secrets.S3_BACKUP_BUCKET }}/backups/${TIMESTAMP}"
+
+          echo "Creating backup at ${BACKUP_BUCKET}"
+          aws s3 sync s3://${{ secrets.S3_BUCKET_PRODUCTION }} ${BACKUP_BUCKET}
+          echo "backup-path=${BACKUP_BUCKET}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to production (Blue-Green)
+        id: deploy
+        run: |
+          # Deploy to blue environment first
+          echo "Deploying to blue environment..."
+          aws s3 sync dist/ s3://${{ secrets.S3_BUCKET_PRODUCTION_BLUE }} --delete
+
+          # Update CloudFront to point to blue environment
+          echo "Switching traffic to blue environment..."
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_PRODUCTION }} \
+            --paths "/*"
+
+      - name: Run smoke tests (production)
+        id: smoke-tests
+        run: |
+          echo "Running smoke tests against production..."
+
+          # Wait for CloudFront to propagate
+          sleep 30
+
+          # Basic health check
+          curl -f https://example.com/health || exit 1
+
+          # Check critical endpoints
+          curl -f https://example.com/api/status || exit 1
+
+          echo "✅ Production smoke tests passed"
+
+      - name: Monitor metrics
+        run: |
+          echo "Monitoring deployment metrics for 5 minutes..."
+          # In real scenario, this would monitor CloudWatch metrics
+          # Error rates, latency, etc.
+          sleep 10
+          echo "✅ Metrics look good"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed, initiating rollback..."
+
+          # Restore from backup
+          aws s3 sync ${{ steps.backup.outputs.backup-path }} s3://${{ secrets.S3_BUCKET_PRODUCTION }} --delete
+
+          # Invalidate cache
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_PRODUCTION }} \
+            --paths "/*"
+
+          echo "🔄 Rollback completed"
+          exit 1
+
+  # Deployment verification
+  post-deployment-verification:
+    name: Post-Deployment Verification
+    runs-on: ubuntu-latest
+    needs: [determine-environment, deploy-dev, deploy-staging, deploy-production]
+    if: always() && needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Verify deployment
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+        run: |
+          case "${ENVIRONMENT}" in
+            dev)
+              URL="https://dev.example.com"
+              ;;
+            staging)
+              URL="https://staging.example.com"
+              ;;
+            production)
+              URL="https://example.com"
+              ;;
+          esac
+
+          echo "Verifying deployment at ${URL}"
+
+          # Extended health check
+          for i in {1..5}; do
+            if curl -f "${URL}/health"; then
+              echo "✅ Health check passed (attempt $i)"
+              break
+            else
+              echo "⚠️ Health check failed (attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Health check failed after 5 attempts"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
+
+      - name: Update deployment status
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const environment = '${{ needs.determine-environment.outputs.environment }}';
+            const devResult = '${{ needs.deploy-dev.result }}';
+            const stagingResult = '${{ needs.deploy-staging.result }}';
+            const productionResult = '${{ needs.deploy-production.result }}';
+
+            let deploymentResult = 'skipped';
+            if (environment === 'dev') deploymentResult = devResult;
+            if (environment === 'staging') deploymentResult = stagingResult;
+            if (environment === 'production') deploymentResult = productionResult;
+
+            const status = deploymentResult === 'success' ? '✅' : '❌';
+
+            core.summary
+              .addHeading(`${status} Deployment to ${environment.toUpperCase()}`)
+              .addRaw(`**Environment:** ${environment}`)
+              .addBreak()
+              .addRaw(`**Status:** ${deploymentResult}`)
+              .addBreak()
+              .addRaw(`**Commit:** ${context.sha}`)
+              .addBreak()
+              .addRaw(`**Actor:** ${context.actor}`)
+              .write();
+
+  # Notify stakeholders
+  notify:
+    name: Notify Stakeholders
+    runs-on: ubuntu-latest
+    needs: [determine-environment, post-deployment-verification]
+    if: always() && needs.determine-environment.outputs.deploy == 'true'
+    timeout-minutes: 5
+
+    steps:
+      - name: Send notification
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          VERIFICATION_RESULT: ${{ needs.post-deployment-verification.result }}
+        run: |
+          STATUS_EMOJI="✅"
+          if [ "$VERIFICATION_RESULT" != "success" ]; then
+            STATUS_EMOJI="❌"
+          fi
+
+          echo "${STATUS_EMOJI} Deployment to ${ENVIRONMENT} completed with status: ${VERIFICATION_RESULT}"
+
+          # In real scenario, send to Slack/Teams/Email
+          # Example: curl -X POST $SLACK_WEBHOOK -d "{\"text\":\"${STATUS_EMOJI} Deployment to ${ENVIRONMENT}: ${VERIFICATION_RESULT}\"}"

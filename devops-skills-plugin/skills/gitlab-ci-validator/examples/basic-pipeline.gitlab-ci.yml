@@ -1,0 +1,123 @@
+# Basic GitLab CI/CD Pipeline Example
+# This example demonstrates a simple three-stage pipeline with best practices
+
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  APP_NAME: "my-application"
+  APP_VERSION: "1.0.0"
+
+# Default settings for all jobs
+default:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  interruptible: true
+  tags:
+    - docker
+
+# Build job
+build_app:
+  stage: build
+  image: node:18-alpine
+  timeout: 15m
+  script:
+    - echo "Building $APP_NAME version $APP_VERSION"
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+      - node_modules/
+    expire_in: 1 hour
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .npm/
+
+# Unit tests
+unit_tests:
+  stage: test
+  image: node:18-alpine
+  timeout: 10m
+  needs:
+    - build_app
+  dependencies:
+    - build_app
+  script:
+    - echo "Running unit tests"
+    - npm run test:unit
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+  coverage: '/Lines\s*:\s*(\d+\.\d+)%/'
+
+# Linting job
+lint_code:
+  stage: test
+  image: node:18-alpine
+  timeout: 5m
+  needs:
+    - build_app
+  dependencies:
+    - build_app
+  script:
+    - echo "Linting code"
+    - npm run lint
+  allow_failure: true
+
+# Deploy to staging
+deploy_staging:
+  stage: deploy
+  image: alpine:3.19
+  timeout: 10m
+  interruptible: false
+  needs:
+    - unit_tests
+    - lint_code
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to staging environment"
+    - echo "Version $APP_VERSION"
+    - curl -X POST $STAGING_WEBHOOK_URL
+  environment:
+    name: staging
+    url: https://staging.example.com
+  resource_group: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+# Deploy to production
+deploy_production:
+  stage: deploy
+  image: alpine:3.19
+  timeout: 10m
+  interruptible: false
+  needs:
+    - unit_tests
+    - lint_code
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to production environment"
+    - echo "Version $APP_VERSION"
+    - curl -X POST $PRODUCTION_WEBHOOK_URL
+  environment:
+    name: production
+    url: https://example.com
+  resource_group: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      allow_failure: false

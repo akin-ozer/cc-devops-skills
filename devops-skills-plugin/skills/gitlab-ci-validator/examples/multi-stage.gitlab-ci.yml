@@ -1,0 +1,374 @@
+# Multi-Stage Pipeline with DAG (Directed Acyclic Graph)
+# Demonstrates advanced pipeline structure with parallel execution
+
+stages:
+  - .pre
+  - build
+  - test
+  - security
+  - deploy
+  - .post
+
+variables:
+  CACHE_VERSION: "v1"
+  NODE_VERSION: "18"
+
+# Pre-flight checks
+validate_config:
+  stage: .pre
+  image: alpine:latest
+  script:
+    - echo "Validating configuration"
+    - test -f package.json || exit 1
+    - test -f Dockerfile || exit 1
+  tags:
+    - docker
+
+# Build frontend
+build_frontend:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  script:
+    - echo "Building frontend"
+    - cd frontend
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - frontend/dist/
+    expire_in: 1 day
+  cache:
+    key: ${CACHE_VERSION}-frontend-${CI_COMMIT_REF_SLUG}
+    paths:
+      - frontend/node_modules/
+      - frontend/.npm/
+  tags:
+    - docker
+
+# Build backend
+build_backend:
+  stage: build
+  image: golang:1.21-alpine
+  script:
+    - echo "Building backend"
+    - cd backend
+    - go mod download
+    - go build -o bin/server ./cmd/server
+  artifacts:
+    paths:
+      - backend/bin/
+    expire_in: 1 day
+  cache:
+    key: ${CACHE_VERSION}-backend-${CI_COMMIT_REF_SLUG}
+    paths:
+      - /go/pkg/mod/
+  tags:
+    - docker
+
+# Build documentation
+build_docs:
+  stage: build
+  image: python:3.11-alpine
+  script:
+    - echo "Building documentation"
+    - pip install mkdocs mkdocs-material
+    - mkdocs build
+  artifacts:
+    paths:
+      - site/
+    expire_in: 1 week
+  tags:
+    - docker
+
+# Frontend unit tests - runs immediately after build_frontend
+test_frontend_unit:
+  stage: test
+  image: node:${NODE_VERSION}-alpine
+  needs:
+    - job: build_frontend
+      artifacts: true
+  script:
+    - echo "Running frontend unit tests"
+    - cd frontend
+    - npm ci
+    - npm run test:unit
+  artifacts:
+    reports:
+      junit: frontend/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: frontend/coverage/cobertura.xml
+  coverage: '/Lines\s*:\s*(\d+\.\d+)%/'
+  tags:
+    - docker
+
+# Frontend E2E tests
+test_frontend_e2e:
+  stage: test
+  image: cypress/included:13.6.0
+  needs:
+    - job: build_frontend
+      artifacts: true
+  services:
+    - name: nginx:alpine
+      alias: web
+  script:
+    - echo "Running E2E tests"
+    - cd frontend
+    - npm ci
+    - npm run test:e2e
+  artifacts:
+    when: always
+    paths:
+      - frontend/cypress/screenshots/
+      - frontend/cypress/videos/
+    expire_in: 1 week
+  allow_failure: true
+  tags:
+    - docker
+
+# Backend unit tests
+test_backend_unit:
+  stage: test
+  image: golang:1.21-alpine
+  needs:
+    - job: build_backend
+      artifacts: true
+  script:
+    - echo "Running backend unit tests"
+    - cd backend
+    - go test -v -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: backend/coverage.xml
+  coverage: '/total:.*?(\d+\.\d+)%/'
+  tags:
+    - docker
+
+# Backend integration tests
+test_backend_integration:
+  stage: test
+  image: golang:1.21-alpine
+  needs:
+    - job: build_backend
+      artifacts: true
+  services:
+    - name: postgres:15-alpine
+      alias: postgres
+    - name: redis:7-alpine
+      alias: redis
+  variables:
+    POSTGRES_DB: testdb
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+    DATABASE_URL: "postgres://test:test@postgres:5432/testdb?sslmode=disable"
+    REDIS_URL: "redis://redis:6379"
+  script:
+    - echo "Running backend integration tests"
+    - cd backend
+    - go test -v -tags=integration ./...
+  tags:
+    - docker
+
+# Lint frontend code
+lint_frontend:
+  stage: test
+  image: node:${NODE_VERSION}-alpine
+  needs:
+    - job: build_frontend
+      artifacts: false
+  script:
+    - echo "Linting frontend code"
+    - cd frontend
+    - npm ci
+    - npm run lint
+  allow_failure: true
+  tags:
+    - docker
+
+# Lint backend code
+lint_backend:
+  stage: test
+  image: golangci/golangci-lint:v1.55-alpine
+  needs:
+    - job: build_backend
+      artifacts: false
+  script:
+    - echo "Linting backend code"
+    - cd backend
+    - golangci-lint run
+  allow_failure: true
+  tags:
+    - docker
+
+# SAST scanning
+sast_scan:
+  stage: security
+  image: returntocorp/semgrep:latest
+  needs: []
+  script:
+    - semgrep --config=auto --json --output=sast-report.json .
+  artifacts:
+    reports:
+      sast: sast-report.json
+  allow_failure: true
+  tags:
+    - docker
+
+# Dependency scanning
+dependency_scan:
+  stage: security
+  image: aquasec/trivy:latest
+  needs: []
+  script:
+    - trivy fs --format json --output dependency-report.json .
+  artifacts:
+    paths:
+      - dependency-report.json
+    expire_in: 1 week
+  allow_failure: true
+  tags:
+    - docker
+
+# Secret scanning
+secret_scan:
+  stage: security
+  image: trufflesecurity/trufflehog:latest
+  needs: []
+  script:
+    - trufflehog filesystem --directory=. --json > secrets-report.json
+  artifacts:
+    paths:
+      - secrets-report.json
+    expire_in: 1 week
+  allow_failure: true
+  tags:
+    - docker
+
+# Deploy to staging
+deploy_staging:
+  stage: deploy
+  image: alpine:latest
+  needs:
+    - test_frontend_unit
+    - test_backend_unit
+    - test_backend_integration
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to staging"
+    - curl -X POST "$STAGING_DEPLOY_WEBHOOK"
+  environment:
+    name: staging
+    url: https://staging.example.com
+    on_stop: stop_staging
+    auto_stop_in: 7 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  tags:
+    - docker
+
+# Stop staging environment
+stop_staging:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Stopping staging environment"
+    - curl -X DELETE "$STAGING_DEPLOY_WEBHOOK"
+  environment:
+    name: staging
+    action: stop
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  tags:
+    - docker
+
+# Deploy review app
+deploy_review:
+  stage: deploy
+  image: alpine:latest
+  needs:
+    - test_frontend_unit
+    - test_backend_unit
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying review app"
+    - echo "URL https://$CI_ENVIRONMENT_SLUG.review.example.com"
+    - curl -X POST "$REVIEW_DEPLOY_WEBHOOK"
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    url: https://$CI_ENVIRONMENT_SLUG.review.example.com
+    on_stop: stop_review
+    auto_stop_in: 3 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  tags:
+    - docker
+
+# Stop review app
+stop_review:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Stopping review app"
+    - curl -X DELETE "$REVIEW_DEPLOY_WEBHOOK"
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    action: stop
+  when: manual
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  tags:
+    - docker
+
+# Deploy to production
+deploy_production:
+  stage: deploy
+  image: alpine:latest
+  needs:
+    - test_frontend_unit
+    - test_backend_unit
+    - test_backend_integration
+    - sast_scan
+    - dependency_scan
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to production"
+    - curl -X POST "$PRODUCTION_DEPLOY_WEBHOOK"
+  environment:
+    name: production
+    url: https://example.com
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  allow_failure: false
+  tags:
+    - docker
+
+# Post-deployment notifications
+notify_deployment:
+  stage: .post
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Sending deployment notification"
+    - |
+      curl -X POST "$SLACK_WEBHOOK" \
+        -H 'Content-Type: application/json' \
+        -d "{\"text\":\"Pipeline completed: $CI_PIPELINE_URL\"}"
+  when: always
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+  tags:
+    - docker

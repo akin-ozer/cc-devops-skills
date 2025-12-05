@@ -1,0 +1,123 @@
+# Deployment Pipeline with Multiple Environments
+# Demonstrates deployment jobs with approval gates
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-22.04'
+
+variables:
+  - group: 'shared-variables'
+  - name: appName
+    value: 'mywebapp'
+
+stages:
+  - stage: Build
+    displayName: 'Build Application'
+    jobs:
+      - job: Build
+        displayName: 'Build Job'
+        steps:
+          - task: Npm@1
+            displayName: 'Install Dependencies'
+            inputs:
+              command: 'ci'
+
+          - task: Cache@2
+            displayName: 'Cache node_modules'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | package-lock.json'
+              path: 'node_modules'
+              cacheHitVar: 'CACHE_RESTORED'
+
+          - script: npm run build
+            displayName: 'Build Application'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Artifacts'
+            inputs:
+              targetPath: 'dist'
+              artifact: 'webapp'
+
+  - stage: DeployDev
+    displayName: 'Deploy to Development'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployDev
+        displayName: 'Deploy to Dev Environment'
+        environment: 'development'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: webapp
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure Web App'
+                  inputs:
+                    azureSubscription: 'Azure-Dev-Connection'
+                    appName: '$(appName)-dev'
+                    package: '$(Pipeline.Workspace)/webapp'
+                    deploymentMethod: 'auto'
+
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: DeployDev
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStaging
+        displayName: 'Deploy to Staging Environment'
+        environment: 'staging'
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - script: echo "Pre-deployment validation"
+                  displayName: 'Pre-deployment Steps'
+
+            deploy:
+              steps:
+                - download: current
+                  artifact: webapp
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure Web App'
+                  inputs:
+                    azureSubscription: 'Azure-Staging-Connection'
+                    appName: '$(appName)-staging'
+                    package: '$(Pipeline.Workspace)/webapp'
+                    deploymentMethod: 'auto'
+
+            postRouteTraffic:
+              steps:
+                - script: echo "Running smoke tests"
+                  displayName: 'Smoke Tests'
+
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployStaging
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to Production Environment'
+        environment: 'production'
+        timeoutInMinutes: 120
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: webapp
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure Web App'
+                  inputs:
+                    azureSubscription: 'Azure-Prod-Connection'
+                    appName: '$(appName)-prod'
+                    package: '$(Pipeline.Workspace)/webapp'
+                    deploymentMethod: 'auto'

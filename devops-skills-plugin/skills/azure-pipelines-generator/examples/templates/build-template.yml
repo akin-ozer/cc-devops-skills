@@ -1,0 +1,69 @@
+# Reusable Build Template
+# Template for building Node.js applications
+
+parameters:
+- name: nodeVersion
+  type: string
+  default: '20.x'
+
+- name: workingDirectory
+  type: string
+  default: '.'
+
+- name: runTests
+  type: boolean
+  default: true
+
+- name: publishArtifacts
+  type: boolean
+  default: true
+
+steps:
+- task: NodeTool@0
+  displayName: 'Install Node.js ${{ parameters.nodeVersion }}'
+  inputs:
+    versionSpec: ${{ parameters.nodeVersion }}
+
+- task: Cache@2
+  displayName: 'Cache npm packages'
+  inputs:
+    key: 'npm | "$(Agent.OS)" | ${{ parameters.workingDirectory }}/package-lock.json'
+    restoreKeys: |
+      npm | "$(Agent.OS)"
+    path: $(Pipeline.Workspace)/.npm
+
+- script: npm ci --cache $(Pipeline.Workspace)/.npm
+  displayName: 'Install dependencies'
+  workingDirectory: ${{ parameters.workingDirectory }}
+
+- script: npm run build
+  displayName: 'Build application'
+  workingDirectory: ${{ parameters.workingDirectory }}
+
+- ${{ if eq(parameters.runTests, true) }}:
+  - script: npm test -- --coverage --ci
+    displayName: 'Run tests'
+    workingDirectory: ${{ parameters.workingDirectory }}
+
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    displayName: 'Publish test results'
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/junit.xml'
+      searchFolder: ${{ parameters.workingDirectory }}
+
+  - task: PublishCodeCoverageResults@1
+    condition: succeededOrFailed()
+    displayName: 'Publish code coverage'
+    inputs:
+      codeCoverageTool: 'Cobertura'
+      summaryFileLocation: '${{ parameters.workingDirectory }}/coverage/cobertura-coverage.xml'
+
+- ${{ if eq(parameters.publishArtifacts, true) }}:
+  - task: PublishPipelineArtifact@1
+    displayName: 'Publish build artifacts'
+    inputs:
+      targetPath: '${{ parameters.workingDirectory }}/dist'
+      artifact: 'webapp'
+      publishLocation: 'pipeline'

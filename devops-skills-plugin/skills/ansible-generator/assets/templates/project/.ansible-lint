@@ -1,0 +1,267 @@
+# Ansible Lint Configuration
+# For full documentation: https://ansible.readthedocs.io/projects/lint/
+
+---
+# Exclude paths from linting
+exclude_paths:
+  - .cache/
+  - .git/
+  - .github/
+  - test/fixtures/
+  - collections/
+  - roles/external/
+  - '*.md'
+  - '*.txt'
+
+# Enable offline mode (don't check for newer versions)
+offline: false
+
+# Set output format: rich, plain, md, json, codeclimate, or sarif
+# format: rich
+
+# Return success if only warnings are found
+# quiet: false
+
+# Parseable output with severity levels
+# parseable: true
+
+# Use color in terminal output
+# colored: true
+
+# Path to custom rules directory
+# rulesdir:
+#   - ./custom-rules/
+
+# Show rule IDs in output
+# verbosity: 1
+
+# Skip list - rules to skip
+skip_list:
+  # Skip line length check (may be too strict for some projects)
+  - yaml[line-length]
+
+  # Skip name casing rule (allow flexibility in task naming)
+  # - name[casing]
+
+  # Skip checks for old Ansible syntax (if maintaining legacy playbooks)
+  # - syntax-check[specific-tag]
+
+  # Skip risky file permissions warning (if intentional)
+  # - risky-file-permissions
+
+  # Skip no-changed-when for command/shell (if acceptable)
+  # - no-changed-when
+
+  # Skip jinja spacing rules (if preferred)
+  # - jinja[spacing]
+
+  # Skip meta information checks
+  # - meta-no-info
+  # - meta-no-tags
+
+  # Skip package latest checks (if using latest is intentional)
+  # - package-latest
+
+# Warn list - rules to warn but not fail
+warn_list:
+  - experimental  # Warn about experimental features
+  - no-changed-when  # Warn when command/shell tasks lack changed_when
+  - no-handler  # Warn when using bare variables in notify
+  - unnamed-task  # Warn about tasks without names
+  - command-instead-of-module  # Warn when shell/command could be replaced with module
+  - command-instead-of-shell  # Warn when command could use shell for pipes/redirects
+  - deprecated-bare-vars  # Warn about bare variables (use {{ }})
+  - deprecated-local-action  # Warn about deprecated local_action syntax
+  - risky-shell-pipe  # Warn about shell tasks using pipes without pipefail
+
+# Enable rules (override defaults)
+enable_list:
+  - args  # Check for correct module arguments
+  - empty-string-compare  # Check for empty string comparisons
+  - no-free-form  # Check for free-form parameters
+  - no-jinja-when  # Check for Jinja2 in when conditions
+  - no-log-password  # Check for passwords without no_log
+  - no-same-owner  # Check for same owner/group
+  - yaml  # YAML syntax checks
+
+# Tags to run or skip
+# tags: []
+# skip_tags: []
+
+# Ansible-lint profile: min, basic, moderate, safety, shared, production
+# profile: production
+
+# Kinds of files to lint
+kinds:
+  - yaml: "*.yaml"
+  - yaml: "*.yml"
+  - playbook: "**/playbooks/*.yml"
+  - playbook: "**/playbooks/*.yaml"
+  - tasks: "**/tasks/*.yml"
+  - tasks: "**/tasks/*.yaml"
+  - handlers: "**/handlers/*.yml"
+  - handlers: "**/handlers/*.yaml"
+  - vars: "**/vars/*.yml"
+  - vars: "**/vars/*.yaml"
+  - vars: "**/defaults/*.yml"
+  - vars: "**/defaults/*.yaml"
+  - meta: "**/meta/main.yml"
+  - meta: "**/meta/main.yaml"
+  - requirements: "**/requirements.yml"
+  - requirements: "**/requirements.yaml"
+
+# Mock modules or roles you want to skip during linting
+# mock_modules:
+#   - my_custom_module
+#   - another_custom_module
+
+# mock_roles:
+#   - mynamespace.my_custom_role
+
+# Loop variable naming pattern
+# loop_var_prefix: "^(__|{role}_)"
+
+# Minimum Ansible version to check against
+# min_ansible_version: "2.15"
+
+# Maximum line length (default: 160)
+# max_line_length: 160
+
+# Enforce task naming based on module name
+# task_name_prefix: "{module_name} | "
+
+# Strict mode - treat warnings as errors
+# strict: false
+
+# Profiles define different strictness levels
+# Available profiles: min, basic, moderate, safety, shared, production
+# Uncomment to use:
+# profile: production
+
+# Write violations to file
+# write_list:
+#   - all
+#   - rule-id
+
+# Use specific Ansible version for checking
+# use_default_rules: true
+
+# Enable/disable specific rule categories
+# Any rule not listed is enabled by default
+rules:
+  # Command module rules
+  command-instead-of-module:
+    severity: MEDIUM
+  command-instead-of-shell:
+    severity: LOW
+
+  # Naming rules
+  name[casing]:
+    severity: MEDIUM
+  name[missing]:
+    severity: HIGH
+  name[play]:
+    severity: MEDIUM
+  name[template]:
+    severity: LOW
+
+  # YAML rules
+  yaml[brackets]:
+    severity: MEDIUM
+  yaml[colons]:
+    severity: MEDIUM
+  yaml[commas]:
+    severity: LOW
+  yaml[document-start]:
+    severity: LOW
+  yaml[empty-lines]:
+    severity: LOW
+  yaml[indentation]:
+    severity: MEDIUM
+  yaml[key-duplicates]:
+    severity: HIGH
+  yaml[line-length]:
+    max: 160
+    severity: LOW
+  yaml[new-line-at-end-of-file]:
+    severity: LOW
+  yaml[trailing-spaces]:
+    severity: LOW
+  yaml[truthy]:
+    severity: MEDIUM
+
+  # Jinja2 rules
+  jinja[spacing]:
+    severity: LOW
+  jinja[invalid]:
+    severity: HIGH
+
+  # Variable rules
+  var-naming[no-reserved]:
+    severity: HIGH
+  var-naming[no-jinja]:
+    severity: MEDIUM
+  var-naming[pattern]:
+    severity: MEDIUM
+
+  # Security rules
+  no-log-password:
+    severity: VERY_HIGH
+  risky-file-permissions:
+    severity: HIGH
+  risky-octal:
+    severity: MEDIUM
+  risky-shell-pipe:
+    severity: MEDIUM
+
+  # Best practices
+  no-changed-when:
+    severity: MEDIUM
+  no-handler:
+    severity: LOW
+  package-latest:
+    severity: LOW
+  deprecated-bare-vars:
+    severity: MEDIUM
+  deprecated-module:
+    severity: HIGH
+  deprecated-command-syntax:
+    severity: MEDIUM
+
+  # Meta rules
+  meta-no-info:
+    severity: LOW
+  meta-no-tags:
+    severity: LOW
+  meta-incorrect:
+    severity: HIGH
+  meta-runtime[unsupported-version]:
+    severity: HIGH
+  meta-runtime[invalid-version]:
+    severity: VERY_HIGH
+
+  # Galaxy rules
+  galaxy[no-changelog]:
+    severity: LOW
+  galaxy[no-runtime]:
+    severity: MEDIUM
+  galaxy[version-incorrect]:
+    severity: HIGH
+  galaxy[version-missing]:
+    severity: MEDIUM
+  galaxy[tags]:
+    severity: LOW
+
+  # Schema validation
+  schema[meta]:
+    severity: VERY_HIGH
+  schema[playbook]:
+    severity: VERY_HIGH
+  schema[tasks]:
+    severity: VERY_HIGH
+  schema[vars]:
+    severity: HIGH
+
+# Additional options
+# progressive: false  # Enable progressive mode
+# project_dir: .  # Project directory

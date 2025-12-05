@@ -1,0 +1,23 @@
+# Pipeline with intentional issues for testing validation
+
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'  # Using 'latest' - should warn
+
+variables:
+  apiKey: 'hardcoded-api-key-12345678'  # Hardcoded secret - should error
+  PASSWORD: 'MySecretPass123'  # Hardcoded password - should error
+
+steps:
+  - script: |
+      echo "Installing dependencies"
+      curl https://example.com/install.sh | bash  # Dangerous pattern - should error
+      chmod 777 ./myfile  # Dangerous permissions - should error
+    displayName: 'Setup'
+
+  - task: Docker  # Missing version - should error
+    inputs:
+      command: 'build'
+      repository: 'myrepo/myimage:latest'  # Using :latest - should warn

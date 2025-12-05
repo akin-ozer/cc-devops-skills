@@ -1,0 +1,218 @@
+# Loki Configuration with Ruler (Alerting & Recording Rules)
+# Simple Scalable deployment with integrated ruler for LogQL-based alerting
+# Reference: https://grafana.com/docs/loki/latest/alert/
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  graceful_shutdown_timeout: 30s
+
+common:
+  path_prefix: /loki
+  storage:
+    s3:
+      s3: s3://us-east-1/my-loki-logs
+      s3forcepathstyle: false
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  join_members:
+    - loki-memberlist
+
+schema_config:
+  configs:
+    - from: "2025-01-01"
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+# Ruler Configuration - Alerting & Recording Rules
+ruler:
+  # Storage for rule files
+  storage:
+    type: s3
+    s3:
+      bucket_name: loki-ruler-bucket
+      region: us-east-1
+      # Uses IAM role for authentication
+
+  # Temporary path for rule processing
+  rule_path: /loki/rules-temp
+
+  # Alertmanager integration
+  alertmanager_url: http://alertmanager:9093
+  enable_alertmanager_v2: true  # Default since Loki 3.2.0
+
+  # Alertmanager client configuration (optional)
+  # alertmanager_client:
+  #   tls_config:
+  #     ca_path: /path/to/ca.crt
+  #   basic_auth_username: admin
+  #   basic_auth_password: ${ALERTMANAGER_PASSWORD}
+
+  # Enable API for rule management
+  enable_api: true
+
+  # Sharding for distributed ruler (recommended for production)
+  enable_sharding: true
+  ring:
+    kvstore:
+      store: memberlist
+
+  # Rule evaluation settings
+  evaluation_interval: 1m
+  poll_interval: 1m
+
+  # Alert timing
+  for_outage_tolerance: 1h
+  for_grace_period: 10m
+  resend_delay: 1m
+
+  # Optional: Remote write recording rule metrics to Prometheus
+  remote_write:
+    enabled: true
+    client:
+      url: http://prometheus:9090/api/v1/write
+      # Optional authentication:
+      # basic_auth:
+      #   username: admin
+      #   password: ${PROMETHEUS_WRITE_PASSWORD}
+
+limits_config:
+  # Ingestion limits
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # Stream limits
+  max_streams_per_user: 100000
+  max_global_streams_per_user: 1000000
+
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h
+  max_query_parallelism: 32
+  max_query_series: 500
+
+  # Retention
+  retention_period: 90d
+
+  # Chunks
+  max_chunks_per_query: 2000000
+
+  # Structured metadata (Loki 2.9+)
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+
+  # Volume API
+  volume_enabled: true
+
+  # Ruler-specific limits (per tenant)
+  ruler_max_rules_per_rule_group: 100
+  ruler_max_rule_groups_per_tenant: 50
+
+# Pattern Ingester (Loki 3.0+)
+pattern_ingester:
+  enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+ingester:
+  chunk_encoding: snappy
+  chunk_idle_period: 30m
+  chunk_retain_period: 15m
+  max_chunk_age: 2h
+  chunk_target_size: 1572864  # 1.5MB
+
+querier:
+  max_concurrent: 4
+  query_timeout: 5m
+
+query_frontend:
+  max_outstanding_per_tenant: 4096
+  compress_responses: true
+  encoding: protobuf
+
+query_range:
+  parallelise_shardable_queries: true
+  cache_results: true
+
+---
+# Example Rule File: /loki/rules/<tenant-id>/alerts.yaml
+# Place this file in your ruler storage bucket under the tenant directory
+
+# groups:
+#   - name: high_error_rate
+#     interval: 1m
+#     limit: 10
+#     rules:
+#       # Alerting rule - fires when error rate exceeds 5%
+#       - alert: HighErrorRate
+#         expr: |
+#           sum(rate({app="myapp"} |= "error" [5m])) by (job)
+#             /
+#           sum(rate({app="myapp"}[5m])) by (job)
+#             > 0.05
+#         for: 10m
+#         labels:
+#           severity: critical
+#         annotations:
+#           summary: "High error rate detected for {{ $labels.job }}"
+#           description: "Error rate is {{ $value | printf \"%.2f\" }}%"
+#           runbook_url: "https://runbooks.example.com/loki/high-error-rate"
+#
+#       # Recording rule - pre-compute expensive queries
+#       - record: job:loki_requests:rate5m
+#         expr: |
+#           sum(rate({job=~".+"}[5m])) by (job)
+#         labels:
+#           source: loki
+#
+#   - name: service_health
+#     interval: 1m
+#     rules:
+#       # Alert on service unavailability
+#       - alert: ServiceUnavailable
+#         expr: |
+#           absent_over_time({service="critical-service"}[5m])
+#         for: 5m
+#         labels:
+#           severity: page
+#         annotations:
+#           summary: "Service critical-service appears to be down"
+#
+#       # Alert on high latency patterns in logs
+#       - alert: HighLatency
+#         expr: |
+#           count_over_time({app="api"} |~ "latency=[0-9]+" | latency > 1000 [5m]) > 100
+#         for: 5m
+#         labels:
+#           severity: warning
+#         annotations:
+#           summary: "High latency detected in API logs"
+
+# Ruler API Endpoints:
+# - GET  /loki/api/v1/rules         - List all rules
+# - GET  /loki/api/v1/rules/{ns}    - List rules in namespace
+# - POST /loki/api/v1/rules/{ns}    - Create/update rule group
+# - DELETE /loki/api/v1/rules/{ns}/{group} - Delete rule group
+# - GET  /loki/api/v1/alerts        - List current alerts
+
+# Note: enable_api: true is required for API-based rule management

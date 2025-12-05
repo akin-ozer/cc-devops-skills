@@ -1,0 +1,102 @@
+---
+# Role Argument Specifications (Ansible 2.11+)
+# This file enables automatic validation of role variables
+# For more info: https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html#role-argument-validation
+
+argument_specs:
+  # Main entry point (required)
+  main:
+    short_description: [SHORT_DESCRIPTION_OF_ROLE]
+    description:
+      - [DETAILED_DESCRIPTION_LINE_1]
+      - [DETAILED_DESCRIPTION_LINE_2]
+    author:
+      - [AUTHOR_NAME]
+
+    options:
+      # Example: String variable
+      [role_name]_package_name:
+        type: str
+        required: false
+        default: [DEFAULT_PACKAGE]
+        description: Name of the package to install
+
+      # Example: Integer variable
+      [role_name]_port:
+        type: int
+        required: false
+        default: [DEFAULT_PORT]
+        description: Port number for the service
+
+      # Example: Boolean variable
+      [role_name]_enabled:
+        type: bool
+        required: false
+        default: true
+        description: Whether to enable the service
+
+      # Example: List variable
+      [role_name]_packages:
+        type: list
+        elements: str
+        required: false
+        default:
+          - [PACKAGE_1]
+          - [PACKAGE_2]
+        description: List of packages to install
+
+      # Example: Dictionary variable
+      [role_name]_config:
+        type: dict
+        required: false
+        default: {}
+        description: Configuration dictionary
+        options:
+          host:
+            type: str
+            required: false
+            default: localhost
+            description: Hostname for the service
+          port:
+            type: int
+            required: false
+            default: 5432
+            description: Port for the service
+
+      # Example: Path variable
+      [role_name]_config_dir:
+        type: path
+        required: false
+        default: /etc/[SERVICE_NAME]
+        description: Configuration directory path
+
+      # Example: Required variable
+      [role_name]_version:
+        type: str
+        required: true
+        description: Version to install (required)
+
+      # Example: Variable with choices
+      [role_name]_state:
+        type: str
+        required: false
+        default: present
+        choices:
+          - present
+          - absent
+          - latest
+        description: Desired state of the installation
+
+# Available data types:
+# - str: String
+# - int: Integer
+# - float: Float
+# - bool: Boolean
+# - list: List/Array
+# - dict: Dictionary/Object
+# - path: File system path
+# - raw: Any type (no validation)
+# - jsonarg: JSON string
+# - json: JSON object
+# - bytes: Bytes
+# - bits: Bits

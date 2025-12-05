@@ -1,0 +1,244 @@
+# Loki Production Configuration with TLS
+# Simple Scalable deployment with full TLS encryption
+# Requires: TLS certificates mounted at /etc/loki/tls/
+# Reference: https://grafana.com/docs/loki/latest/configure/#server
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  graceful_shutdown_timeout: 30s
+
+  # HTTP TLS Configuration
+  http_tls_config:
+    # Server certificate
+    cert_file: /etc/loki/tls/tls.crt
+    key_file: /etc/loki/tls/tls.key
+    # Client CA for mTLS (optional but recommended)
+    client_ca_file: /etc/loki/tls/ca.crt
+    # Require client certificates (mTLS)
+    client_auth_type: RequireAndVerifyClientCert  # Options: NoClientCert, RequestClientCert, RequireAnyClientCert, VerifyClientCertIfGiven, RequireAndVerifyClientCert
+
+  # gRPC TLS Configuration (inter-component communication)
+  grpc_tls_config:
+    cert_file: /etc/loki/tls/tls.crt
+    key_file: /etc/loki/tls/tls.key
+    client_ca_file: /etc/loki/tls/ca.crt
+    client_auth_type: RequireAndVerifyClientCert
+
+common:
+  path_prefix: /loki
+  storage:
+    s3:
+      s3: s3://us-east-1/production-loki-bucket
+      s3forcepathstyle: false
+      # Use IAM roles for authentication (never hardcode credentials)
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+  # Zone awareness for multi-AZ deployments
+  instance_availability_zone: ${AVAILABILITY_ZONE}
+
+memberlist:
+  join_members:
+    - loki-memberlist
+
+schema_config:
+  configs:
+    - from: "2025-01-01"
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+limits_config:
+  # Ingestion limits
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # Stream limits
+  max_streams_per_user: 100000
+  max_global_streams_per_user: 500000
+
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h
+  max_query_parallelism: 32
+  max_query_series: 500
+
+  # Retention
+  retention_period: 90d
+
+  # Chunks
+  max_chunks_per_query: 2000000
+
+  # Structured metadata (Loki 2.9+)
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+
+  # Volume API
+  volume_enabled: true
+
+  # OTLP Configuration (Loki 3.0+)
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: false
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - service.namespace
+            - deployment.environment
+        - action: structured_metadata
+          attributes:
+            - k8s.pod.name
+            - service.instance.id
+    log_attributes:
+      - action: structured_metadata
+        attributes:
+          - trace_id
+          - span_id
+
+# Pattern Ingester (Loki 3.0+)
+pattern_ingester:
+  enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+ingester:
+  chunk_encoding: snappy
+  chunk_idle_period: 30m
+  chunk_retain_period: 15m
+  max_chunk_age: 2h
+  chunk_target_size: 1572864  # 1.5MB
+
+  lifecycler:
+    ring:
+      replication_factor: 3
+      zone_awareness_enabled: true  # CRITICAL for multi-AZ HA
+
+querier:
+  max_concurrent: 4
+  query_timeout: 5m
+
+query_frontend:
+  max_outstanding_per_tenant: 4096
+  compress_responses: true
+  encoding: protobuf
+
+query_range:
+  parallelise_shardable_queries: true
+  cache_results: true
+
+# Caching with TLS (if using external memcached with TLS)
+chunk_store_config:
+  chunk_cache_config:
+    memcached:
+      batch_size: 256
+      parallelism: 10
+    memcached_client:
+      host: memcached-chunks.loki.svc.cluster.local
+      service: memcached-client
+      timeout: 500ms
+      # TLS for memcached (if supported)
+      # tls_enabled: true
+
+# Results cache
+frontend:
+  encoding: protobuf
+  results_cache:
+    cache:
+      memcached_client:
+        host: memcached-results.loki.svc.cluster.local
+        service: memcached-client
+        timeout: 500ms
+        max_idle_conns: 100
+
+# Index Gateway
+index_gateway:
+  mode: ring
+  ring:
+    kvstore:
+      store: memberlist
+
+---
+# Kubernetes TLS Secret Configuration
+# Create TLS secrets using cert-manager or manually:
+#
+# # Using cert-manager (recommended)
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: loki-tls
+#   namespace: loki
+# spec:
+#   secretName: loki-tls
+#   duration: 8760h  # 1 year
+#   renewBefore: 720h  # 30 days
+#   issuerRef:
+#     name: ca-issuer
+#     kind: ClusterIssuer
+#   commonName: loki
+#   dnsNames:
+#     - loki
+#     - loki.loki.svc
+#     - loki.loki.svc.cluster.local
+#     - "*.loki-headless.loki.svc.cluster.local"
+#
+# # Manual secret creation
+# kubectl create secret tls loki-tls \
+#   --cert=tls.crt \
+#   --key=tls.key \
+#   -n loki
+#
+# kubectl create secret generic loki-ca \
+#   --from-file=ca.crt=ca.crt \
+#   -n loki
+
+---
+# Helm values for TLS configuration
+# Use with: helm install loki grafana/loki -f values-tls.yaml
+#
+# loki:
+#   server:
+#     http_tls_config:
+#       cert_file: /etc/loki/tls/tls.crt
+#       key_file: /etc/loki/tls/tls.key
+#       client_ca_file: /etc/loki/tls/ca.crt
+#     grpc_tls_config:
+#       cert_file: /etc/loki/tls/tls.crt
+#       key_file: /etc/loki/tls/tls.key
+#       client_ca_file: /etc/loki/tls/ca.crt
+#
+# # Mount TLS secrets
+# extraVolumes:
+#   - name: tls
+#     secret:
+#       secretName: loki-tls
+#   - name: ca
+#     secret:
+#       secretName: loki-ca
+#
+# extraVolumeMounts:
+#   - name: tls
+#     mountPath: /etc/loki/tls
+#     readOnly: true
+#   - name: ca
+#     mountPath: /etc/loki/tls/ca.crt
+#     subPath: ca.crt
+#     readOnly: true

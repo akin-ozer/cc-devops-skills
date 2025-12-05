@@ -1,0 +1,16 @@
+{
+  "description": "DevOps Skills - Intelligent DevOps skills for Claude Code.",
+  "author": "Akin Ozer",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "MANDATORY SKILL ACTIVATION SEQUENCE\n\nStep 1 - EVALUATE:\nFor each skill in <available_skills>, state: [skill-name] - YES/NO - [reason]\n\nStep 2 - ACTIVATE:\nIF any skills are YES -> Use Skill(skill-name) tool for EACH relevant skill NOW\nIF no skills are YES -> State \"No skills needed\" and proceed\n\nStep 3 - IMPLEMENT:\nOnly after Step 2 is complete, proceed with implementation.\n\nCRITICAL: You MUST call Skill() tool in Step 2. Do NOT skip to implementation.\n\nExample:\n- dockerfile-generator: YES - creating a new Dockerfile\n- dockerfile-validator: YES - need to validate generated Dockerfile\n- k8s-yaml-validator: NO - not working with Kubernetes manifests\n\nThen IMMEDIATELY use Skill() tool:\n> Skill(dockerfile-generator)\n> Skill(dockerfile-validator)\n\nTHEN and ONLY THEN start implementation"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+# Example variable values
+# Copy this file to terraform.tfvars and update with actual values
+
+environment  = "dev"
+project_name = "my-project"
+
+tags = {
+  ManagedBy   = "Terraform"
+  Owner       = "team@example.com"
+  CostCenter  = "engineering"
+}

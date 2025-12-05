@@ -1,0 +1,8 @@
+{
+  "name": "devops-skills",
+  "description": "Set of DevOps skills for Claude Code.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Akin Ozer"
+  }
+}

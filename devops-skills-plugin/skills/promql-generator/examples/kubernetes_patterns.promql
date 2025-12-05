@@ -1,0 +1,401 @@
+# Kubernetes PromQL Query Patterns
+#
+# This file contains PromQL queries for monitoring Kubernetes clusters using:
+# - kube-state-metrics (KSM) - Kubernetes object state metrics
+# - cAdvisor - Container resource metrics (embedded in kubelet)
+# - node-exporter - Node-level metrics
+#
+# References:
+# - https://github.com/kubernetes/kube-state-metrics
+# - https://github.com/google/cadvisor
+# - https://kubernetes.io/docs/concepts/cluster-administration/kube-state-metrics/
+
+## ===== POD STATUS AND HEALTH =====
+
+# Pods not in Running state
+kube_pod_status_phase{phase!="Running", phase!="Succeeded"} == 1
+
+# Pods not ready
+count(kube_pod_status_ready{condition="false"}) by (namespace, pod)
+
+# Pods in CrashLoopBackOff
+kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+
+# Pods in ImagePullBackOff
+kube_pod_container_status_waiting_reason{reason="ImagePullBackOff"} == 1
+
+# Pods pending for more than 5 minutes
+max_over_time(kube_pod_status_phase{phase="Pending"}[5m]) == 1
+
+# Container restarts in the last hour
+sum by (namespace, pod, container) (
+  increase(kube_pod_container_status_restarts_total[1h])
+)
+
+# Pods by phase per namespace
+count by (namespace, phase) (kube_pod_status_phase == 1)
+
+# Unschedulable pods
+sum by (namespace) (kube_pod_status_unschedulable)
+
+## ===== CONTAINER RESOURCE USAGE (cAdvisor) =====
+
+# Container CPU usage (cores)
+sum by (namespace, pod, container) (
+  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+)
+
+# Container CPU usage percentage of request
+(
+  sum by (namespace, pod, container) (
+    rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+  )
+  /
+  sum by (namespace, pod, container) (
+    kube_pod_container_resource_requests{resource="cpu"}
+  )
+) * 100
+
+# Container CPU usage percentage of limit
+(
+  sum by (namespace, pod, container) (
+    rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+  )
+  /
+  sum by (namespace, pod, container) (
+    kube_pod_container_resource_limits{resource="cpu"}
+  )
+) * 100
+
+# Container memory usage (working set bytes)
+sum by (namespace, pod, container) (
+  container_memory_working_set_bytes{container!="", container!="POD"}
+)
+
+# Container memory usage percentage of request
+(
+  sum by (namespace, pod, container) (
+    container_memory_working_set_bytes{container!="", container!="POD"}
+  )
+  /
+  sum by (namespace, pod, container) (
+    kube_pod_container_resource_requests{resource="memory"}
+  )
+) * 100
+
+# Container memory usage percentage of limit
+(
+  sum by (namespace, pod, container) (
+    container_memory_working_set_bytes{container!="", container!="POD"}
+  )
+  /
+  sum by (namespace, pod, container) (
+    kube_pod_container_resource_limits{resource="memory"}
+  )
+) * 100
+
+# Containers near memory limit (>90%)
+(
+  sum by (namespace, pod, container) (
+    container_memory_working_set_bytes{container!="", container!="POD"}
+  )
+  /
+  sum by (namespace, pod, container) (
+    kube_pod_container_resource_limits{resource="memory"}
+  )
+) > 0.9
+
+# Container CPU throttling
+sum by (namespace, pod, container) (
+  increase(container_cpu_cfs_throttled_periods_total[5m])
+)
+/
+sum by (namespace, pod, container) (
+  increase(container_cpu_cfs_periods_total[5m])
+)
+
+## ===== NAMESPACE RESOURCE USAGE =====
+
+# CPU usage by namespace
+sum by (namespace) (
+  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+)
+
+# Memory usage by namespace (GB)
+sum by (namespace) (
+  container_memory_working_set_bytes{container!="", container!="POD"}
+) / 1024 / 1024 / 1024
+
+# Pod count by namespace
+count by (namespace) (kube_pod_info)
+
+# Top 5 namespaces by CPU usage
+topk(5,
+  sum by (namespace) (
+    rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+  )
+)
+
+# Top 5 namespaces by memory usage
+topk(5,
+  sum by (namespace) (
+    container_memory_working_set_bytes{container!="", container!="POD"}
+  )
+)
+
+## ===== DEPLOYMENT HEALTH =====
+
+# Deployments with unavailable replicas
+kube_deployment_status_replicas_unavailable > 0
+
+# Deployment replica mismatch (desired vs current)
+kube_deployment_spec_replicas - kube_deployment_status_replicas_available
+
+# Deployments not fully available
+(
+  kube_deployment_status_replicas_available
+  /
+  kube_deployment_spec_replicas
+) < 1
+
+# Deployment rollout stuck
+kube_deployment_status_observed_generation != kube_deployment_metadata_generation
+
+# Deployments by namespace
+count by (namespace) (kube_deployment_labels)
+
+## ===== STATEFULSET HEALTH =====
+
+# StatefulSets with unavailable replicas
+kube_statefulset_status_replicas - kube_statefulset_status_replicas_ready
+
+# StatefulSets not fully available
+(
+  kube_statefulset_status_replicas_ready
+  /
+  kube_statefulset_replicas
+) < 1
+
+## ===== DAEMONSET HEALTH =====
+
+# DaemonSets with unavailable nodes
+kube_daemonset_status_desired_number_scheduled - kube_daemonset_status_number_ready
+
+# DaemonSet misscheduled
+kube_daemonset_status_number_misscheduled > 0
+
+## ===== NODE HEALTH =====
+
+# Nodes not ready
+kube_node_status_condition{condition="Ready", status="true"} == 0
+
+# Node conditions (MemoryPressure, DiskPressure, PIDPressure)
+kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"} == 1
+
+# Node CPU allocatable vs capacity
+kube_node_status_allocatable{resource="cpu"}
+/
+kube_node_status_capacity{resource="cpu"}
+
+# Node memory allocatable vs capacity
+kube_node_status_allocatable{resource="memory"}
+/
+kube_node_status_capacity{resource="memory"}
+
+# CPU requested vs allocatable per node
+sum by (node) (kube_pod_container_resource_requests{resource="cpu"})
+/
+sum by (node) (kube_node_status_allocatable{resource="cpu"})
+
+# Memory requested vs allocatable per node
+sum by (node) (kube_pod_container_resource_requests{resource="memory"})
+/
+sum by (node) (kube_node_status_allocatable{resource="memory"})
+
+# Pods per node
+count by (node) (kube_pod_info)
+
+## ===== PERSISTENT VOLUMES =====
+
+# PVC not bound
+kube_persistentvolumeclaim_status_phase{phase!="Bound"} == 1
+
+# PV capacity usage (if metrics available)
+kubelet_volume_stats_used_bytes
+/
+kubelet_volume_stats_capacity_bytes
+
+# PVs nearing capacity (>80%)
+(
+  kubelet_volume_stats_used_bytes
+  /
+  kubelet_volume_stats_capacity_bytes
+) > 0.8
+
+# PVC by storage class
+count by (storageclass) (kube_persistentvolumeclaim_info)
+
+## ===== JOBS AND CRONJOBS =====
+
+# Failed jobs in the last hour
+kube_job_status_failed > 0
+
+# Jobs running longer than expected
+time() - kube_job_status_start_time > 3600  # Running for more than 1 hour
+
+# CronJob last successful run
+time() - kube_cronjob_status_last_successful_time
+
+# CronJobs that haven't run successfully in 24 hours
+(time() - kube_cronjob_status_last_successful_time) > 86400
+
+## ===== HPA (Horizontal Pod Autoscaler) =====
+
+# HPA at max replicas
+kube_horizontalpodautoscaler_status_current_replicas
+==
+kube_horizontalpodautoscaler_spec_max_replicas
+
+# HPA utilization vs target
+kube_horizontalpodautoscaler_status_current_replicas
+/
+kube_horizontalpodautoscaler_spec_max_replicas
+
+# HPA unable to scale
+kube_horizontalpodautoscaler_status_condition{condition="ScalingLimited", status="true"} == 1
+
+## ===== RESOURCE QUOTAS =====
+
+# Namespace resource quota usage
+kube_resourcequota{type="used"}
+/
+kube_resourcequota{type="hard"}
+
+# Namespaces approaching quota (>80%)
+(
+  kube_resourcequota{type="used"}
+  /
+  kube_resourcequota{type="hard"}
+) > 0.8
+
+## ===== NETWORK METRICS =====
+
+# Pod network receive rate (MB/s)
+sum by (namespace, pod) (
+  rate(container_network_receive_bytes_total[5m])
+) / 1024 / 1024
+
+# Pod network transmit rate (MB/s)
+sum by (namespace, pod) (
+  rate(container_network_transmit_bytes_total[5m])
+) / 1024 / 1024
+
+# Network errors per pod
+sum by (namespace, pod) (
+  rate(container_network_receive_errors_total[5m])
+  +
+  rate(container_network_transmit_errors_total[5m])
+)
+
+## ===== VECTOR MATCHING / JOINS =====
+
+# Enrich pod metrics with kube_pod_info labels
+sum by (namespace, pod) (
+  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+)
+* on (namespace, pod) group_left (node, created_by_name, created_by_kind)
+  kube_pod_info
+
+# Join container metrics with owner references
+sum by (namespace, pod) (
+  container_memory_working_set_bytes{container!="", container!="POD"}
+)
+* on (namespace, pod) group_left (owner_name, owner_kind)
+  kube_pod_owner
+
+# Get deployment name for pods
+kube_pod_info
+* on (namespace, pod) group_left (deployment)
+  label_replace(
+    kube_pod_owner{owner_kind="ReplicaSet"},
+    "deployment",
+    "$1",
+    "owner_name",
+    "(.+)-[^-]+"
+  )
+
+# CPU usage with node labels
+sum by (node, namespace, pod) (
+  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+)
+* on (node) group_left (label_topology_kubernetes_io_zone)
+  kube_node_labels
+
+## ===== ALERTING PATTERNS =====
+
+# Pod not ready for 5 minutes
+kube_pod_status_ready{condition="false"} == 1
+
+# Container OOM killed
+kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+
+# High pod restart rate
+increase(kube_pod_container_status_restarts_total[1h]) > 5
+
+# Deployment replicas mismatch
+(
+  kube_deployment_spec_replicas
+  -
+  kube_deployment_status_replicas_available
+) > 0
+
+# Node not ready
+kube_node_status_condition{condition="Ready", status="true"} == 0
+
+# PVC pending
+kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+
+# CPU request near limit (>90%)
+(
+  sum by (namespace, pod) (
+    rate(container_cpu_usage_seconds_total{container!=""}[5m])
+  )
+  /
+  sum by (namespace, pod) (
+    kube_pod_container_resource_limits{resource="cpu"}
+  )
+) > 0.9
+
+# Memory usage near limit (>90%)
+(
+  sum by (namespace, pod) (
+    container_memory_working_set_bytes{container!=""}
+  )
+  /
+  sum by (namespace, pod) (
+    kube_pod_container_resource_limits{resource="memory"}
+  )
+) > 0.9
+
+## ===== CAPACITY PLANNING =====
+
+# Cluster-wide CPU utilization
+sum(rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m]))
+/
+sum(kube_node_status_allocatable{resource="cpu"})
+
+# Cluster-wide memory utilization
+sum(container_memory_working_set_bytes{container!="", container!="POD"})
+/
+sum(kube_node_status_allocatable{resource="memory"})
+
+# Pods per node capacity
+count by (node) (kube_pod_info)
+/
+sum by (node) (kube_node_status_allocatable{resource="pods"})
+
+# Predict when nodes will be full (CPU)
+predict_linear(
+  sum(rate(container_cpu_usage_seconds_total{container!=""}[1h]))[6h:1h],
+  24*3600
+)

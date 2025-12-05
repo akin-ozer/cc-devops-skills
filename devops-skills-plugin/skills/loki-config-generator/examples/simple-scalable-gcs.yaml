@@ -1,0 +1,118 @@
+# Loki Simple Scalable Mode with Google Cloud Storage (GCS)
+# Recommended for production deployments on GCP (100GB-1TB/day)
+# Requires: GCS bucket, service account with Storage Admin permissions
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  graceful_shutdown_timeout: 30s
+
+common:
+  path_prefix: /loki
+  storage:
+    gcs:
+      bucket_name: my-loki-logs-bucket
+      # Authentication options (choose one):
+      # 1. Workload Identity (recommended for GKE)
+      # 2. Service account JSON file mounted as volume
+      # service_account: /var/secrets/google/key.json
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  join_members:
+    - loki-memberlist
+
+schema_config:
+  configs:
+    - from: 2025-01-01
+      store: tsdb
+      object_store: gcs
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/index
+    cache_location: /loki/index_cache
+    cache_ttl: 24h
+
+limits_config:
+  # Ingestion limits
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # Stream limits
+  max_streams_per_user: 100000
+  max_global_streams_per_user: 1000000
+
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h
+  max_query_parallelism: 32
+  max_query_series: 500
+
+  # Retention
+  retention_period: 90d
+
+  # Chunks
+  max_chunks_per_query: 2000000
+
+  # Structured metadata (Loki 3.0+)
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+
+  # Volume API
+  volume_enabled: true
+
+  # OTLP Configuration (Loki 3.0+)
+  otlp_config:
+    resource_attributes:
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - service.namespace
+            - deployment.environment
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+ingester:
+  chunk_encoding: snappy
+  chunk_idle_period: 30m
+  chunk_retain_period: 15m
+  max_chunk_age: 2h
+  chunk_target_size: 1572864  # 1.5MB
+
+# Pattern Ingester (Loki 3.0+)
+pattern_ingester:
+  enabled: true
+
+querier:
+  max_concurrent: 4
+  query_timeout: 5m
+
+query_frontend:
+  max_outstanding_per_tenant: 4096
+  compress_responses: true
+  encoding: protobuf  # Recommended for performance
+
+query_range:
+  parallelise_shardable_queries: true
+  cache_results: true

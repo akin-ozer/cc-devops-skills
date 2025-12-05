@@ -1,0 +1,149 @@
+# Docker Build and Push Pipeline Example
+# Demonstrates building and pushing Docker images to registry
+
+stages:
+  - test
+  - build
+  - scan
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+
+# Use Docker-in-Docker service
+default:
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  before_script:
+    - docker info
+
+# Run tests before building
+test_application:
+  image: node:18-alpine
+  stage: test
+  script:
+    - npm ci
+    - npm run test
+  artifacts:
+    reports:
+      junit: junit.xml
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+      - .npm/
+
+# Build Docker image
+build_image:
+  stage: build
+  script:
+    - echo "Building Docker image"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build
+        --build-arg VERSION=$IMAGE_TAG
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        --tag $IMAGE_NAME:$IMAGE_TAG
+        --tag $IMAGE_NAME:latest
+        .
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:latest
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  tags:
+    - docker
+
+# Build image for feature branches (no push to latest)
+build_feature_image:
+  stage: build
+  script:
+    - echo "Building feature branch image"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build
+        --tag $IMAGE_NAME:$CI_COMMIT_REF_SLUG
+        .
+    - docker push $IMAGE_NAME:$CI_COMMIT_REF_SLUG
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
+  tags:
+    - docker
+
+# Scan image for vulnerabilities
+scan_image:
+  image: aquasec/trivy:latest
+  stage: scan
+  script:
+    - echo "Scanning image for vulnerabilities"
+    - trivy image --exit-code 0 --severity LOW,MEDIUM $IMAGE_NAME:$IMAGE_TAG
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME:$IMAGE_TAG
+  needs:
+    - build_image
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  tags:
+    - docker
+
+# Deploy to Kubernetes
+deploy_to_k8s:
+  image: bitnami/kubectl:latest
+  stage: deploy
+  script:
+    - echo "Deploying to Kubernetes"
+    - kubectl config use-context $KUBE_CONTEXT
+    - kubectl set image deployment/$APP_NAME $APP_NAME=$IMAGE_NAME:$IMAGE_TAG -n $NAMESPACE
+    - kubectl rollout status deployment/$APP_NAME -n $NAMESPACE
+  environment:
+    name: production
+    url: https://app.example.com
+    kubernetes:
+      namespace: $NAMESPACE
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+  needs:
+    - build_image
+    - scan_image
+  tags:
+    - kubernetes
+
+# Multi-stage build example with BuildKit
+build_optimized:
+  stage: build
+  variables:
+    DOCKER_BUILDKIT: 1
+  script:
+    - echo "Building with BuildKit"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build
+        --cache-from $IMAGE_NAME:buildcache
+        --build-arg BUILDKIT_INLINE_CACHE=1
+        --tag $IMAGE_NAME:$IMAGE_TAG-optimized
+        --file Dockerfile.optimized
+        .
+    - docker push $IMAGE_NAME:$IMAGE_TAG-optimized
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  tags:
+    - docker
+
+# Docker Compose testing
+test_with_compose:
+  stage: test
+  image: docker/compose:latest
+  services:
+    - docker:24-dind
+  script:
+    - docker compose up -d
+    - docker compose ps
+    - docker compose run --rm test npm run test:integration
+    - docker compose down
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  tags:
+    - docker

@@ -1,0 +1,175 @@
+# Loki Configuration with Thanos Object Storage Client (Loki 3.4+)
+# Simple Scalable deployment using the new Thanos-based storage clients
+# The Thanos client provides consistent storage configuration across Grafana's databases
+# Reference: https://grafana.com/docs/loki/latest/configure/examples/thanos-storage-configs/
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  graceful_shutdown_timeout: 30s
+
+# Thanos Object Storage Client Configuration (Loki 3.4+)
+# Note: use_thanos_objstore is mutually exclusive with legacy storage config
+storage_config:
+  use_thanos_objstore: true
+  object_store:
+    # Storage prefix for all objects (optional)
+    # Note: Cannot contain dashes (-), use underscores instead
+    storage_prefix: "loki_prod"
+    s3:
+      bucket_name: my-loki-bucket
+      endpoint: s3.us-west-2.amazonaws.com
+      region: us-west-2
+      # Authentication options:
+      # 1. IAM roles (recommended for EKS/EC2)
+      native_aws_auth_enabled: true
+      # 2. Or explicit credentials (not recommended for production):
+      # access_key_id: ${AWS_ACCESS_KEY_ID}
+      # secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+
+      # S3-specific settings
+      dualstack_enabled: true      # IPv4/IPv6 support
+      storage_class: STANDARD      # STANDARD, REDUCED_REDUNDANCY, GLACIER, etc.
+      max_retries: 10
+
+      # HTTP client settings
+      http:
+        idle_conn_timeout: 1m30s
+        response_header_timeout: 2m
+        insecure_skip_verify: false
+
+      # Server-side encryption (optional)
+      # sse:
+      #   type: SSE-KMS              # SSE-KMS or SSE-S3
+      #   kms_key_id: my-kms-key
+
+# Ruler storage must be configured separately when using Thanos
+ruler_storage:
+  backend: s3
+  s3:
+    bucket_name: my-loki-ruler-bucket
+    endpoint: s3.us-west-2.amazonaws.com
+    region: us-west-2
+
+common:
+  path_prefix: /loki
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  join_members:
+    - loki-memberlist
+
+schema_config:
+  configs:
+    - from: "2025-01-01"
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+limits_config:
+  # Ingestion limits
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # Stream limits
+  max_streams_per_user: 100000
+  max_global_streams_per_user: 1000000
+
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h
+  max_query_parallelism: 32
+  max_query_series: 500
+
+  # Retention
+  retention_period: 90d
+
+  # Chunks
+  max_chunks_per_query: 2000000
+
+  # Structured metadata (Loki 2.9+)
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+
+  # Volume API
+  volume_enabled: true
+
+  # OTLP Configuration (Loki 3.0+)
+  # IMPORTANT: k8s.pod.name and service.instance.id are NOT index labels (high cardinality)
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: false
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - service.namespace
+            - deployment.environment
+        - action: structured_metadata
+          attributes:
+            - k8s.pod.name
+            - service.instance.id
+    log_attributes:
+      - action: structured_metadata
+        attributes:
+          - trace_id
+          - span_id
+
+  # Time Sharding for out-of-order ingestion (Loki 3.4+)
+  # Enable if you need to ingest logs from the past (backfilling, delayed delivery)
+  shard_streams:
+    time_sharding_enabled: true
+
+# Pattern Ingester (Loki 3.0+)
+pattern_ingester:
+  enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+ingester:
+  chunk_encoding: snappy
+  chunk_idle_period: 30m
+  chunk_retain_period: 15m
+  max_chunk_age: 2h
+  chunk_target_size: 1572864  # 1.5MB
+
+querier:
+  max_concurrent: 4
+  query_timeout: 5m
+
+query_frontend:
+  max_outstanding_per_tenant: 4096
+  compress_responses: true
+  encoding: protobuf
+
+query_range:
+  parallelise_shardable_queries: true
+  cache_results: true
+
+# Key Migration Notes from Legacy Storage:
+# - use_thanos_objstore: true is MUTUALLY EXCLUSIVE with legacy storage config
+# - Legacy config is silently ignored when Thanos is enabled
+# - disable_dualstack → dualstack_enabled (inverted logic)
+# - signature_version removed (always uses V4)
+# - http_config → http (nested block)
+# - Multiple bucket support removed (use single bucket_name)
+# - Storage prefix cannot contain dashes (-) - use underscores
+# - Ruler storage MUST be configured separately under ruler_storage

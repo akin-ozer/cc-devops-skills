@@ -1,0 +1,106 @@
+# [REUSABLE_WORKFLOW_NAME]
+#
+# [WORKFLOW_DESCRIPTION]
+#
+# Inputs:
+#   - [INPUT_NAME]: [INPUT_DESCRIPTION]
+#
+# Secrets:
+#   - [SECRET_NAME]: [SECRET_DESCRIPTION]
+#
+# Outputs:
+#   - [OUTPUT_NAME]: [OUTPUT_DESCRIPTION]
+#
+# Usage:
+#   jobs:
+#     call-workflow:
+#       uses: [OWNER]/[REPO]/.github/workflows/[FILENAME]@[REF]
+#       with:
+#         [INPUT_NAME]: [INPUT_VALUE]
+#       secrets:
+#         [SECRET_NAME]: ${{ secrets.[SECRET_NAME] }}
+
+name: [REUSABLE_WORKFLOW_NAME]
+
+on:
+  workflow_call:
+    inputs:
+      [INPUT_NAME]:
+        description: '[INPUT_DESCRIPTION]'
+        required: [true/false]
+        type: [string/boolean/number/choice/environment]
+        default: '[DEFAULT_VALUE]'  # Optional, only for optional inputs
+
+      # Add more inputs as needed
+      # Example types:
+      # - string: text values
+      # - boolean: true/false
+      # - number: numeric values
+      # - choice: predefined options (requires 'options' field)
+      # - environment: GitHub environment name
+
+    secrets:
+      [SECRET_NAME]:
+        description: '[SECRET_DESCRIPTION]'
+        required: [true/false]
+
+      # Add more secrets as needed
+      # Alternatively, use 'secrets: inherit' to pass all secrets
+      # (use sparingly for security)
+
+    outputs:
+      [OUTPUT_NAME]:
+        description: '[OUTPUT_DESCRIPTION]'
+        value: ${{ jobs.[JOB_ID].outputs.[OUTPUT_KEY] }}
+
+      # Add more outputs as needed
+      # Outputs must be mapped from job outputs
+
+# Set default permissions (security best practice)
+permissions:
+  contents: read
+
+# Environment variables available to all jobs
+env:
+  [ENV_VAR_NAME]: '[ENV_VAR_VALUE]'
+
+jobs:
+  [JOB_ID]:
+    name: [JOB_NAME]
+    runs-on: [ubuntu-latest/windows-latest/macos-latest]
+    timeout-minutes: [TIMEOUT_MINUTES]
+
+    # Job-specific permissions
+    permissions:
+      contents: read
+      [PERMISSION_SCOPE]: [read/write]
+
+    # Define outputs for this job
+    outputs:
+      [OUTPUT_KEY]: ${{ steps.[STEP_ID].outputs.[OUTPUT_NAME] }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 1
+
+      - name: [STEP_NAME]
+        id: [STEP_ID]
+        run: |
+          # Use inputs: ${{ inputs.[INPUT_NAME] }}
+          # Use secrets: ${{ secrets.[SECRET_NAME] }}
+          echo "[OUTPUT_NAME]=[OUTPUT_VALUE]" >> $GITHUB_OUTPUT
+
+      # Add more steps as needed
+
+  # Add more jobs as needed
+  [ANOTHER_JOB_ID]:
+    name: [ANOTHER_JOB_NAME]
+    needs: [JOB_ID]  # Optional: depend on previous job
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Use previous job output
+        run: |
+          echo "Output from previous job: ${{ needs.[JOB_ID].outputs.[OUTPUT_KEY] }}"

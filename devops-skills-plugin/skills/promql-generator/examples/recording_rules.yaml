@@ -1,0 +1,308 @@
+# Prometheus Recording Rules Examples
+#
+# Recording rules pre-compute frequently-used or computationally expensive
+# expressions and save them as new time series. This improves dashboard
+# performance and enables more efficient alerting.
+#
+# Naming convention: level:metric:operations
+# - level: The aggregation level (job, instance, namespace, etc.)
+# - metric: The base metric name
+# - operations: Functions applied (rate5m, ratio, etc.)
+#
+# Save to a .yaml file and reference in prometheus.yml:
+#   rule_files:
+#     - "recording_rules.yaml"
+#
+# References:
+# - https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/
+# - https://prometheus.io/docs/practices/rules/
+
+groups:
+  # ===== HTTP REQUEST METRICS =====
+  - name: http_request_rules
+    interval: 30s
+    rules:
+      # Request rate by job
+      - record: job:http_requests:rate5m
+        expr: sum by (job) (rate(http_requests_total[5m]))
+
+      # Request rate by job and endpoint
+      - record: job_endpoint:http_requests:rate5m
+        expr: sum by (job, endpoint) (rate(http_requests_total[5m]))
+
+      # Request rate by job and status code
+      - record: job_status:http_requests:rate5m
+        expr: sum by (job, status_code) (rate(http_requests_total[5m]))
+
+      # Error rate by job (5xx errors / total)
+      - record: job:http_requests:error_ratio_rate5m
+        expr: |
+          sum by (job) (rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum by (job) (rate(http_requests_total[5m]))
+
+      # Error rate by endpoint
+      - record: job_endpoint:http_requests:error_ratio_rate5m
+        expr: |
+          sum by (job, endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum by (job, endpoint) (rate(http_requests_total[5m]))
+
+      # Success rate (1 - error rate)
+      - record: job:http_requests:success_ratio_rate5m
+        expr: 1 - job:http_requests:error_ratio_rate5m
+
+  # ===== LATENCY METRICS =====
+  - name: http_latency_rules
+    interval: 30s
+    rules:
+      # P50 latency by job
+      - record: job:http_request_duration_seconds:p50
+        expr: |
+          histogram_quantile(0.5,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      # P90 latency by job
+      - record: job:http_request_duration_seconds:p90
+        expr: |
+          histogram_quantile(0.9,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      # P95 latency by job
+      - record: job:http_request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      # P99 latency by job
+      - record: job:http_request_duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      # P95 latency by endpoint
+      - record: job_endpoint:http_request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      # Average latency by job
+      - record: job:http_request_duration_seconds:avg
+        expr: |
+          sum by (job) (rate(http_request_duration_seconds_sum[5m]))
+          /
+          sum by (job) (rate(http_request_duration_seconds_count[5m]))
+
+  # ===== SLO METRICS =====
+  - name: slo_rules
+    interval: 30s
+    rules:
+      # Error ratio for SLO calculations (multiple windows)
+      - record: job:slo_errors_per_request:ratio_rate5m
+        expr: |
+          sum by (job) (rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum by (job) (rate(http_requests_total[5m]))
+
+      - record: job:slo_errors_per_request:ratio_rate30m
+        expr: |
+          sum by (job) (rate(http_requests_total{status_code=~"5.."}[30m]))
+          /
+          sum by (job) (rate(http_requests_total[30m]))
+
+      - record: job:slo_errors_per_request:ratio_rate1h
+        expr: |
+          sum by (job) (rate(http_requests_total{status_code=~"5.."}[1h]))
+          /
+          sum by (job) (rate(http_requests_total[1h]))
+
+      - record: job:slo_errors_per_request:ratio_rate6h
+        expr: |
+          sum by (job) (rate(http_requests_total{status_code=~"5.."}[6h]))
+          /
+          sum by (job) (rate(http_requests_total[6h]))
+
+      # Burn rate calculation (for 99.9% SLO)
+      - record: job:slo_burn_rate:1h
+        expr: job:slo_errors_per_request:ratio_rate1h / 0.001
+
+      - record: job:slo_burn_rate:6h
+        expr: job:slo_errors_per_request:ratio_rate6h / 0.001
+
+      # Availability over time
+      - record: job:slo_availability:ratio_rate1h
+        expr: 1 - job:slo_errors_per_request:ratio_rate1h
+
+  # ===== NODE METRICS (USE Method) =====
+  - name: node_rules
+    interval: 30s
+    rules:
+      # CPU utilization by instance
+      - record: instance:node_cpu:utilization
+        expr: |
+          (
+            1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+          ) * 100
+
+      # Memory utilization by instance
+      - record: instance:node_memory:utilization
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+            /
+            node_memory_MemTotal_bytes
+          ) * 100
+
+      # Disk utilization by instance and mountpoint
+      - record: instance_mountpoint:node_filesystem:utilization
+        expr: |
+          (
+            (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+            /
+            node_filesystem_size_bytes
+          ) * 100
+
+      # Network receive rate by instance (MB/s)
+      - record: instance:node_network_receive:rate5m_mb
+        expr: |
+          sum by (instance) (rate(node_network_receive_bytes_total[5m]))
+          / 1024 / 1024
+
+      # Network transmit rate by instance (MB/s)
+      - record: instance:node_network_transmit:rate5m_mb
+        expr: |
+          sum by (instance) (rate(node_network_transmit_bytes_total[5m]))
+          / 1024 / 1024
+
+      # Disk I/O utilization
+      - record: instance_device:node_disk_io:utilization
+        expr: rate(node_disk_io_time_seconds_total[5m]) * 100
+
+  # ===== KUBERNETES METRICS =====
+  - name: kubernetes_rules
+    interval: 30s
+    rules:
+      # CPU usage by namespace
+      - record: namespace:container_cpu:usage_rate5m
+        expr: |
+          sum by (namespace) (
+            rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+          )
+
+      # Memory usage by namespace (GB)
+      - record: namespace:container_memory:working_set_gb
+        expr: |
+          sum by (namespace) (
+            container_memory_working_set_bytes{container!="", container!="POD"}
+          ) / 1024 / 1024 / 1024
+
+      # Pod count by namespace
+      - record: namespace:kube_pod:count
+        expr: count by (namespace) (kube_pod_info)
+
+      # CPU usage percentage of request by namespace
+      - record: namespace:container_cpu:request_utilization
+        expr: |
+          (
+            sum by (namespace) (
+              rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+            )
+            /
+            sum by (namespace) (
+              kube_pod_container_resource_requests{resource="cpu"}
+            )
+          ) * 100
+
+      # Memory usage percentage of request by namespace
+      - record: namespace:container_memory:request_utilization
+        expr: |
+          (
+            sum by (namespace) (
+              container_memory_working_set_bytes{container!="", container!="POD"}
+            )
+            /
+            sum by (namespace) (
+              kube_pod_container_resource_requests{resource="memory"}
+            )
+          ) * 100
+
+      # CPU usage by pod
+      - record: namespace_pod:container_cpu:usage_rate5m
+        expr: |
+          sum by (namespace, pod) (
+            rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+          )
+
+      # Memory usage by pod (GB)
+      - record: namespace_pod:container_memory:working_set_gb
+        expr: |
+          sum by (namespace, pod) (
+            container_memory_working_set_bytes{container!="", container!="POD"}
+          ) / 1024 / 1024 / 1024
+
+  # ===== CLUSTER AGGREGATE METRICS =====
+  - name: cluster_rules
+    interval: 60s
+    rules:
+      # Cluster-wide CPU utilization
+      - record: cluster:node_cpu:utilization
+        expr: |
+          avg(instance:node_cpu:utilization)
+
+      # Cluster-wide memory utilization
+      - record: cluster:node_memory:utilization
+        expr: |
+          (
+            sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+            /
+            sum(node_memory_MemTotal_bytes)
+          ) * 100
+
+      # Total request rate across all services
+      - record: cluster:http_requests:rate5m
+        expr: sum(job:http_requests:rate5m)
+
+      # Cluster-wide error rate
+      - record: cluster:http_requests:error_ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+
+      # Total pods in cluster
+      - record: cluster:kube_pod:count
+        expr: count(kube_pod_info)
+
+      # Total running pods
+      - record: cluster:kube_pod_running:count
+        expr: count(kube_pod_status_phase{phase="Running"} == 1)
+
+  # ===== NATIVE HISTOGRAM METRICS (Prometheus 3.x+) =====
+  - name: native_histogram_rules
+    interval: 30s
+    rules:
+      # Request count from native histogram
+      - record: job:http_request_duration_seconds:count_rate5m
+        expr: |
+          sum by (job) (
+            histogram_count(rate(http_request_duration_seconds[5m]))
+          )
+
+      # Average from native histogram
+      - record: job:http_request_duration_seconds:avg_rate5m
+        expr: |
+          sum by (job) (histogram_sum(rate(http_request_duration_seconds[5m])))
+          /
+          sum by (job) (histogram_count(rate(http_request_duration_seconds[5m])))
+
+      # P95 from native histogram
+      - record: job:http_request_duration_seconds:p95_native
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job) (rate(http_request_duration_seconds[5m]))
+          )

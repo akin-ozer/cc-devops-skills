@@ -1,0 +1,73 @@
+# Basic CI Pipeline
+# Simple continuous integration pipeline for Node.js application
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    exclude:
+    - docs/**
+    - README.md
+
+pr:
+  branches:
+    include:
+    - main
+
+pool:
+  vmImage: 'ubuntu-22.04'
+
+variables:
+  nodeVersion: '20.x'
+  buildConfiguration: 'Release'
+
+steps:
+- task: NodeTool@0
+  displayName: 'Install Node.js'
+  inputs:
+    versionSpec: $(nodeVersion)
+
+- task: Cache@2
+  displayName: 'Cache npm packages'
+  inputs:
+    key: 'npm | "$(Agent.OS)" | package-lock.json'
+    restoreKeys: |
+      npm | "$(Agent.OS)"
+    path: $(Pipeline.Workspace)/.npm
+
+- script: npm ci --cache $(Pipeline.Workspace)/.npm
+  displayName: 'Install dependencies'
+
+- script: npm run lint
+  displayName: 'Run linter'
+  continueOnError: true
+
+- script: npm run build
+  displayName: 'Build application'
+
+- script: npm test -- --coverage
+  displayName: 'Run tests with coverage'
+
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  displayName: 'Publish test results'
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/test-results.xml'
+    failTaskOnFailedTests: true
+
+- task: PublishCodeCoverageResults@1
+  condition: succeededOrFailed()
+  displayName: 'Publish code coverage'
+  inputs:
+    codeCoverageTool: 'Cobertura'
+    summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage/cobertura-coverage.xml'
+
+- task: PublishPipelineArtifact@1
+  displayName: 'Publish build artifacts'
+  inputs:
+    targetPath: '$(Build.SourcesDirectory)/dist'
+    artifact: 'webapp'
+    publishLocation: 'pipeline'

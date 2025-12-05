@@ -1,0 +1,242 @@
+# [WORKFLOW_NAME]
+#
+# [WORKFLOW_DESCRIPTION]
+#
+# Triggers:
+#   - [TRIGGER_EVENTS]
+#
+# Required secrets:
+#   - [SECRET_NAME]: [SECRET_DESCRIPTION]
+#
+# Required permissions:
+#   - [PERMISSION_SCOPE]: [read/write]
+
+name: [WORKFLOW_NAME]
+
+on:
+  # Trigger on push to specific branches
+  push:
+    branches: [main, develop]
+    paths:
+      - '[PATH_PATTERN]/**'
+      - '!**.md'
+
+  # Trigger on pull requests
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        default: 'dev'
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        type: boolean
+        default: false
+
+  # Scheduled trigger (daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+
+# Set default permissions to read-only (security best practice)
+permissions:
+  contents: read
+
+# Prevent duplicate runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Environment variables available to all jobs
+env:
+  [ENV_VAR_NAME]: '[ENV_VAR_VALUE]'
+
+jobs:
+  # Job 1: Linting and validation
+  lint:
+    name: Lint and Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 1
+
+      - name: [SETUP_STEP_NAME]
+        uses: [SETUP_ACTION]
+        with:
+          [SETUP_INPUT]: [SETUP_VALUE]
+          cache: '[CACHE_TYPE]'
+
+      - name: Install dependencies
+        run: [INSTALL_COMMAND]
+
+      - name: Run linter
+        run: [LINT_COMMAND]
+
+  # Job 2: Testing
+  test:
+    name: Test on [PLATFORM] [VERSION]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      checks: write  # For test reporting
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        [VERSION_KEY]: [[VERSION_1], [VERSION_2], [VERSION_3]]
+        exclude:
+          # Exclude expensive combinations if needed
+          - os: macos-latest
+            [VERSION_KEY]: [VERSION_1]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: [SETUP_STEP_NAME] ${{ matrix.[VERSION_KEY] }}
+        uses: [SETUP_ACTION]
+        with:
+          [VERSION_INPUT]: ${{ matrix.[VERSION_KEY] }}
+          cache: '[CACHE_TYPE]'
+
+      - name: Install dependencies
+        run: [INSTALL_COMMAND]
+
+      - name: Run tests
+        run: [TEST_COMMAND]
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.[VERSION_KEY] }}
+          path: [TEST_RESULTS_PATH]
+          retention-days: 7
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.[VERSION_KEY] == [MAIN_VERSION]
+        uses: codecov/codecov-action@e0b68c6749509c5f83f984dd99a76a1c1a231044 # v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: [COVERAGE_FILE_PATH]
+          fail_ci_if_error: true
+
+  # Job 3: Build
+  build:
+    name: Build Application
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    outputs:
+      build-id: ${{ steps.build.outputs.id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: [SETUP_STEP_NAME]
+        uses: [SETUP_ACTION]
+        with:
+          [SETUP_INPUT]: [SETUP_VALUE]
+          cache: '[CACHE_TYPE]'
+
+      - name: Install dependencies
+        run: [INSTALL_COMMAND]
+
+      - name: Build application
+        id: build
+        run: |
+          [BUILD_COMMAND]
+          echo "id=build-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: build-${{ github.sha }}
+          path: [BUILD_OUTPUT_PATH]
+          retention-days: 7
+          if-no-files-found: error
+
+  # Job 4: Deploy (conditional)
+  deploy:
+    name: Deploy to [ENVIRONMENT]
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Use environment for deployment protection rules
+    environment:
+      name: [ENVIRONMENT_NAME]
+      url: [ENVIRONMENT_URL]
+
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          name: build-${{ github.sha }}
+          path: [BUILD_OUTPUT_PATH]
+
+      - name: Deploy to [ENVIRONMENT]
+        env:
+          [DEPLOY_SECRET]: ${{ secrets.[DEPLOY_SECRET] }}
+        run: |
+          [DEPLOY_COMMAND]
+
+      - name: Verify deployment
+        run: |
+          [VERIFICATION_COMMAND]
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Deployment failed!"
+          # Add notification logic here
+
+  # Job 5: Cleanup (always runs)
+  cleanup:
+    name: Cleanup
+    needs: [deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Cleanup temporary resources
+        run: |
+          echo "Performing cleanup..."
+          # Add cleanup logic here

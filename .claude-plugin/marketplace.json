@@ -1,0 +1,13 @@
+{
+  "name": "akin-ozer",
+  "owner": {
+    "name": "Akin Ozer"
+  },
+  "plugins": [
+    {
+      "name": "devops-skills",
+      "source": "./devops-skills-plugin",
+      "description": "DevOps skills for Claude Code."
+    }
+  ]
+}

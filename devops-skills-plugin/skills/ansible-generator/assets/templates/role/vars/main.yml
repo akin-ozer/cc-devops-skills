@@ -1,0 +1,10 @@
+---
+# Role: [ROLE_NAME]
+# Variables (higher priority - harder to override)
+
+# Internal variables that should not be overridden
+[role_name]_internal_var: value
+
+# Derived variables
+[role_name]_full_config_path: "{{ [role_name]_config_dir }}/config.yml"
+[role_name]_pid_file: "/var/run/{{ [role_name]_service_name }}.pid"

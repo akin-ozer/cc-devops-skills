@@ -1,0 +1,60 @@
+---
+# Playbook: [PLAYBOOK_NAME]
+# Description: [PLAYBOOK_DESCRIPTION]
+# Requirements:
+#   - Ansible [MIN_VERSION]+
+#   - Target hosts: [OS_REQUIREMENTS]
+# Variables:
+#   - [VAR_NAME]: [VAR_DESCRIPTION] (required/optional, default: [DEFAULT_VALUE])
+# Usage:
+#   ansible-playbook -i inventory/[ENV] [PLAYBOOK_FILE] -e "[REQUIRED_VARS]"
+
+- name: [Play description]
+  hosts: [TARGET_HOSTS]
+  become: [yes/no]
+  gather_facts: [yes/no]
+
+  vars:
+    # Define play-level variables
+    [var_name]: [value]
+
+  pre_tasks:
+    - name: Update package cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      tags:
+        - always
+
+    - name: Update package cache (RHEL/CentOS)
+      ansible.builtin.yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      tags:
+        - always
+
+  tasks:
+    - name: [Task description]
+      ansible.builtin.[module]:
+        [parameter]: [value]
+      tags:
+        - [tag_name]
+
+  post_tasks:
+    - name: Verify deployment
+      ansible.builtin.uri:
+        url: "http://localhost:[PORT]/health"
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: 5
+      delay: 10
+      tags:
+        - verify
+
+  handlers:
+    - name: [Handler description]
+      ansible.builtin.service:
+        name: [service_name]
+        state: restarted

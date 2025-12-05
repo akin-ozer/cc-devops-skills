@@ -1,0 +1,51 @@
+# Pipeline with Template Usage
+# Demonstrates reusable templates for common tasks
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-22.04'
+
+variables:
+  - template: variables/common.yml
+  - name: environment
+    value: 'production'
+
+stages:
+  - stage: CI
+    displayName: 'Continuous Integration'
+    jobs:
+      - job: Build
+        displayName: 'Build and Test'
+        steps:
+          - template: templates/install-dependencies.yml
+            parameters:
+              nodeVersion: '20.x'
+
+          - template: templates/build-steps.yml
+            parameters:
+              buildConfiguration: 'Release'
+
+          - template: templates/test-steps.yml
+            parameters:
+              coverageEnabled: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Artifacts'
+            inputs:
+              targetPath: 'dist'
+              artifact: 'build-output'
+
+  - stage: CD
+    displayName: 'Continuous Deployment'
+    dependsOn: CI
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: templates/deploy-job.yml
+        parameters:
+          environment: '$(environment)'
+          azureSubscription: 'Azure-Production'
+          appServiceName: 'myapp-prod'

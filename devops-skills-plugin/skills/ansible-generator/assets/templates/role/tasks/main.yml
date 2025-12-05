@@ -1,0 +1,52 @@
+---
+# Role: [ROLE_NAME]
+# Tasks: Main task list
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+  tags:
+    - always
+
+- name: Ensure [package/service] is installed
+  ansible.builtin.package:
+    name: "{{ [role_name]_package_name }}"
+    state: present
+  tags:
+    - install
+    - packages
+
+- name: Create required directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ [role_name]_user }}"
+    group: "{{ [role_name]_group }}"
+  loop:
+    - "{{ [role_name]_config_dir }}"
+    - "{{ [role_name]_data_dir }}"
+    - "{{ [role_name]_log_dir }}"
+  tags:
+    - configure
+    - directories
+
+- name: Deploy configuration file
+  ansible.builtin.template:
+    src: config.j2
+    dest: "{{ [role_name]_config_dir }}/config.yml"
+    mode: '0644'
+    owner: "{{ [role_name]_user }}"
+    group: "{{ [role_name]_group }}"
+    backup: yes
+    validate: "[validation_command] %s"
+  notify: Restart [service_name]
+  tags:
+    - configure
+
+- name: Ensure service is started and enabled
+  ansible.builtin.service:
+    name: "{{ [role_name]_service_name }}"
+    state: started
+    enabled: yes
+  tags:
+    - service

@@ -1,0 +1,219 @@
+# Good PromQL Query Examples
+# These queries follow best practices and demonstrate proper usage
+
+# ==============================================================================
+# RATE FUNCTIONS ON COUNTERS
+# ==============================================================================
+
+# Good: Calculate per-second request rate
+rate(http_requests_total{job="api-service", status="200"}[5m])
+
+# Good: Calculate 95th percentile latency from histogram
+histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket{job="api"}[5m])))
+
+# Good: Calculate error rate percentage
+(
+  rate(http_requests_total{job="api", status=~"5.."}[5m])
+  /
+  rate(http_requests_total{job="api"}[5m])
+) * 100
+
+# Good: Total increase over time window
+increase(http_requests_total{job="api"}[1h])
+
+
+# ==============================================================================
+# AGGREGATIONS WITH PROPER GROUPING
+# ==============================================================================
+
+# Good: Sum requests by job and path
+sum by (job, path) (rate(http_requests_total[5m]))
+
+# Good: Average memory usage per instance, excluding pod label
+avg without (pod) (node_memory_usage_bytes{job="node-exporter"})
+
+# Good: Count number of instances per job
+count by (job) (up{job="api-service"})
+
+# Good: Top 5 services by request rate
+topk(5, sum by (service) (rate(http_requests_total[5m])))
+
+
+# ==============================================================================
+# GAUGE METRICS
+# ==============================================================================
+
+# Good: Current memory usage (gauge)
+node_memory_usage_bytes{instance="prod-1"}
+
+# Good: Average memory over time window
+avg_over_time(node_memory_usage_bytes{job="node-exporter"}[5m])
+
+# Good: Maximum CPU usage in the last hour
+max_over_time(node_cpu_usage_percent{instance="prod-1"}[1h])
+
+
+# ==============================================================================
+# SPECIFIC LABEL FILTERS
+# ==============================================================================
+
+# Good: Specific job and instance filters
+up{job="prometheus", instance="localhost:9090"}
+
+# Good: Multiple specific label filters
+http_requests_total{
+  job="api-service",
+  environment="production",
+  datacenter="us-east-1"
+}
+
+# Good: Exact status code match
+http_requests_total{status="404", job="api"}
+
+
+# ==============================================================================
+# COMPLEX QUERIES WITH PROPER STRUCTURE
+# ==============================================================================
+
+# Good: Request success rate with proper aggregation
+sum by (job) (rate(http_requests_total{status=~"2.."}[5m]))
+/
+sum by (job) (rate(http_requests_total[5m]))
+
+# Good: Memory usage percentage
+(
+  node_memory_usage_bytes{job="node-exporter"}
+  /
+  node_memory_total_bytes{job="node-exporter"}
+) * 100
+
+# Good: Predict disk fill time (linear regression)
+predict_linear(
+  node_filesystem_avail_bytes{mountpoint="/"}[1h],
+  4 * 3600
+)
+
+# Good: Change rate of metric (second derivative)
+deriv(rate(http_requests_total{job="api"}[5m])[10m:1m])
+
+
+# ==============================================================================
+# PROPER RANGE VECTORS
+# ==============================================================================
+
+# Good: Appropriate rate range (at least 4x scrape interval)
+rate(http_requests_total{job="api"}[2m])
+
+# Good: Short range for irate
+irate(http_requests_total{job="api"}[2m])
+
+# Good: Count resets in counter
+resets(http_requests_total{job="api"}[1h])
+
+
+# ==============================================================================
+# HISTOGRAM CALCULATIONS
+# ==============================================================================
+
+# Good: Calculate average from histogram
+rate(http_request_duration_seconds_sum{job="api"}[5m])
+/
+rate(http_request_duration_seconds_count{job="api"}[5m])
+
+# Good: Multi-quantile calculation
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+and
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+and
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+
+
+# ==============================================================================
+# TIME-BASED QUERIES
+# ==============================================================================
+
+# Good: Compare current vs 1 hour ago
+rate(http_requests_total{job="api"}[5m])
+/
+rate(http_requests_total{job="api"}[5m] offset 1h)
+
+# Good: Query at specific time
+http_requests_total{job="api"} @ 1609459200
+
+# Good: Query at end of range for consistent topk
+topk(5, rate(http_requests_total[1h] @ end()))
+
+
+# ==============================================================================
+# LABEL MANIPULATION
+# ==============================================================================
+
+# Good: Join metrics by common labels
+rate(http_requests_total[5m])
+* on (job, instance) group_left (version)
+service_info
+
+# Good: Replace label values
+label_replace(
+  up{job="node-exporter"},
+  "instance",
+  "$1",
+  "instance",
+  "([^:]+):.*"
+)
+
+
+# ==============================================================================
+# SUBQUERIES (USED APPROPRIATELY)
+# ==============================================================================
+
+# Good: Calculate max rate over reasonable window
+max_over_time(rate(http_requests_total{job="api"}[5m])[30m:1m])
+
+# Good: Detect spikes in rate
+rate(http_requests_total{job="api"}[5m])
+>
+max_over_time(rate(http_requests_total{job="api"}[5m])[1h:1m]) * 2
+
+
+# ==============================================================================
+# BOOLEAN OPERATORS
+# ==============================================================================
+
+# Good: Find services with high error rate AND low request rate
+(
+  rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+)
+and
+(
+  rate(http_requests_total[5m]) < 10
+)
+
+# Good: Alerts - memory usage high but not in maintenance
+(node_memory_usage_percent > 90)
+unless
+(maintenance_mode{job="node-exporter"} == 1)
+
+
+# ==============================================================================
+# MULTI-DIMENSIONAL AGGREGATIONS
+# ==============================================================================
+
+# Good: CPU usage by node and core
+sum by (node, cpu) (rate(node_cpu_seconds_total{mode!="idle"}[5m]))
+
+# Good: Request rate by service, excluding internal calls
+sum by (service) (
+  rate(http_requests_total{source!="internal"}[5m])
+)
+
+
+# ==============================================================================
+# ABSENT CHECKS FOR ALERTING
+# ==============================================================================
+
+# Good: Check if metric is missing
+absent(up{job="critical-service"})
+
+# Good: Check if metric was present but now missing
+absent_over_time(up{job="critical-service"}[5m])

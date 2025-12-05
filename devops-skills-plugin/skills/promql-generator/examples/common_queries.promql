@@ -1,0 +1,227 @@
+# Common PromQL Queries
+
+# This file contains frequently-used PromQL query patterns.
+# Copy and customize these queries for your monitoring needs.
+
+## ===== REQUEST RATE =====
+
+# Basic request rate (requests per second)
+rate(http_requests_total{job="api-server"}[5m])
+
+# Total requests per second across all instances
+sum(rate(http_requests_total{job="api-server"}[5m]))
+
+# Request rate by endpoint
+sum by (endpoint) (rate(http_requests_total{job="api-server"}[5m]))
+
+# Request rate by method and endpoint
+sum by (method, endpoint) (rate(http_requests_total{job="api-server"}[5m]))
+
+# Request rate per minute (instead of per second)
+sum(rate(http_requests_total{job="api-server"}[5m])) * 60
+
+## ===== ERROR RATE =====
+
+# Error ratio (0 to 1)
+sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+/
+sum(rate(http_requests_total{job="api-server"}[5m]))
+
+# Error percentage (0 to 100)
+(
+  sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api-server"}[5m]))
+) * 100
+
+# Error rate by endpoint
+sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+/
+sum by (endpoint) (rate(http_requests_total[5m]))
+
+# 4xx client errors
+sum(rate(http_requests_total{status_code=~"4.."}[5m]))
+/
+sum(rate(http_requests_total[5m]))
+
+## ===== LATENCY / RESPONSE TIME =====
+
+# 95th percentile latency
+histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# Multiple percentiles for comparison
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))  # P50 (median)
+histogram_quantile(0.90, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))  # P90
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))  # P95
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))  # P99
+
+# Average latency
+sum(rate(http_request_duration_seconds_sum[5m]))
+/
+sum(rate(http_request_duration_seconds_count[5m]))
+
+# Latency by endpoint
+histogram_quantile(0.95,
+  sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+## ===== CPU USAGE =====
+
+# CPU usage percentage (excluding idle)
+(
+  1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
+) * 100
+
+# CPU usage by instance
+100 - (
+  avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100
+)
+
+# CPU usage by mode
+sum by (mode) (rate(node_cpu_seconds_total[5m])) * 100
+
+## ===== MEMORY USAGE =====
+
+# Memory usage percentage
+(
+  (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  /
+  node_memory_MemTotal_bytes
+) * 100
+
+# Available memory in GB
+node_memory_MemAvailable_bytes / 1024 / 1024 / 1024
+
+# Memory usage by instance
+(
+  (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  /
+  node_memory_MemTotal_bytes
+) * 100
+
+## ===== DISK USAGE =====
+
+# Disk usage percentage
+(
+  (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+  /
+  node_filesystem_size_bytes
+) * 100
+
+# Available disk space in GB
+node_filesystem_avail_bytes / 1024 / 1024 / 1024
+
+# Disk I/O rate
+rate(node_disk_reads_completed_total[5m]) + rate(node_disk_writes_completed_total[5m])
+
+## ===== NETWORK =====
+
+# Network receive rate in MB/s
+rate(node_network_receive_bytes_total[5m]) / 1024 / 1024
+
+# Network transmit rate in MB/s
+rate(node_network_transmit_bytes_total[5m]) / 1024 / 1024
+
+# Total network throughput in MB/s
+(
+  rate(node_network_receive_bytes_total[5m])
+  +
+  rate(node_network_transmit_bytes_total[5m])
+) / 1024 / 1024
+
+## ===== AVAILABILITY =====
+
+# Percentage of instances up
+(count(up{job="api-server"} == 1) / count(up{job="api-server"})) * 100
+
+# Number of instances up
+count(up{job="api-server"} == 1)
+
+# Number of instances down
+count(up{job="api-server"} == 0)
+
+# Success rate (2xx + 3xx responses)
+sum(rate(http_requests_total{status_code=~"[23].."}[5m]))
+/
+sum(rate(http_requests_total[5m]))
+
+## ===== QUEUE METRICS =====
+
+# Current queue size
+queue_size{job="worker"}
+
+# Average queue size
+avg_over_time(queue_size{job="worker"}[10m])
+
+# Maximum queue depth
+max_over_time(queue_size{job="worker"}[1h])
+
+# Queue processing rate
+rate(queue_processed_total{job="worker"}[5m])
+
+## ===== TOP N QUERIES =====
+
+# Top 10 endpoints by request count
+topk(10, sum by (endpoint) (rate(http_requests_total[5m])))
+
+# Top 5 instances by CPU usage
+topk(5, 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100))
+
+# Top 5 instances by memory usage
+topk(5,
+  (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  /
+  node_memory_MemTotal_bytes
+  * 100
+)
+
+## ===== RATE OF CHANGE =====
+
+# Rate of change of queue length
+deriv(queue_length[10m])
+
+# Predict disk usage in 4 hours
+predict_linear(node_filesystem_avail_bytes[1h], 4*3600)
+
+# Compare current vs 1 hour ago
+rate(http_requests_total[5m]) - rate(http_requests_total[5m] offset 1h)
+
+# Compare current vs 1 week ago
+rate(http_requests_total[5m]) / rate(http_requests_total[5m] offset 1w)
+
+## ===== CACHE METRICS =====
+
+# Cache hit ratio
+rate(cache_hits_total[5m])
+/
+(rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+
+# Cache hit percentage
+(
+  rate(cache_hits_total[5m])
+  /
+  (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+) * 100
+
+## ===== RATIOS =====
+
+# Success/failure ratio
+rate(success_total[5m]) / rate(failure_total[5m])
+
+# Requests per CPU core
+sum(rate(http_requests_total[5m]))
+/
+count(node_cpu_seconds_total{mode="idle"})
+
+## ===== TIME-BASED =====
+
+# Only during business hours (9 AM - 5 PM)
+http_requests_total and hour() >= 9 and hour() < 17
+
+# Only on weekdays
+http_requests_total and day_of_week() > 0 and day_of_week() < 6
+
+# Weekend traffic
+http_requests_total and (day_of_week() == 0 or day_of_week() == 6)

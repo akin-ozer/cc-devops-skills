@@ -1,0 +1,102 @@
+---
+# Ansible Requirements File
+# Install with: ansible-galaxy install -r requirements.yml
+# For more info: https://docs.ansible.com/ansible/latest/galaxy/user_guide.html
+
+# Collections
+collections:
+  # Core collections
+  - name: ansible.posix
+    version: ">=1.5.0"
+    source: https://galaxy.ansible.com
+
+  - name: community.general
+    version: ">=8.0.0"
+    source: https://galaxy.ansible.com
+
+  # Example: Cloud providers
+  # - name: amazon.aws
+  #   version: ">=7.0.0"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: azure.azcollection
+  #   version: ">=2.0.0"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: google.cloud
+  #   version: ">=1.2.0"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Docker/Kubernetes
+  # - name: community.docker
+  #   version: ">=3.0.0"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: kubernetes.core
+  #   version: ">=3.0.0"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Monitoring/Observability
+  # - name: community.grafana
+  #   version: ">=1.6.0"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Security/Secrets Management
+  # - name: community.hashi_vault
+  #   version: ">=6.0.0"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Database
+  # - name: community.postgresql
+  #   version: ">=3.0.0"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: community.mysql
+  #   version: ">=3.0.0"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Windows
+  # - name: ansible.windows
+  #   version: ">=2.0.0"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: community.windows
+  #   version: ">=2.0.0"
+  #   source: https://galaxy.ansible.com
+
+# Roles
+roles:
+  # Example: Install role from Ansible Galaxy
+  # - name: geerlingguy.nginx
+  #   version: "3.1.4"
+  #   source: https://galaxy.ansible.com
+  #
+  # - name: geerlingguy.postgresql
+  #   version: "3.4.6"
+  #   source: https://galaxy.ansible.com
+
+  # Example: Install role from GitHub
+  # - name: my-custom-role
+  #   src: https://github.com/username/ansible-role-custom.git
+  #   version: main
+  #   scm: git
+
+  # Example: Install role from private Git repository
+  # - name: internal-role
+  #   src: git@gitlab.company.com:ansible/internal-role.git
+  #   version: v1.0.0
+  #   scm: git
+
+  # Example: Install role to specific path
+  # - name: my-role
+  #   src: https://github.com/username/ansible-role-myapp.git
+  #   version: v2.1.0
+  #   scm: git
+
+# Notes:
+# - Use semantic versioning for better dependency management
+# - Pin specific versions for production environments
+# - Use version ranges (>=, <=, etc.) for development
+# - Keep this file in version control
+# - Run ansible-galaxy collection install -r requirements.yml --force to update
+# - Run ansible-galaxy role install -r requirements.yml --force to update roles

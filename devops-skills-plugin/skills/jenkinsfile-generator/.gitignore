@@ -1,0 +1,38 @@
+# Rendered output
+rendered/
+output/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Test artifacts
+test-output/
+generated/
+
+# Python virtual environments
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+.eggs/

@@ -1,0 +1,281 @@
+# Basic GitLab CI/CD Pipeline Template
+# A simple three-stage pipeline for building, testing, and deploying applications
+#
+# Usage: Copy this template and customize for your needs
+# - Replace [PLACEHOLDERS] with actual values
+# - Remove sections you don't need
+# - Adjust image versions, commands, and paths
+# - Validate with gitlab-ci-validator skill
+
+stages:
+  - build
+  - test
+  - deploy
+
+# Global variables (customize for your project)
+variables:
+  # Language/framework version
+  NODE_VERSION: "20"              # [PLACEHOLDER: Set your Node.js version]
+
+  # Build configuration
+  BUILD_DIR: "dist"               # [PLACEHOLDER: Set your build output directory]
+
+  # Cache configuration
+  CACHE_VERSION: "v1"             # Bump this to invalidate cache
+
+# Default settings for all jobs
+default:
+  # Default Docker image (customize based on your tech stack)
+  image: node:${NODE_VERSION}-alpine   # [PLACEHOLDER: Set your base image]
+
+  # Cache configuration
+  cache:
+    key: ${CACHE_VERSION}-${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/              # [PLACEHOLDER: Set your dependency directory]
+    policy: pull                   # Jobs only pull cache by default
+
+  # Common setup commands
+  before_script:
+    - echo "Starting job ${CI_JOB_NAME} in stage ${CI_JOB_STAGE}"
+    - echo "Commit: ${CI_COMMIT_SHORT_SHA} on branch ${CI_COMMIT_BRANCH}"
+
+  # Runner tags (customize for your runners)
+  tags:
+    - docker                        # [PLACEHOLDER: Set your runner tags]
+
+  # Test jobs can be interrupted by newer pipelines
+  interruptible: true
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+
+build-application:
+  stage: build
+
+  # Override cache policy to push updated cache
+  cache:
+    key: ${CACHE_VERSION}-${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+    policy: pull-push               # Pull existing, push updates
+
+  script:
+    # Install dependencies
+    - npm ci                        # [PLACEHOLDER: Replace with your install command]
+
+    # Run build
+    - npm run build                 # [PLACEHOLDER: Replace with your build command]
+
+    # Verify build output
+    - ls -la ${BUILD_DIR}
+
+  # Save build artifacts
+  artifacts:
+    paths:
+      - ${BUILD_DIR}/               # [PLACEHOLDER: Set your build output path]
+    exclude:
+      - "**/*.map"                  # [PLACEHOLDER: Exclude unnecessary files]
+    expire_in: 1 hour               # Short expiration for intermediate artifacts
+    when: on_success
+
+  # Run on changes to source files or dependencies
+  rules:
+    - changes:
+        - src/**/*                  # [PLACEHOLDER: Set your source directory]
+        - package*.json             # [PLACEHOLDER: Set your dependency files]
+      when: always
+    - when: on_success
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+
+test-unit:
+  stage: test
+
+  # Start immediately after build completes (DAG optimization)
+  needs: [build-application]
+
+  script:
+    # Install dependencies (from cache)
+    - npm ci
+
+    # Run unit tests
+    - npm run test:unit             # [PLACEHOLDER: Replace with your test command]
+
+  # Code coverage reporting
+  coverage: '/Coverage: \d+\.\d+%/'  # [PLACEHOLDER: Adjust regex for your coverage format]
+
+  # Test reports
+  artifacts:
+    when: always                    # Save reports even on failure
+    reports:
+      junit: junit.xml              # [PLACEHOLDER: Set your test report path]
+      coverage_report:
+        coverage_format: cobertura  # [PLACEHOLDER: Set your coverage format]
+        path: coverage/cobertura-coverage.xml
+    paths:
+      - coverage/
+    expire_in: 1 week
+
+test-lint:
+  stage: test
+
+  # Can run immediately without waiting for build
+  needs: []
+
+  script:
+    - npm ci
+    - npm run lint                  # [PLACEHOLDER: Replace with your lint command]
+
+  # Allow linting to fail without blocking pipeline
+  allow_failure: true
+
+test-integration:
+  stage: test
+
+  # Depends on build artifacts
+  needs: [build-application]
+
+  # Service dependencies (customize for your needs)
+  services:
+    - postgres:15-alpine            # [PLACEHOLDER: Add/remove services as needed]
+    - redis:7-alpine
+
+  # Environment variables for services
+  variables:
+    POSTGRES_DB: testdb
+    POSTGRES_USER: testuser
+    POSTGRES_PASSWORD: testpass
+    DATABASE_URL: postgres://testuser:testpass@postgres:5432/testdb
+    REDIS_URL: redis://redis:6379
+
+  script:
+    - npm ci
+    - npm run test:integration      # [PLACEHOLDER: Replace with your integration test command]
+
+  # Retry on flaky network/service issues
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - api_failure
+
+# ============================================================================
+# DEPLOY STAGE
+# ============================================================================
+
+deploy-staging:
+  stage: deploy
+
+  # Override interruptible for deployments
+  interruptible: false
+
+  # Depends on successful tests
+  needs:
+    - job: build-application
+      artifacts: true
+    - job: test-unit
+      artifacts: false
+
+  # Environment configuration
+  environment:
+    name: staging
+    url: https://staging.example.com    # [PLACEHOLDER: Set your staging URL]
+    on_stop: stop-staging
+    auto_stop_in: 1 week
+
+  # Prevent concurrent deployments to same environment
+  resource_group: staging
+
+  script:
+    # [PLACEHOLDER: Add your deployment commands]
+    - echo "Deploying to staging environment"
+    - echo "Using build from ${BUILD_DIR}"
+    # Example: rsync, scp, kubectl, helm, etc.
+    # - rsync -avz ${BUILD_DIR}/ $STAGING_SERVER:/var/www/html/
+    # - kubectl apply -f k8s/staging/
+    # - helm upgrade --install myapp ./chart --namespace staging
+
+  # Only run on main/develop branch
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+      when: on_success
+    - when: never
+
+stop-staging:
+  stage: deploy
+
+  environment:
+    name: staging
+    action: stop
+
+  script:
+    # [PLACEHOLDER: Add cleanup commands]
+    - echo "Stopping staging environment"
+
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - when: never
+
+deploy-production:
+  stage: deploy
+
+  # Cannot be interrupted
+  interruptible: false
+
+  # Depends on successful tests
+  needs:
+    - job: build-application
+      artifacts: true
+    - job: test-unit
+      artifacts: false
+    - job: test-integration
+      artifacts: false
+
+  # Production environment
+  environment:
+    name: production
+    url: https://example.com            # [PLACEHOLDER: Set your production URL]
+
+  # Prevent concurrent production deployments
+  resource_group: production
+
+  script:
+    # [PLACEHOLDER: Add your production deployment commands]
+    - echo "Deploying to production environment"
+    - echo "Using build from ${BUILD_DIR}"
+    # Example deployment commands
+    # - rsync -avz ${BUILD_DIR}/ $PROD_SERVER:/var/www/html/
+    # - kubectl apply -f k8s/production/
+    # - helm upgrade --install myapp ./chart --namespace production
+
+  # Requires manual approval for production
+  when: manual
+
+  # Only run on main branch or version tags
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+    - when: never
+
+# ============================================================================
+# CLEANUP (Optional)
+# ============================================================================
+
+cleanup:
+  stage: .post
+
+  script:
+    - echo "Running cleanup tasks"
+    # [PLACEHOLDER: Add cleanup commands if needed]
+
+  when: always
+  allow_failure: true

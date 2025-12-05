@@ -1,0 +1,78 @@
+# Reusable Deployment Template
+# Template for deploying applications to Azure
+
+parameters:
+- name: environment
+  type: string
+
+- name: azureSubscription
+  type: string
+
+- name: appName
+  type: string
+
+- name: appType
+  type: string
+  default: 'webAppLinux'
+
+- name: artifactName
+  type: string
+  default: 'webapp'
+
+- name: approvalRequired
+  type: boolean
+  default: true
+
+stages:
+- stage: Deploy_${{ parameters.environment }}
+  displayName: 'Deploy to ${{ parameters.environment }}'
+  jobs:
+  - deployment: Deploy${{ parameters.environment }}
+    displayName: 'Deploy to ${{ parameters.environment }} Environment'
+    pool:
+      vmImage: 'ubuntu-22.04'
+    environment: ${{ parameters.environment }}
+    strategy:
+      runOnce:
+        preDeploy:
+          steps:
+          - script: echo "Pre-deployment validation for ${{ parameters.environment }}"
+            displayName: 'Pre-Deployment Checks'
+
+        deploy:
+          steps:
+          - download: current
+            artifact: ${{ parameters.artifactName }}
+            displayName: 'Download artifacts'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              appType: ${{ parameters.appType }}
+              appName: ${{ parameters.appName }}
+              package: '$(Pipeline.Workspace)/${{ parameters.artifactName }}/**/*.zip'
+
+        postDeploy:
+          steps:
+          - script: |
+              echo "Post-deployment validation"
+              echo "Application deployed to: https://${{ parameters.appName }}.azurewebsites.net"
+            displayName: 'Post-Deployment Validation'
+
+          - script: |
+              # Health check
+              curl -f https://${{ parameters.appName }}.azurewebsites.net/health || exit 1
+            displayName: 'Health Check'
+            continueOnError: true
+
+        on:
+          failure:
+            steps:
+            - script: echo "Deployment to ${{ parameters.environment }} failed"
+              displayName: 'Failure Notification'
+
+          success:
+            steps:
+            - script: echo "Deployment to ${{ parameters.environment }} succeeded"
+              displayName: 'Success Notification'

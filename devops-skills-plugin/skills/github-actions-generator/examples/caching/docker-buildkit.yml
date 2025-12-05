@@ -1,0 +1,256 @@
+# Docker BuildKit Cache Example
+# Demonstrates: GitHub Actions cache backend, inline vs registry cache, multi-stage build optimization
+
+name: Docker Build with BuildKit Cache
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Example 1: Basic BuildKit with GitHub Actions Cache
+  build-with-gha-cache:
+    name: Build with GitHub Actions Cache Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+
+      # GitHub Actions Cache Backend
+      # - Stores cache in GitHub Actions cache (10 GB free per repo)
+      # - mode=max caches all build layers (not just final image)
+      # - Fastest option for most use cases
+      - name: Build and push (GHA cache)
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.sha }}
+
+  # Example 2: Multi-Stage Build with Optimized Caching
+  build-multistage-optimized:
+    name: Multi-Stage Build with Cache Optimization
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Multi-stage builds benefit most from mode=max
+      # All intermediate stages are cached
+      - name: Build multi-stage with optimized cache
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          file: ./Dockerfile.multistage
+          target: production  # Only build production stage
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:multistage-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+
+  # Example 3: Registry Cache (for cross-runner sharing)
+  build-with-registry-cache:
+    name: Build with Registry Cache Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Registry Cache Backend
+      # - Stores cache in container registry
+      # - Useful for sharing cache across different CI systems
+      # - Slower than GHA cache but more portable
+      # - Good for self-hosted runners
+      - name: Build and push (registry cache)
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:registry-cache-${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  # Example 4: Inline Cache (embedded in image)
+  build-with-inline-cache:
+    name: Build with Inline Cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Inline Cache
+      # - Embeds cache metadata in the image itself
+      # - No separate cache artifact
+      # - Only caches layers in final image (not intermediate stages)
+      # - Useful when you can't use separate cache backends
+      - name: Build and push (inline cache)
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:inline-cache-${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+
+  # Example 5: Comparison and Best Practices
+  comparison-summary:
+    name: Cache Strategy Comparison
+    runs-on: ubuntu-latest
+    needs: [build-with-gha-cache, build-multistage-optimized, build-with-registry-cache, build-with-inline-cache]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Generate cache strategy comparison
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## Docker BuildKit Cache Strategy Comparison
+
+          | Strategy | Speed | Cache Size | Use Case | Limitations |
+          |----------|-------|------------|----------|-------------|
+          | **GHA Cache** (`type=gha`) | ⚡ Fastest | Up to 10 GB free | Most workflows, GitHub-hosted runners | Limited to 10 GB per repo |
+          | **Registry Cache** (`type=registry`) | 🐌 Slower | Unlimited | Self-hosted runners, cross-CI sharing | Requires registry storage |
+          | **Inline Cache** (`type=inline`) | 🐌 Slowest | Embedded | When separate cache unavailable | Only caches final image layers |
+
+          ### Recommendations
+
+          ✅ **Use GHA Cache (`type=gha,mode=max`) for:**
+          - Standard CI/CD workflows
+          - Multi-stage builds (caches all stages)
+          - GitHub-hosted runners
+          - Fast rebuild times
+
+          ✅ **Use Registry Cache (`type=registry`) for:**
+          - Self-hosted runners
+          - Sharing cache across different CI systems
+          - When you need >10 GB cache
+          - Cross-repository builds
+
+          ⚠️ **Use Inline Cache (`type=inline`) only when:**
+          - You can't use GHA or registry cache
+          - Cache size is very small
+          - You only need final image layers cached
+
+          ### Cache Modes
+
+          - `mode=min` - Only caches layers from final image (default)
+          - `mode=max` - Caches all layers including intermediate stages (recommended)
+
+          ### Multi-Stage Build Optimization
+
+          For multi-stage Dockerfiles:
+          ```dockerfile
+          # Base stage - cached separately
+          FROM node:24-alpine AS base
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci
+
+          # Build stage - cached separately
+          FROM base AS build
+          COPY . .
+          RUN npm run build
+
+          # Production stage - final image
+          FROM base AS production
+          COPY --from=build /app/dist ./dist
+          CMD ["node", "dist/index.js"]
+          ```
+
+          With `mode=max`, all stages (base, build, production) are cached independently,
+          maximizing cache reuse on subsequent builds.
+
+          ### Cache Key Strategy
+
+          BuildKit automatically generates cache keys based on:
+          - Dockerfile content
+          - Build context files referenced in COPY/ADD
+          - Build arguments
+          - Target platform
+
+          No manual cache key management needed! 🎉
+          EOF
+
+          echo "## Build Status Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- GHA Cache: ${{ needs.build-with-gha-cache.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Multi-stage: ${{ needs.build-multistage-optimized.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Registry Cache: ${{ needs.build-with-registry-cache.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Inline Cache: ${{ needs.build-with-inline-cache.result }}" >> $GITHUB_STEP_SUMMARY

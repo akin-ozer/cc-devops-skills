@@ -1,0 +1,9 @@
+# Python virtual environment (if used)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Test files
+test-*.yml
+temp-*.yml

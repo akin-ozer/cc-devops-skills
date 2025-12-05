@@ -1,0 +1,328 @@
+# Bad PromQL Query Examples (Anti-Patterns)
+# These queries demonstrate common mistakes and anti-patterns
+# Each bad example is followed by a corrected version
+
+# ==============================================================================
+# HIGH CARDINALITY - MISSING LABEL FILTERS
+# ==============================================================================
+
+# BAD: No label filters - matches ALL time series
+http_requests_total
+
+# GOOD: Specific label filters
+http_requests_total{job="api-service", instance="prod-1"}
+
+# ---
+
+# BAD: Empty label matcher
+http_requests_total{}
+
+# GOOD: Add meaningful filters
+http_requests_total{job="api", environment="production"}
+
+
+# ==============================================================================
+# REGEX OVERUSE
+# ==============================================================================
+
+# BAD: Using regex for exact match
+http_requests_total{status=~"200"}
+
+# GOOD: Use exact match operator
+http_requests_total{status="200"}
+
+# ---
+
+# BAD: Overly broad regex
+http_requests_total{status=~"2.."}
+
+# GOOD: Be more specific or use exact matches
+http_requests_total{status=~"2[0-9]{2}"}
+# OR even better:
+http_requests_total{status=~"200|201|204"}
+
+
+# ==============================================================================
+# MISSING RATE ON COUNTERS
+# ==============================================================================
+
+# BAD: Using counter without rate/increase
+http_requests_total{job="api"}
+
+# GOOD: Apply rate to get per-second rate
+rate(http_requests_total{job="api"}[5m])
+
+# ---
+
+# BAD: Summing counter values directly
+sum(http_requests_total)
+
+# GOOD: Sum the rates
+sum(rate(http_requests_total[5m]))
+
+
+# ==============================================================================
+# RATE ON GAUGES
+# ==============================================================================
+
+# BAD: Using rate on gauge metric
+rate(node_memory_usage_bytes[5m])
+
+# GOOD: Use gauge directly or with avg_over_time
+node_memory_usage_bytes
+# OR:
+avg_over_time(node_memory_usage_bytes[5m])
+
+# ---
+
+# BAD: irate on gauge
+irate(cpu_temperature_celsius[5m])
+
+# GOOD: Use gauge value or calculate delta
+cpu_temperature_celsius
+# OR:
+delta(cpu_temperature_celsius[5m])
+
+
+# ==============================================================================
+# AVERAGING QUANTILES
+# ==============================================================================
+
+# BAD: Averaging pre-calculated quantiles (mathematically invalid!)
+avg(http_request_duration_seconds{quantile="0.95"})
+
+# GOOD: Calculate quantile from histogram buckets
+histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+# ---
+
+# BAD: Summing quantiles
+sum(response_time_seconds{quantile="0.99"})
+
+# GOOD: Calculate from histogram
+histogram_quantile(0.99,
+  sum by (job, le) (rate(response_time_seconds_bucket[5m]))
+)
+
+
+# ==============================================================================
+# IMPROPER IRATE USAGE
+# ==============================================================================
+
+# BAD: irate with long time range (only uses last 2 samples!)
+irate(http_requests_total[1h])
+
+# GOOD: Use rate for long ranges
+rate(http_requests_total[1h])
+# OR: Use shorter range with irate
+irate(http_requests_total[2m])
+
+
+# ==============================================================================
+# RATE WITH TOO SHORT RANGE
+# ==============================================================================
+
+# BAD: Rate range too short (less than 4x scrape interval)
+rate(http_requests_total[30s])
+
+# GOOD: Use at least 2-4 minutes for typical 15s scrape interval
+rate(http_requests_total[2m])
+
+
+# ==============================================================================
+# MISSING RANGE VECTOR
+# ==============================================================================
+
+# BAD: rate without range vector
+rate(http_requests_total)
+
+# GOOD: Include time range
+rate(http_requests_total[5m])
+
+# ---
+
+# BAD: increase without range
+increase(http_requests_total{job="api"})
+
+# GOOD: Add range vector
+increase(http_requests_total{job="api"}[1h])
+
+
+# ==============================================================================
+# EXCESSIVE SUBQUERY RANGES
+# ==============================================================================
+
+# BAD: Subquery over 95 days (processes millions of samples!)
+rate(http_requests_total[5m])[95d:1m]
+
+# GOOD: Use recording rules or limit range
+# Create recording rule:
+# - record: job:http_requests:rate5m
+#   expr: rate(http_requests_total[5m])
+# Then query:
+job:http_requests:rate5m[7d:1m]
+
+
+# ==============================================================================
+# UNBOUNDED AGGREGATIONS
+# ==============================================================================
+
+# BAD: Aggregation without by/without clause
+sum(rate(http_requests_total[5m]))
+
+# GOOD: Specify grouping labels
+sum by (job, instance) (rate(http_requests_total[5m]))
+
+# ---
+
+# BAD: Unclear aggregation
+avg(node_memory_usage_bytes)
+
+# GOOD: Be explicit about grouping
+avg by (instance) (node_memory_usage_bytes)
+
+
+# ==============================================================================
+# HISTOGRAM MISTAKES
+# ==============================================================================
+
+# BAD: histogram_quantile without rate
+histogram_quantile(0.95, sum by (le) (http_request_duration_seconds_bucket))
+
+# GOOD: Use rate on buckets
+histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+# ---
+
+# BAD: histogram_quantile without 'le' label in grouping
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds_bucket[5m])))
+
+# GOOD: Include 'le' in by clause
+histogram_quantile(0.95,
+  sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+
+# ==============================================================================
+# OFFSET MISPLACEMENT
+# ==============================================================================
+
+# BAD: offset between metric name and range vector (invalid syntax)
+http_requests_total offset 1h [5m]
+
+# GOOD: offset after range vector selector
+http_requests_total[5m] offset 1h
+
+# GOOD: offset with instant vector
+http_requests_total offset 1h
+
+# GOOD: offset inside rate() function
+rate(http_requests_total[5m] offset 1h)
+
+
+# ==============================================================================
+# INEFFICIENT LABEL MATCHING
+# ==============================================================================
+
+# BAD: Multiple OR conditions for same label
+http_requests_total{job="api"} or http_requests_total{job="web"} or http_requests_total{job="worker"}
+
+# GOOD: Use regex with alternatives
+http_requests_total{job=~"api|web|worker"}
+
+# ---
+
+# BAD: Negating with multiple !=
+http_requests_total{status!="200", status!="201", status!="204"}
+
+# GOOD: Use negative regex
+http_requests_total{status!~"200|201|204"}
+
+
+# ==============================================================================
+# COMPLEX QUERIES WITHOUT RECORDING RULES
+# ==============================================================================
+
+# BAD: Complex query repeated many times in dashboards/alerts
+sum by (job, instance) (
+  rate(http_requests_total{status=~"5.."}[5m])
+) /
+sum by (job, instance) (
+  rate(http_requests_total[5m])
+)
+
+# GOOD: Create recording rule (in prometheus config):
+# - record: job_instance:http_requests:error_rate5m
+#   expr: |
+#     sum by (job, instance) (
+#       rate(http_requests_total{status=~"5.."}[5m])
+#     ) /
+#     sum by (job, instance) (
+#       rate(http_requests_total[5m])
+#     )
+# Then use:
+job_instance:http_requests:error_rate5m
+
+
+# ==============================================================================
+# INCORRECT DIVISION
+# ==============================================================================
+
+# BAD: Division without matching labels
+rate(http_requests_total{status="500"}[5m])
+/
+rate(http_requests_total[5m])
+
+# GOOD: Ensure labels match in division
+rate(http_requests_total{job="api", status="500"}[5m])
+/
+rate(http_requests_total{job="api"}[5m])
+
+
+# ==============================================================================
+# MISSING GROUP_LEFT/GROUP_RIGHT
+# ==============================================================================
+
+# BAD: One-to-many join without group_left
+rate(http_requests_total[5m])
+* on (job, instance)
+service_info
+
+# GOOD: Use group_left to include labels from right side
+rate(http_requests_total[5m])
+* on (job, instance) group_left (version, commit)
+service_info
+
+
+# ==============================================================================
+# IMPLICIT AGGREGATION ISSUES
+# ==============================================================================
+
+# BAD: Comparing vectors with different label sets
+http_requests_total{job="api", instance="host1"} > 1000
+
+# GOOD: Aggregate first or match labels explicitly
+sum by (job) (http_requests_total{job="api"}) > 1000
+
+
+# ==============================================================================
+# REDUNDANT FUNCTIONS
+# ==============================================================================
+
+# BAD: Nested unnecessary functions
+avg(avg_over_time(node_cpu_percent[5m]))
+
+# GOOD: Single aggregation is enough
+avg_over_time(node_cpu_percent[5m])
+
+# ---
+
+# BAD: rate of rate (doesn't make sense)
+rate(rate(http_requests_total[5m])[10m])
+
+# GOOD: Just use rate once
+rate(http_requests_total[5m])

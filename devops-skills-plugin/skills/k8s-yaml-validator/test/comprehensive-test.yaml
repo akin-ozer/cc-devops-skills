@@ -1,0 +1,59 @@
+# Test file for k8s-yaml-validator skill
+# Contains intentional errors to test all validation stages
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+   labels:
+    app: web-app
+    version: v1.0.0
+spec:
+  replicas: "3"
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+      - name: web
+        image: nginx:latest
+        ports:
+        - containerPort: "80"
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 250m
+          limits:
+            memory: 128Mi
+            cpu: 500m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-svc
+spec:
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: web-app-tls
+  namespace: default
+spec:
+  secretName: web-app-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - web-app.example.com
+  - www.web-app.example.com

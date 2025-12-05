@@ -1,0 +1,324 @@
+# Go Application CI/CD Pipeline
+# Complete pipeline for building, testing, and deploying a Go microservice
+# Includes: Matrix testing, Docker build, and Kubernetes deployment
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - docs/**
+      - README.md
+      - '*.md'
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Go configuration
+  goVersion: '1.22'
+  # Docker configuration
+  dockerRegistryServiceConnection: 'myACR'
+  imageRepository: 'go-app'
+  containerRegistry: 'myregistry.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+  # Kubernetes configuration
+  kubernetesServiceConnection: 'myAKSCluster'
+  # Common settings
+  vmImageName: 'ubuntu-22.04'
+
+stages:
+  # ============================================================================
+  # Stage 1: Build and Test
+  # ============================================================================
+  - stage: BuildAndTest
+    displayName: 'Build and Test'
+    jobs:
+      # ----------------------------------------------------------------------
+      # Job: Matrix Testing across Go versions
+      # ----------------------------------------------------------------------
+      - job: TestMatrix
+        displayName: 'Test with Go Matrix'
+        pool:
+          vmImage: $(vmImageName)
+        timeoutInMinutes: 30
+        strategy:
+          matrix:
+            go121:
+              goTestVersion: '1.21'
+            go122:
+              goTestVersion: '1.22'
+          maxParallel: 2
+        steps:
+          # Install Go version
+          - task: GoTool@0
+            displayName: 'Install Go $(goTestVersion)'
+            inputs:
+              version: $(goTestVersion)
+
+          # Cache Go modules for faster builds
+          - task: Cache@2
+            displayName: 'Cache Go modules'
+            inputs:
+              key: 'go | "$(Agent.OS)" | go.sum'
+              restoreKeys: |
+                go | "$(Agent.OS)"
+              path: $(GOPATH)/pkg/mod
+
+          # Download dependencies
+          - script: go mod download
+            displayName: 'Download Go modules'
+
+          # Run static analysis
+          - script: go vet ./...
+            displayName: 'Run Go vet'
+
+          # Run tests with coverage and race detection
+          - script: |
+              go test -v -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee test-output.txt
+              go-junit-report < test-output.txt > report.xml || true
+            displayName: 'Run Go tests with coverage'
+
+          # Generate HTML coverage report
+          - script: go tool cover -html=coverage.out -o coverage.html
+            displayName: 'Generate coverage report'
+            condition: succeededOrFailed()
+
+          # Publish test results
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            displayName: 'Publish test results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/report.xml'
+              failTaskOnFailedTests: true
+              testRunTitle: 'Go $(goTestVersion) Tests'
+
+          # Publish code coverage
+          - task: PublishCodeCoverageResults@1
+            condition: succeededOrFailed()
+            displayName: 'Publish code coverage'
+            inputs:
+              codeCoverageTool: 'Cobertura'
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
+              reportDirectory: '$(System.DefaultWorkingDirectory)/coverage'
+
+      # ----------------------------------------------------------------------
+      # Job: Build Go Binary
+      # ----------------------------------------------------------------------
+      - job: Build
+        displayName: 'Build Go Application'
+        dependsOn: TestMatrix
+        pool:
+          vmImage: $(vmImageName)
+        timeoutInMinutes: 20
+        steps:
+          # Install Go
+          - task: GoTool@0
+            displayName: 'Install Go $(goVersion)'
+            inputs:
+              version: $(goVersion)
+
+          # Cache Go modules
+          - task: Cache@2
+            displayName: 'Cache Go modules'
+            inputs:
+              key: 'go | "$(Agent.OS)" | go.sum'
+              restoreKeys: |
+                go | "$(Agent.OS)"
+              path: $(GOPATH)/pkg/mod
+
+          # Download dependencies
+          - script: go mod download
+            displayName: 'Download Go modules'
+
+          # Build for Linux (for Docker container)
+          - script: |
+              CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+                -ldflags="-w -s -X main.Version=$(Build.BuildId) -X main.CommitHash=$(Build.SourceVersion)" \
+                -o $(Build.ArtifactStagingDirectory)/app \
+                ./cmd/server
+            displayName: 'Build Go binary for Linux'
+
+          # Publish build artifacts
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish build artifacts'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)'
+              artifact: 'go-binary'
+              publishLocation: 'pipeline'
+
+  # ============================================================================
+  # Stage 2: Build and Push Docker Image
+  # ============================================================================
+  - stage: BuildDockerImage
+    displayName: 'Build Docker Image'
+    dependsOn: BuildAndTest
+    jobs:
+      - job: DockerBuild
+        displayName: 'Build and Push Docker Image'
+        pool:
+          vmImage: $(vmImageName)
+        timeoutInMinutes: 20
+        steps:
+          # Shallow clone for faster checkout
+          - checkout: self
+            fetchDepth: 1
+
+          # Download the built Go binary
+          - download: current
+            artifact: go-binary
+            displayName: 'Download Go binary'
+
+          # Docker@2: Build and push Docker images to a container registry
+          # Requires: Docker registry service connection
+          - task: Docker@2
+            displayName: 'Build and Push Docker image'
+            inputs:
+              command: buildAndPush
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+
+  # ============================================================================
+  # Stage 3: Deploy to Staging
+  # ============================================================================
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: BuildDockerImage
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployStaging
+        displayName: 'Deploy to Staging Environment'
+        pool:
+          vmImage: $(vmImageName)
+        environment: staging
+        timeoutInMinutes: 30
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - script: echo "Pre-deployment validation for staging"
+                  displayName: 'Pre-deployment checks'
+
+            deploy:
+              steps:
+                - checkout: self
+
+                # KubernetesManifest@0: Deploy to Kubernetes cluster
+                # Requires: Kubernetes service connection
+                - task: KubernetesManifest@0
+                  displayName: 'Deploy to Kubernetes (Staging)'
+                  inputs:
+                    action: 'deploy'
+                    kubernetesServiceConnection: $(kubernetesServiceConnection)
+                    namespace: 'staging'
+                    manifests: |
+                      $(Build.SourcesDirectory)/k8s/deployment.yml
+                      $(Build.SourcesDirectory)/k8s/service.yml
+                    containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+
+                # Check rollout status
+                - task: Kubernetes@1
+                  displayName: 'Check rollout status'
+                  inputs:
+                    connectionType: 'Kubernetes Service Connection'
+                    kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+                    namespace: 'staging'
+                    command: 'rollout'
+                    arguments: 'status deployment/go-app --timeout=5m'
+
+            postDeploy:
+              steps:
+                - script: |
+                    echo "Running smoke tests against staging"
+                    curl -f https://staging.example.com/health || exit 1
+                  displayName: 'Health check'
+                  timeoutInMinutes: 5
+                  continueOnError: true
+
+            on:
+              failure:
+                steps:
+                  - script: echo "Staging deployment failed"
+                    displayName: 'Failure notification'
+
+              success:
+                steps:
+                  - script: echo "Staging deployment successful"
+                    displayName: 'Success notification'
+
+  # ============================================================================
+  # Stage 4: Deploy to Production
+  # ============================================================================
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: BuildDockerImage
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to Production Environment'
+        pool:
+          vmImage: $(vmImageName)
+        environment: production
+        timeoutInMinutes: 30
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - script: echo "Pre-deployment validation for production"
+                  displayName: 'Pre-deployment checks'
+
+            deploy:
+              steps:
+                - checkout: self
+
+                # KubernetesManifest@0: Deploy to Kubernetes cluster
+                # Requires: Kubernetes service connection
+                - task: KubernetesManifest@0
+                  displayName: 'Deploy to Kubernetes (Production)'
+                  inputs:
+                    action: 'deploy'
+                    kubernetesServiceConnection: $(kubernetesServiceConnection)
+                    namespace: 'production'
+                    manifests: |
+                      $(Build.SourcesDirectory)/k8s/deployment.yml
+                      $(Build.SourcesDirectory)/k8s/service.yml
+                    containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+
+                # Check rollout status
+                - task: Kubernetes@1
+                  displayName: 'Check rollout status'
+                  inputs:
+                    connectionType: 'Kubernetes Service Connection'
+                    kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+                    namespace: 'production'
+                    command: 'rollout'
+                    arguments: 'status deployment/go-app --timeout=5m'
+
+            postDeploy:
+              steps:
+                - script: |
+                    echo "Running production health check"
+                    curl -f https://api.example.com/health || exit 1
+                  displayName: 'Production health check'
+                  timeoutInMinutes: 5
+
+            on:
+              failure:
+                steps:
+                  - script: echo "Production deployment failed - initiating rollback notification"
+                    displayName: 'Rollback on failure'
+
+              success:
+                steps:
+                  - script: echo "Production deployment successful"
+                    displayName: 'Deployment success notification'

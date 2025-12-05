@@ -1,0 +1,583 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Values",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "description": "Number of replicas for the deployment",
+      "type": "integer",
+      "minimum": 0
+    },
+    "image": {
+      "description": "Image configuration",
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "description": "Container image repository",
+          "type": "string"
+        },
+        "pullPolicy": {
+          "description": "Image pull policy",
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "tag": {
+          "description": "Overrides the image tag (default is chart appVersion)",
+          "type": "string"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "description": "Image pull secrets for private registries",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "nameOverride": {
+      "description": "Override the chart name",
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "description": "Override the fullname",
+      "type": "string"
+    },
+    "serviceAccount": {
+      "description": "ServiceAccount configuration",
+      "type": "object",
+      "properties": {
+        "create": {
+          "description": "Specifies whether a service account should be created",
+          "type": "boolean"
+        },
+        "automount": {
+          "description": "Automatically mount service account token",
+          "type": "boolean"
+        },
+        "annotations": {
+          "description": "Annotations to add to the service account",
+          "type": "object"
+        },
+        "name": {
+          "description": "The name of the service account to use",
+          "type": "string"
+        }
+      }
+    },
+    "podAnnotations": {
+      "description": "Pod annotations",
+      "type": "object"
+    },
+    "podLabels": {
+      "description": "Pod labels",
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "description": "Pod security context",
+      "type": "object"
+    },
+    "securityContext": {
+      "description": "Container security context",
+      "type": "object"
+    },
+    "service": {
+      "description": "Service configuration",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Service type",
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+        },
+        "port": {
+          "description": "Service port",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "targetPort": {
+          "description": "Target container port",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "livenessProbe": {
+      "description": "Liveness probe configuration",
+      "type": "object",
+      "properties": {
+        "httpGet": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Path for HTTP GET request",
+              "type": "string"
+            },
+            "port": {
+              "description": "Port for HTTP GET request",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "tcpSocket": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "description": "Port for TCP socket check",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "exec": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "description": "Command to execute",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "initialDelaySeconds": {
+          "description": "Initial delay before starting probes",
+          "type": "integer",
+          "minimum": 0
+        },
+        "periodSeconds": {
+          "description": "Period between probes",
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "description": "Timeout for probe",
+          "type": "integer",
+          "minimum": 1
+        },
+        "successThreshold": {
+          "description": "Minimum consecutive successes",
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "description": "Minimum consecutive failures",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "readinessProbe": {
+      "description": "Readiness probe configuration",
+      "type": "object",
+      "properties": {
+        "httpGet": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Path for HTTP GET request",
+              "type": "string"
+            },
+            "port": {
+              "description": "Port for HTTP GET request",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "tcpSocket": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "description": "Port for TCP socket check",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "exec": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "description": "Command to execute",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "initialDelaySeconds": {
+          "description": "Initial delay before starting probes",
+          "type": "integer",
+          "minimum": 0
+        },
+        "periodSeconds": {
+          "description": "Period between probes",
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "description": "Timeout for probe",
+          "type": "integer",
+          "minimum": 1
+        },
+        "successThreshold": {
+          "description": "Minimum consecutive successes",
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "description": "Minimum consecutive failures",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "startupProbe": {
+      "description": "Startup probe configuration (for slow-starting containers)",
+      "type": "object",
+      "properties": {
+        "httpGet": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Path for HTTP GET request",
+              "type": "string"
+            },
+            "port": {
+              "description": "Port for HTTP GET request",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "tcpSocket": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "description": "Port for TCP socket check",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "integer", "minimum": 1, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "exec": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "description": "Command to execute",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "initialDelaySeconds": {
+          "description": "Initial delay before starting probes",
+          "type": "integer",
+          "minimum": 0
+        },
+        "periodSeconds": {
+          "description": "Period between probes",
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "description": "Timeout for probe",
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "description": "Minimum consecutive failures before giving up",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "env": {
+      "description": "Environment variables",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "description": "Environment variable name",
+            "type": "string"
+          },
+          "value": {
+            "description": "Environment variable value",
+            "type": "string"
+          },
+          "valueFrom": {
+            "description": "Source for environment variable value",
+            "type": "object",
+            "properties": {
+              "secretKeyRef": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "key": { "type": "string" }
+                }
+              },
+              "configMapKeyRef": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "key": { "type": "string" }
+                }
+              },
+              "fieldRef": {
+                "type": "object",
+                "properties": {
+                  "fieldPath": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "envFrom": {
+      "description": "Environment variables from ConfigMaps or Secrets",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "configMapRef": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "ConfigMap name",
+                "type": "string"
+              }
+            }
+          },
+          "secretRef": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "Secret name",
+                "type": "string"
+              }
+            }
+          },
+          "prefix": {
+            "description": "Prefix for environment variable names",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "volumeMounts": {
+      "description": "Volume mounts for the container",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "mountPath"],
+        "properties": {
+          "name": {
+            "description": "Volume name (must match a volume)",
+            "type": "string"
+          },
+          "mountPath": {
+            "description": "Path within the container",
+            "type": "string"
+          },
+          "subPath": {
+            "description": "Sub-path within the volume",
+            "type": "string"
+          },
+          "readOnly": {
+            "description": "Mount as read-only",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "volumes": {
+      "description": "Volumes for the pod",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "description": "Volume name",
+            "type": "string"
+          },
+          "configMap": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": { "type": "string" },
+                    "path": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "secret": {
+            "type": "object",
+            "properties": {
+              "secretName": { "type": "string" },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": { "type": "string" },
+                    "path": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "emptyDir": {
+            "type": "object",
+            "properties": {
+              "medium": { "type": "string" },
+              "sizeLimit": { "type": "string" }
+            }
+          },
+          "persistentVolumeClaim": {
+            "type": "object",
+            "properties": {
+              "claimName": { "type": "string" },
+              "readOnly": { "type": "boolean" }
+            }
+          },
+          "hostPath": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "description": "Ingress configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable ingress",
+          "type": "boolean"
+        },
+        "className": {
+          "description": "Ingress class name",
+          "type": "string"
+        },
+        "annotations": {
+          "description": "Ingress annotations",
+          "type": "object"
+        },
+        "hosts": {
+          "description": "Ingress hosts configuration",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Exact", "Prefix", "ImplementationSpecific"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "description": "Ingress TLS configuration",
+          "type": "array"
+        }
+      }
+    },
+    "resources": {
+      "description": "Resource limits and requests",
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object"
+        },
+        "requests": {
+          "type": "object"
+        }
+      }
+    },
+    "autoscaling": {
+      "description": "Horizontal Pod Autoscaler configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable autoscaling",
+          "type": "boolean"
+        },
+        "minReplicas": {
+          "description": "Minimum number of replicas",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "description": "Maximum number of replicas",
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetCPUUtilizationPercentage": {
+          "description": "Target CPU utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "targetMemoryUtilizationPercentage": {
+          "description": "Target memory utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "nodeSelector": {
+      "description": "Node selector",
+      "type": "object"
+    },
+    "tolerations": {
+      "description": "Tolerations",
+      "type": "array"
+    },
+    "affinity": {
+      "description": "Affinity rules",
+      "type": "object"
+    }
+  }
+}

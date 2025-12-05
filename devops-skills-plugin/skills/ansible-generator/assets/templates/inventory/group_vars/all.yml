@@ -1,0 +1,24 @@
+---
+# Global variables for all hosts
+
+# Connection settings
+ansible_user: deploy
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_private_key_file: ~/.ssh/id_rsa
+
+# Common packages
+common_packages:
+  - vim
+  - git
+  - htop
+  - curl
+  - wget
+
+# NTP configuration
+ntp_enabled: true
+ntp_timezone: UTC
+
+# Security settings
+security_ssh_port: 22
+security_ssh_password_authentication: no
+security_ssh_permit_root_login: no

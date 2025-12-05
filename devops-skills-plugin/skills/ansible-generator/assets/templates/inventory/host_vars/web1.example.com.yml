@@ -1,0 +1,22 @@
+---
+# Host-specific variables for web1.example.com
+
+# Host identification
+server_id: web1
+datacenter: dc1
+rack: A1
+
+# Resource allocation
+memory_limit: 4G
+cpu_cores: 2
+
+# Host-specific configuration
+nginx_worker_processes: 2
+nginx_worker_connections: 1024
+
+# Monitoring
+monitoring_enabled: true
+monitoring_tags:
+  - production
+  - webserver
+  - primary

@@ -1,0 +1,149 @@
+# GitLab CI/CD Pipeline Example with Components (GitLab 17.0+)
+#
+# This example demonstrates the use of CI/CD components from the GitLab Catalog.
+# Components are reusable pipeline configuration units introduced in GitLab 16.x
+# and made GA in GitLab 17.0 (May 2024).
+#
+# Learn more: https://docs.gitlab.com/ci/components/
+
+# Include components from the CI/CD Catalog
+include:
+  # Example 1: Docker build and push component
+  - component: $CI_SERVER_FQDN/components/docker/build-and-push@1.2.0
+    inputs:
+      stage: build
+      dockerfile: Dockerfile
+      context: .
+      docker_image: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+      registry_user: $CI_REGISTRY_USER
+      registry_password: $CI_REGISTRY_PASSWORD
+
+  # Example 2: Node.js test component with specific version
+  - component: gitlab.com/components/nodejs/test@2.1.0
+    inputs:
+      stage: test
+      node_version: "20"
+      test_command: "npm test"
+
+  # Example 3: Security scanning component from official GitLab components
+  - component: $CI_SERVER_FQDN/components/security/sast@3.0.1
+    inputs:
+      stage: security
+      sast_excluded_paths: "tests/,docs/"
+
+  # Example 4: Component with conditional rules
+  - component: $CI_SERVER_FQDN/components/deploy/kubernetes@1.5.2
+    inputs:
+      stage: deploy
+      k8s_namespace: $CI_ENVIRONMENT_NAME
+      k8s_cluster: $K8S_CLUSTER_NAME
+      manifest_path: ./k8s/deployment.yaml
+    rules:
+      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+  # Example 5: Using ~latest for development (not recommended for production)
+  # Warning: This will use the absolute latest version which may include breaking changes
+  - component: $CI_SERVER_FQDN/components/quality/code-coverage@~latest
+    inputs:
+      stage: report
+      coverage_format: cobertura
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+  # Example 6: Project include (traditional method) with pinned ref for comparison
+  - project: 'shared-ci/templates'
+    ref: 'v2.3.0'  # Pinned version for security and reproducibility
+    file: '/templates/notification.gitlab-ci.yml'
+
+  # Example 7: Local include for custom jobs
+  - local: '.gitlab/ci/custom-jobs.yml'
+
+# Define pipeline stages
+stages:
+  - build
+  - test
+  - security
+  - report
+  - deploy
+  - .post  # Special stage that runs after all other stages
+
+# Global variables
+variables:
+  # Docker configuration
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+  # Component configuration
+  CI_DEBUG_COMPONENTS: "false"
+
+# Additional custom job that works alongside components
+validate:
+  stage: test
+  image: alpine:latest
+  script:
+    - echo "Running additional validation..."
+    - echo "This job runs alongside component-based jobs"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Override or extend component behavior
+# Components can be customized using the inputs parameter
+# or by defining jobs that extend component-generated jobs
+
+# Example: Production deployment with manual trigger
+deploy_production:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploying to production environment"
+    - kubectl apply -f k8s/production/
+  environment:
+    name: production
+    url: https://app.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+  needs:
+    - validate
+
+# Example: Notification job
+notify_success:
+  stage: .post
+  image: curlimages/curl:latest
+  script:
+    - echo "Pipeline completed successfully"
+    - |
+      curl -X POST $SLACK_WEBHOOK_URL \
+        -H 'Content-Type: application/json' \
+        -d "{\"text\": \"Pipeline $CI_PIPELINE_ID completed for $CI_PROJECT_NAME\"}"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+  allow_failure: true
+
+# Best Practices for Components:
+#
+# 1. Version Pinning:
+#    - Always pin to specific versions (@1.2.3) in production
+#    - Use ~latest only in development/testing
+#    - Partial versions (~1.2) match latest patch version
+#
+# 2. Inputs:
+#    - Use CI/CD variables for sensitive data (not hardcoded)
+#    - Validate required inputs are provided
+#    - Use descriptive input names
+#
+# 3. Security:
+#    - Verify component sources (prefer $CI_SERVER_FQDN)
+#    - Review component code before using in production
+#    - Monitor for component updates and security advisories
+#
+# 4. Testing:
+#    - Test component integration in non-production branches first
+#    - Use rules to control when components run
+#    - Monitor pipeline execution times
+#
+# 5. Documentation:
+#    - Document why specific components were chosen
+#    - Keep track of component versions used
+#    - Document any custom configurations or inputs

@@ -1,0 +1,348 @@
+# Multi-Project and Parent-Child Pipeline Template
+# Orchestrates multiple projects or creates dynamic child pipelines
+#
+# Usage: Copy this template and customize for your needs
+# - Replace [PLACEHOLDERS] with actual values
+# - Choose pattern: multi-project trigger or parent-child
+# - Configure dependencies and artifact passing
+# - Validate with gitlab-ci-validator skill
+
+# ============================================================================
+# PATTERN 1: MULTI-PROJECT PIPELINES
+# Trigger pipelines in other GitLab projects
+# ============================================================================
+
+stages:
+  - build
+  - trigger-downstream
+  - verify
+
+variables:
+  # Version to pass to downstream projects
+  VERSION: $CI_COMMIT_SHORT_SHA
+
+# Build the library/artifact
+build-library:
+  stage: build
+
+  image: node:20-alpine
+
+  script:
+    - npm ci
+    - npm run build
+    - npm pack                           # Create npm package
+
+  artifacts:
+    paths:
+      - "*.tgz"                          # Package file
+      - dist/
+    expire_in: 1 hour
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Trigger multiple downstream projects in parallel
+trigger-app-1:
+  stage: trigger-downstream
+
+  trigger:
+    project: group/application-1        # [PLACEHOLDER: Set downstream project]
+    branch: main
+    strategy: depend                    # Wait for completion
+
+  variables:
+    LIBRARY_VERSION: $VERSION
+    TRIGGER_SOURCE: library-update
+
+  needs: [build-library]
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+trigger-app-2:
+  stage: trigger-downstream
+
+  trigger:
+    project: group/application-2        # [PLACEHOLDER: Set downstream project]
+    branch: main
+    strategy: depend
+
+  variables:
+    LIBRARY_VERSION: $VERSION
+    TRIGGER_SOURCE: library-update
+
+  needs: [build-library]
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+trigger-app-3:
+  stage: trigger-downstream
+
+  trigger:
+    project: group/application-3        # [PLACEHOLDER: Set downstream project]
+    branch: main
+    strategy: depend
+
+  variables:
+    LIBRARY_VERSION: $VERSION
+    TRIGGER_SOURCE: library-update
+
+  needs: [build-library]
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Verify all downstream projects succeeded
+verify-downstream:
+  stage: verify
+
+  image: alpine:3.19
+
+  script:
+    - echo "All downstream projects completed successfully"
+    - echo "Library version $VERSION deployed"
+
+  needs:
+    - trigger-app-1
+    - trigger-app-2
+    - trigger-app-3
+
+# ============================================================================
+# PATTERN 2: PARENT-CHILD PIPELINES (STATIC)
+# Include child pipeline configurations from repository
+# ============================================================================
+
+# Uncomment to use this pattern:
+#
+# trigger-frontend:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: frontend/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - frontend/**/*
+#
+# trigger-backend:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: backend/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - backend/**/*
+#
+# trigger-infrastructure:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: infrastructure/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - infrastructure/**/*
+
+# ============================================================================
+# PATTERN 3: DYNAMIC CHILD PIPELINES
+# Generate child pipeline configuration dynamically
+# ============================================================================
+
+# Uncomment to use this pattern:
+#
+# generate-child-pipeline:
+#   stage: build
+#
+#   image: python:3.12-alpine
+#
+#   script:
+#     # Generate pipeline configuration dynamically
+#     - python scripts/generate-pipeline.py > generated-pipeline.yml
+#     - cat generated-pipeline.yml  # Show generated config
+#
+#   artifacts:
+#     paths:
+#       - generated-pipeline.yml
+#     expire_in: 1 hour
+#
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#
+# trigger-generated-pipeline:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include:
+#       - artifact: generated-pipeline.yml
+#         job: generate-child-pipeline
+#     strategy: depend
+#
+#   needs: [generate-child-pipeline]
+#
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================================
+# PATTERN 4: MATRIX-BASED MULTI-PROJECT TRIGGERS
+# Trigger multiple projects using matrix parallelization
+# ============================================================================
+
+# Uncomment to use this pattern:
+#
+# trigger-microservices:
+#   stage: trigger-downstream
+#
+#   parallel:
+#     matrix:
+#       - PROJECT:
+#           - group/service-auth
+#           - group/service-users
+#           - group/service-orders
+#           - group/service-payments
+#           - group/service-notifications
+#
+#   trigger:
+#     project: $PROJECT
+#     branch: main
+#     strategy: depend
+#
+#   variables:
+#     DEPLOY_VERSION: $VERSION
+#     ENVIRONMENT: staging
+#
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "develop"
+#       when: always
+#     - when: never
+
+# ============================================================================
+# PATTERN 5: CONDITIONAL DOWNSTREAM TRIGGERS
+# Trigger different projects based on conditions
+# ============================================================================
+
+# Uncomment to use this pattern:
+#
+# trigger-staging-deploy:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     project: group/deployment-staging
+#     branch: main
+#
+#   variables:
+#     SERVICE_VERSION: $VERSION
+#     ENVIRONMENT: staging
+#
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "develop"
+#       when: always
+#     - when: never
+#
+# trigger-production-deploy:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     project: group/deployment-production
+#     branch: main
+#
+#   variables:
+#     SERVICE_VERSION: $CI_COMMIT_TAG
+#     ENVIRONMENT: production
+#
+#   rules:
+#     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+#       when: manual
+#     - when: never
+
+# ============================================================================
+# PATTERN 6: MONOREPO WITH CONDITIONAL CHILD PIPELINES
+# For monorepos: only trigger child pipelines for changed components
+# ============================================================================
+
+# Uncomment to use this pattern:
+#
+# trigger-service-a:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: services/service-a/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - services/service-a/**/*
+#       when: always
+#     - when: never
+#
+# trigger-service-b:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: services/service-b/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - services/service-b/**/*
+#       when: always
+#     - when: never
+#
+# trigger-service-c:
+#   stage: trigger-downstream
+#
+#   trigger:
+#     include: services/service-c/.gitlab-ci.yml
+#     strategy: depend
+#
+#   rules:
+#     - changes:
+#         - services/service-c/**/*
+#       when: always
+#     - when: never
+
+# ============================================================================
+# EXAMPLE: PYTHON SCRIPT FOR DYNAMIC PIPELINE GENERATION
+# ============================================================================
+#
+# scripts/generate-pipeline.py:
+#
+# #!/usr/bin/env python3
+# import yaml
+# import sys
+#
+# # Define services to deploy
+# services = ['auth', 'users', 'orders', 'payments']
+#
+# # Generate pipeline configuration
+# pipeline = {
+#     'stages': ['deploy'],
+#     'variables': {
+#         'VERSION': '$CI_COMMIT_SHORT_SHA'
+#     }
+# }
+#
+# # Add deploy job for each service
+# for service in services:
+#     job_name = f'deploy-{service}'
+#     pipeline[job_name] = {
+#         'stage': 'deploy',
+#         'image': 'bitnami/kubectl:1.29',
+#         'script': [
+#             f'kubectl set image deployment/{service} {service}=$IMAGE:$VERSION',
+#             f'kubectl rollout status deployment/{service}'
+#         ],
+#         'environment': {
+#             'name': f'{service}-production',
+#             'kubernetes': {
+#                 'namespace': 'production'
+#             }
+#         }
+#     }
+#
+# # Output YAML
+# print(yaml.dump(pipeline, default_flow_style=False))

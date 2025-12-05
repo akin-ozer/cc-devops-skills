@@ -1,0 +1,144 @@
+# Python CI/CD Pipeline
+# Build, test, and deploy Python application
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  pythonVersion: '3.11'
+  vmImageName: 'ubuntu-22.04'
+
+stages:
+- stage: Build
+  displayName: 'Build and Test'
+  jobs:
+  - job: BuildTest
+    displayName: 'Build and Test Python Application'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Use Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+        architecture: 'x64'
+
+    - task: Cache@2
+      displayName: 'Cache pip packages'
+      inputs:
+        key: 'pip | "$(Agent.OS)" | requirements.txt'
+        restoreKeys: |
+          pip | "$(Agent.OS)"
+        path: $(Pipeline.Workspace)/.pip
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install --cache-dir $(Pipeline.Workspace)/.pip -r requirements.txt
+      displayName: 'Install dependencies'
+
+    - script: |
+        pip install pylint
+        pylint **/*.py --exit-zero
+      displayName: 'Run linting'
+      continueOnError: true
+
+    - script: |
+        pip install pytest pytest-cov
+        pytest tests/ --junitxml=junit/test-results.xml --cov=. --cov-report=xml --cov-report=html
+      displayName: 'Run tests with coverage'
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      displayName: 'Publish test results'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/test-results.xml'
+        failTaskOnFailedTests: true
+
+    - task: PublishCodeCoverageResults@1
+      condition: succeededOrFailed()
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
+        reportDirectory: '$(System.DefaultWorkingDirectory)/**/htmlcov'
+
+    - script: |
+        pip install --upgrade build
+        python -m build
+      displayName: 'Build Python package'
+
+    - task: CopyFiles@2
+      displayName: 'Copy artifacts'
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)'
+        Contents: |
+          **
+          !**/.git/**
+          !**/__pycache__/**
+          !**/tests/**
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish build artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'python-app'
+        publishLocation: 'pipeline'
+
+- stage: DeployDev
+  displayName: 'Deploy to Development'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  jobs:
+  - deployment: DeployDev
+    displayName: 'Deploy to Dev Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: development
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: python-app
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: |
+              pip install -r $(Pipeline.Workspace)/python-app/requirements.txt
+              echo "Deploying Python application to development"
+            displayName: 'Deploy Application'
+
+- stage: DeployProd
+  displayName: 'Deploy to Production'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployProd
+    displayName: 'Deploy to Production Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: python-app
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: |
+              pip install -r $(Pipeline.Workspace)/python-app/requirements.txt
+              echo "Deploying Python application to production"
+            displayName: 'Deploy Application'

@@ -1,0 +1,418 @@
+# Repository Dispatch Example
+# Demonstrates: External API triggers, webhook integration, payload validation, multiple event types
+
+name: Handle External Events
+
+on:
+  repository_dispatch:
+    types:
+      - deploy-prod
+      - deploy-staging
+      - deploy-dev
+      - run-migration
+      - rebuild-cache
+      - incident-response
+      - custom-task
+
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+
+env:
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # Job 1: Handle deployment events
+  handle-deployment:
+    name: Handle Deployment Event
+    if: startsWith(github.event.action, 'deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment:
+      name: ${{ github.event.client_payload.environment || 'staging' }}
+
+    steps:
+      - name: Validate deployment payload
+        id: validate
+        run: |
+          # Required fields validation
+          if [[ -z "${{ github.event.client_payload.version }}" ]]; then
+            echo "❌ Error: 'version' is required in client_payload"
+            exit 1
+          fi
+
+          if [[ -z "${{ github.event.client_payload.environment }}" ]]; then
+            echo "❌ Error: 'environment' is required in client_payload"
+            exit 1
+          fi
+
+          # Validate environment
+          ENV="${{ github.event.client_payload.environment }}"
+          if [[ ! "$ENV" =~ ^(dev|staging|production)$ ]]; then
+            echo "❌ Error: Invalid environment: $ENV"
+            echo "Allowed: dev, staging, production"
+            exit 1
+          fi
+
+          # Validate version format (semver)
+          VERSION="${{ github.event.client_payload.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "⚠️ Warning: Version doesn't match semver format: $VERSION"
+          fi
+
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "requestor=${{ github.event.client_payload.requestor || 'unknown' }}" >> $GITHUB_OUTPUT
+
+      - name: Log deployment request
+        run: |
+          cat <<EOF
+          📦 Deployment Request Received
+
+          Event Type: ${{ github.event.action }}
+          Version: ${{ steps.validate.outputs.version }}
+          Environment: ${{ steps.validate.outputs.environment }}
+          Requestor: ${{ steps.validate.outputs.requestor }}
+          Rollback: ${{ github.event.client_payload.rollback || 'false' }}
+          Force: ${{ github.event.client_payload.force || 'false' }}
+
+          Payload:
+          ${{ toJSON(github.event.client_payload) }}
+          EOF
+
+      - name: Checkout specific version
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ steps.validate.outputs.version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        env:
+          NODE_ENV: production
+          ENVIRONMENT: ${{ steps.validate.outputs.environment }}
+        run: npm run build
+
+      - name: Deploy to environment
+        env:
+          ENVIRONMENT: ${{ steps.validate.outputs.environment }}
+          VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          echo "🚀 Deploying $VERSION to $ENVIRONMENT"
+
+          # Deployment logic here
+          # Example: AWS, Kubernetes, etc.
+
+          DEPLOY_URL="https://$ENVIRONMENT.example.com"
+          echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+
+      - name: Create deployment notification issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const environment = '${{ steps.validate.outputs.environment }}';
+            const version = '${{ steps.validate.outputs.version }}';
+            const requestor = '${{ steps.validate.outputs.requestor }}';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment: ${version} to ${environment}`,
+              body: `## 🚀 Deployment Summary
+
+              **Version:** ${version}
+              **Environment:** ${environment}
+              **Requestor:** ${requestor}
+              **Triggered via:** repository_dispatch API
+
+              **Workflow Run:** https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+
+              **URL:** https://${environment}.example.com
+
+              ✅ Deployment completed successfully
+              `,
+              labels: ['deployment', environment]
+            });
+
+  # Job 2: Handle migration events
+  handle-migration:
+    name: Run Database Migration
+    if: github.event.action == 'run-migration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    environment:
+      name: ${{ github.event.client_payload.environment || 'staging' }}
+
+    steps:
+      - name: Validate migration payload
+        run: |
+          if [[ -z "${{ github.event.client_payload.migration_name }}" ]]; then
+            echo "❌ Error: 'migration_name' is required"
+            exit 1
+          fi
+
+          if [[ -z "${{ github.event.client_payload.environment }}" ]]; then
+            echo "❌ Error: 'environment' is required"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Run migration
+        env:
+          MIGRATION_NAME: ${{ github.event.client_payload.migration_name }}
+          ENVIRONMENT: ${{ github.event.client_payload.environment }}
+        run: |
+          echo "🔄 Running migration: $MIGRATION_NAME on $ENVIRONMENT"
+
+          # Migration logic here
+          # Example: npm run migrate:up $MIGRATION_NAME
+
+          echo "✅ Migration completed"
+
+  # Job 3: Handle cache rebuild
+  handle-cache-rebuild:
+    name: Rebuild Application Cache
+    if: github.event.action == 'rebuild-cache'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+
+      - name: Clear existing cache
+        run: |
+          echo "🗑️ Clearing cache for: ${{ github.event.client_payload.cache_key || 'all' }}"
+          # Clear cache logic
+
+      - name: Rebuild cache
+        run: |
+          echo "🔄 Rebuilding cache..."
+          npm ci
+          npm run build
+
+      - name: Save cache
+        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            dist/
+          key: cache-rebuild-${{ github.sha }}
+
+  # Job 4: Handle incident response
+  handle-incident:
+    name: Incident Response
+    if: github.event.action == 'incident-response'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Parse incident payload
+        id: incident
+        run: |
+          SEVERITY="${{ github.event.client_payload.severity || 'medium' }}"
+          MESSAGE="${{ github.event.client_payload.message }}"
+          AFFECTED_SERVICE="${{ github.event.client_payload.service }}"
+
+          echo "severity=$SEVERITY" >> $GITHUB_OUTPUT
+          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "service=$AFFECTED_SERVICE" >> $GITHUB_OUTPUT
+
+      - name: Create incident issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const severity = '${{ steps.incident.outputs.severity }}';
+            const message = '${{ steps.incident.outputs.message }}';
+            const service = '${{ steps.incident.outputs.service }}';
+
+            const severityEmoji = {
+              'critical': '🔴',
+              'high': '🟠',
+              'medium': '🟡',
+              'low': '🟢'
+            };
+
+            const emoji = severityEmoji[severity] || '⚪';
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${emoji} Incident: ${service} - ${severity.toUpperCase()}`,
+              body: `## Incident Report
+
+              **Severity:** ${severity.toUpperCase()}
+              **Service:** ${service}
+              **Message:** ${message}
+
+              **Triggered:** ${new Date().toISOString()}
+              **Source:** Monitoring System (via repository_dispatch)
+
+              ### Next Steps
+              - [ ] Investigate root cause
+              - [ ] Implement fix
+              - [ ] Deploy fix
+              - [ ] Verify resolution
+              - [ ] Post-mortem
+              `,
+              labels: ['incident', severity, 'automated'],
+              assignees: context.payload.client_payload.assignees || []
+            });
+
+            console.log(`Created incident issue: ${issue.data.html_url}`);
+
+      - name: Trigger automated response
+        if: steps.incident.outputs.severity == 'critical'
+        run: |
+          echo "🚨 CRITICAL INCIDENT DETECTED"
+          echo "Triggering automated response procedures..."
+
+          # Automated incident response
+          # Example: Scale up services, enable debug mode, alert team
+
+  # Job 5: Handle custom tasks
+  handle-custom-task:
+    name: Execute Custom Task
+    if: github.event.action == 'custom-task'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Validate custom task
+        run: |
+          if [[ -z "${{ github.event.client_payload.task_name }}" ]]; then
+            echo "❌ Error: 'task_name' is required"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Execute custom task
+        env:
+          TASK_NAME: ${{ github.event.client_payload.task_name }}
+          TASK_ARGS: ${{ toJSON(github.event.client_payload.args) }}
+        run: |
+          echo "⚙️ Executing task: $TASK_NAME"
+          echo "Arguments: $TASK_ARGS"
+
+          # Custom task execution
+          # Use allowlist to prevent arbitrary code execution
+          case "$TASK_NAME" in
+            "cleanup-old-artifacts")
+              echo "Running artifact cleanup..."
+              # Cleanup logic
+              ;;
+            "regenerate-docs")
+              echo "Regenerating documentation..."
+              # Docs generation logic
+              ;;
+            "validate-config")
+              echo "Validating configuration..."
+              # Validation logic
+              ;;
+            *)
+              echo "❌ Error: Unknown task: $TASK_NAME"
+              echo "Allowed tasks: cleanup-old-artifacts, regenerate-docs, validate-config"
+              exit 1
+              ;;
+          esac
+
+          echo "✅ Task completed"
+
+  # Job 6: Event summary
+  event-summary:
+    name: Event Processing Summary
+    runs-on: ubuntu-latest
+    needs: [handle-deployment, handle-migration, handle-cache-rebuild, handle-incident, handle-custom-task]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Generate summary
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 📬 Repository Dispatch Event Summary
+
+          **Event Type:** ${{ github.event.action }}
+          **Triggered:** ${{ github.event.created_at }}
+          **Sender:** ${{ github.event.sender.login }}
+
+          ### Job Results
+          - Deployment: ${{ needs.handle-deployment.result }}
+          - Migration: ${{ needs.handle-migration.result }}
+          - Cache Rebuild: ${{ needs.handle-cache-rebuild.result }}
+          - Incident Response: ${{ needs.handle-incident.result }}
+          - Custom Task: ${{ needs.handle-custom-task.result }}
+
+          ### Payload
+          ```json
+          ${{ toJSON(github.event.client_payload) }}
+          ```
+
+          ---
+
+          ### How to Trigger This Workflow
+
+          **Using curl:**
+          ```bash
+          curl -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{
+              "event_type": "deploy-prod",
+              "client_payload": {
+                "version": "v1.2.3",
+                "environment": "production",
+                "requestor": "api-user"
+              }
+            }'
+          ```
+
+          **Using Python:**
+          ```python
+          import requests
+
+          url = "https://api.github.com/repos/${{ github.repository }}/dispatches"
+          headers = {
+              "Authorization": f"token {token}",
+              "Accept": "application/vnd.github.v3+json"
+          }
+          payload = {
+              "event_type": "deploy-prod",
+              "client_payload": {
+                  "version": "v1.2.3",
+                  "environment": "production"
+              }
+          }
+          requests.post(url, json=payload, headers=headers)
+          ```
+
+          **Using GitHub CLI:**
+          ```bash
+          gh api repos/${{ github.repository }}/dispatches \
+            -X POST \
+            -f event_type='deploy-prod' \
+            -f client_payload[version]='v1.2.3' \
+            -f client_payload[environment]='production'
+          ```
+          EOF

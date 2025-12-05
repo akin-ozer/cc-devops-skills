@@ -1,0 +1,301 @@
+# SLO, Error Budget, and Burn Rate Patterns
+#
+# This file contains PromQL queries for implementing Service Level Objectives (SLOs),
+# error budget tracking, and burn rate alerting following Google SRE best practices.
+#
+# References:
+# - https://sre.google/workbook/alerting-on-slos/
+# - https://grafana.com/docs/grafana-cloud/alerting-and-irm/slo/introduction/
+
+## ===== ERROR BUDGET CALCULATIONS =====
+
+# Error budget remaining (for 99.9% SLO over 30 days)
+# Returns value between 0 and 1 (1 = full budget, 0 = exhausted)
+1 - (
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d]))
+  /
+  sum(rate(http_requests_total{job="api"}[30d]))
+) / 0.001
+
+# Error budget consumed percentage (0-100%)
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d]))
+  /
+  sum(rate(http_requests_total{job="api"}[30d]))
+) / 0.001 * 100
+
+# Error budget remaining in hours (for 30-day window)
+(
+  1 - (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d]))
+    /
+    sum(rate(http_requests_total{job="api"}[30d]))
+  ) / 0.001
+) * 720  # 720 hours in 30 days
+
+## ===== AVAILABILITY CALCULATIONS =====
+
+# Current availability (30-day rolling window)
+sum(rate(http_requests_total{job="api", status_code!~"5.."}[30d]))
+/
+sum(rate(http_requests_total{job="api"}[30d]))
+
+# Availability percentage
+(
+  sum(rate(http_requests_total{job="api", status_code!~"5.."}[30d]))
+  /
+  sum(rate(http_requests_total{job="api"}[30d]))
+) * 100
+
+# Availability by service
+sum by (service) (rate(http_requests_total{status_code!~"5.."}[30d]))
+/
+sum by (service) (rate(http_requests_total[30d]))
+
+## ===== BURN RATE CALCULATIONS =====
+
+# Burn rate definition:
+# burn_rate = (current_error_rate) / (allowed_error_rate)
+# For 99.9% SLO, allowed_error_rate = 0.001 (0.1%)
+
+# Current burn rate (1 hour window, 99.9% SLO)
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h]))
+  /
+  sum(rate(http_requests_total{job="api"}[1h]))
+) / 0.001
+
+# Burn rate over 5 minutes (for short window)
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api"}[5m]))
+) / 0.001
+
+# Burn rate over 6 hours (for medium window)
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h]))
+  /
+  sum(rate(http_requests_total{job="api"}[6h]))
+) / 0.001
+
+# Burn rate by service
+(
+  sum by (service) (rate(http_requests_total{status_code=~"5.."}[1h]))
+  /
+  sum by (service) (rate(http_requests_total[1h]))
+) / 0.001
+
+## ===== MULTI-WINDOW, MULTI-BURN-RATE ALERTS =====
+
+# Page-level alert: 2% budget in 1 hour (burn rate 14.4)
+# Uses both long window (1h) AND short window (5m)
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h]))
+    /
+    sum(rate(http_requests_total{job="api"}[1h]))
+  ) > 14.4 * 0.001
+)
+and
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[5m]))
+    /
+    sum(rate(http_requests_total{job="api"}[5m]))
+  ) > 14.4 * 0.001
+)
+
+# Ticket-level alert: 5% budget in 6 hours (burn rate 6)
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h]))
+    /
+    sum(rate(http_requests_total{job="api"}[6h]))
+  ) > 6 * 0.001
+)
+and
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[30m]))
+    /
+    sum(rate(http_requests_total{job="api"}[30m]))
+  ) > 6 * 0.001
+)
+
+# Low urgency alert: 10% budget in 3 days (burn rate 1)
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[3d]))
+    /
+    sum(rate(http_requests_total{job="api"}[3d]))
+  ) > 1 * 0.001
+)
+and
+(
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h]))
+    /
+    sum(rate(http_requests_total{job="api"}[6h]))
+  ) > 1 * 0.001
+)
+
+## ===== LATENCY SLO QUERIES =====
+
+# Percentage of requests under SLO target (200ms)
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.2", job="api"}[5m]))
+  /
+  sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+) * 100
+
+# Percentage of requests violating latency SLO (over 500ms)
+(
+  1 - (
+    sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+    /
+    sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+  )
+) * 100
+
+# Latency SLO compliance (90% of requests under 200ms)
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.2", job="api"}[5m]))
+  /
+  sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+) >= 0.9
+
+# Combined latency and availability SLO
+(
+  # Availability component (99.9% success rate)
+  sum(rate(http_requests_total{job="api", status_code!~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api"}[5m]))
+  >= 0.999
+)
+and
+(
+  # Latency component (95% under 500ms)
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+  /
+  sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+  >= 0.95
+)
+
+## ===== SLO DASHBOARD QUERIES =====
+
+# SLO status (1 = meeting SLO, 0 = violating)
+(
+  sum(rate(http_requests_total{job="api", status_code!~"5.."}[30d]))
+  /
+  sum(rate(http_requests_total{job="api"}[30d]))
+) >= 0.999
+
+# Days until error budget exhaustion (at current burn rate)
+(
+  1 - (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d]))
+    /
+    sum(rate(http_requests_total{job="api"}[30d]))
+  ) / 0.001
+) * 30
+/
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h]))
+  /
+  sum(rate(http_requests_total{job="api"}[1h]))
+) / 0.001
+
+# Error budget depletion rate (budget consumed per hour)
+(
+  sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h]))
+  /
+  sum(rate(http_requests_total{job="api"}[1h]))
+) / 0.001 / 720 * 100  # Percentage per hour
+
+## ===== APDEX SCORE =====
+
+# Apdex score (Application Performance Index)
+# Satisfied = < 500ms, Tolerating = 500ms-2s, Frustrated = > 2s
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+  +
+  sum(rate(http_request_duration_seconds_bucket{le="2", job="api"}[5m]))
+  -
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+) / 2
+/
+sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+
+# Simplified Apdex (satisfied + tolerating/2) / total
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+  +
+  (
+    sum(rate(http_request_duration_seconds_bucket{le="2", job="api"}[5m]))
+    -
+    sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m]))
+  ) / 2
+)
+/
+sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+
+## ===== SLI/SLO BY ENDPOINT =====
+
+# Error rate by endpoint (for per-endpoint SLOs)
+sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+/
+sum by (endpoint) (rate(http_requests_total[5m]))
+
+# Latency P95 by endpoint
+histogram_quantile(0.95,
+  sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+# Endpoints violating error rate SLO
+(
+  sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+  /
+  sum by (endpoint) (rate(http_requests_total[5m]))
+) > 0.001
+
+# Endpoints violating latency SLO
+histogram_quantile(0.95,
+  sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+) > 0.5
+
+## ===== COMPOSITE SLOs =====
+
+# Overall service health (combines multiple SLIs)
+# 1 = healthy, 0 = unhealthy
+(
+  # Error rate under threshold
+  (
+    sum(rate(http_requests_total{job="api", status_code=~"5.."}[5m]))
+    /
+    sum(rate(http_requests_total{job="api"}[5m]))
+  ) < 0.001
+)
+and
+(
+  # P95 latency under threshold
+  histogram_quantile(0.95,
+    sum by (le) (rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+  ) < 0.5
+)
+and
+(
+  # All instances up
+  count(up{job="api"} == 1) == count(up{job="api"})
+)
+
+## ===== BURN RATE REFERENCE =====
+
+# Burn Rate | Budget Consumed | Time to Exhaust | Alert Level
+# ----------------------------------------------------------------
+# 1         | 100% over 30d   | 30 days         | None
+# 2         | 100% over 15d   | 15 days         | Low
+# 3         | 10% in 1d       | 10 days         | Low
+# 6         | 5% in 6h        | 5 days          | Ticket
+# 14.4      | 2% in 1h        | ~2 days         | Page
+# 36        | 5% in 1h        | ~20 hours       | Page (urgent)

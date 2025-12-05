@@ -1,0 +1,27 @@
+# Rendered output
+rendered/
+output/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Test artifacts
+test-charts/
+*.tgz
+
+# Python virtual environments (if scripts use Python)
+venv/
+__pycache__/
+*.pyc

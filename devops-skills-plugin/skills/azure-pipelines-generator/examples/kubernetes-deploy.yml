@@ -1,0 +1,116 @@
+# Kubernetes Deployment Pipeline
+# Build Docker image and deploy to Kubernetes cluster
+
+trigger:
+  branches:
+    include:
+    - main
+
+variables:
+  dockerRegistryServiceConnection: 'myACR'
+  imageRepository: 'myapp'
+  containerRegistry: 'myregistry.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+  vmImageName: 'ubuntu-22.04'
+  kubernetesServiceConnection: 'myK8sCluster'
+  namespace: 'production'
+
+stages:
+- stage: BuildAndPush
+  displayName: 'Build and Push Container Image'
+  jobs:
+  - job: Build
+    displayName: 'Build Docker Image'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: Docker@2
+      displayName: 'Build and Push image'
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+- stage: DeployToK8s
+  displayName: 'Deploy to Kubernetes'
+  dependsOn: BuildAndPush
+  jobs:
+  - deployment: DeployK8s
+    displayName: 'Deploy to AKS Cluster'
+    pool:
+      vmImage: $(vmImageName)
+    environment: kubernetes-production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - task: KubernetesManifest@0
+            displayName: 'Create namespace (if not exists)'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: $(kubernetesServiceConnection)
+              namespace: $(namespace)
+              manifests: |
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: $(namespace)
+            continueOnError: true
+
+          - task: KubernetesManifest@0
+            displayName: 'Deploy to Kubernetes'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: $(kubernetesServiceConnection)
+              namespace: $(namespace)
+              manifests: |
+                $(Build.SourcesDirectory)/k8s/deployment.yml
+                $(Build.SourcesDirectory)/k8s/service.yml
+              containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+
+          - task: Kubernetes@1
+            displayName: 'Check rollout status'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+              namespace: $(namespace)
+              command: 'rollout'
+              arguments: 'status deployment/myapp --timeout=5m'
+
+          - task: Kubernetes@1
+            displayName: 'Get deployment info'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+              namespace: $(namespace)
+              command: 'get'
+              arguments: 'pods,svc,deployment'
+
+- stage: SmokeTest
+  displayName: 'Smoke Test'
+  dependsOn: DeployToK8s
+  jobs:
+  - job: SmokeTest
+    displayName: 'Run Smoke Tests'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - script: |
+        echo "Running smoke tests against deployed application"
+        # Add actual smoke test commands here
+        curl -f https://myapp.example.com/health || exit 1
+      displayName: 'Health Check'
+      timeoutInMinutes: 5
+
+    - script: |
+        echo "All smoke tests passed"
+      displayName: 'Smoke Test Results'

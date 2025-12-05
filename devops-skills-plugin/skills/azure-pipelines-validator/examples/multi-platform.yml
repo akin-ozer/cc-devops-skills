@@ -1,0 +1,65 @@
+# Multi-Platform Build Pipeline
+# Builds and tests on multiple operating systems
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+
+pr: none
+
+strategy:
+  matrix:
+    linux:
+      imageName: 'ubuntu-22.04'
+      platformName: 'Linux'
+    mac:
+      imageName: 'macOS-13'
+      platformName: 'macOS'
+    windows:
+      imageName: 'windows-2022'
+      platformName: 'Windows'
+
+pool:
+  vmImage: $(imageName)
+
+variables:
+  nodeVersion: '20.x'
+
+steps:
+  - task: NodeTool@0
+    displayName: 'Install Node.js'
+    inputs:
+      versionSpec: '$(nodeVersion)'
+
+  - task: Cache@2
+    displayName: 'Cache npm packages'
+    inputs:
+      key: 'npm | "$(Agent.OS)" | package-lock.json'
+      restoreKeys: |
+        npm | "$(Agent.OS)"
+      path: '$(npm_config_cache)'
+
+  - script: npm ci
+    displayName: 'Install Dependencies'
+
+  - script: npm run build
+    displayName: 'Build on $(platformName)'
+
+  - script: npm test
+    displayName: 'Run Tests on $(platformName)'
+
+  - task: PublishTestResults@2
+    displayName: 'Publish Test Results'
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/test-results.xml'
+      testRunTitle: 'Tests on $(platformName)'
+
+  - task: PublishCodeCoverageResults@2
+    displayName: 'Publish Coverage'
+    inputs:
+      codeCoverageTool: 'Cobertura'
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage/cobertura-coverage.xml'

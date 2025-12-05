@@ -1,0 +1,154 @@
+---
+# Molecule configuration template for Ansible role testing
+# Copy this file to your role's molecule/default/molecule.yml
+
+# Dependency manager
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    role-file: requirements.yml
+
+# Test driver (docker, podman, vagrant, ec2, etc.)
+driver:
+  name: docker
+
+# Test platforms - define your test instances
+platforms:
+  # Ubuntu 22.04 LTS
+  - name: ubuntu-22-04
+    image: ubuntu:22.04
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+  # Ubuntu 20.04 LTS
+  - name: ubuntu-20-04
+    image: ubuntu:20.04
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+  # Debian 11
+  - name: debian-11
+    image: debian:11
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+  # Rocky Linux 9 (RHEL-compatible)
+  - name: rocky-9
+    image: rockylinux:9
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+# Provisioner settings
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+      callback_whitelist: profile_tasks, timer, yaml
+      stdout_callback: yaml
+    ssh_connection:
+      pipelining: true
+  inventory:
+    host_vars:
+      # Example host-specific vars
+      ubuntu-22-04:
+        ansible_python_interpreter: /usr/bin/python3
+      ubuntu-20-04:
+        ansible_python_interpreter: /usr/bin/python3
+      debian-11:
+        ansible_python_interpreter: /usr/bin/python3
+      rocky-9:
+        ansible_python_interpreter: /usr/bin/python3
+  playbooks:
+    # Optional prepare playbook (runs before converge)
+    prepare: prepare.yml
+    # Main converge playbook (runs your role)
+    converge: converge.yml
+    # Verification playbook (tests if role worked)
+    verify: verify.yml
+  # Additional Ansible configuration
+  env:
+    ANSIBLE_FORCE_COLOR: "true"
+
+# Verifier settings
+verifier:
+  name: ansible
+
+# Linter settings
+lint: |
+  set -e
+  yamllint .
+  ansible-lint .
+
+# Scenario settings
+scenario:
+  name: default
+  # Test sequence
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy
+  # Create sequence (for 'molecule create')
+  create_sequence:
+    - dependency
+    - create
+    - prepare
+  # Converge sequence (for 'molecule converge')
+  converge_sequence:
+    - dependency
+    - create
+    - prepare
+    - converge
+  # Check sequence (for 'molecule check')
+  check_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - create
+    - prepare
+    - converge
+    - check
+    - destroy
+  # Destroy sequence (for 'molecule destroy')
+  destroy_sequence:
+    - dependency
+    - cleanup
+    - destroy

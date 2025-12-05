@@ -1,0 +1,123 @@
+# .NET CI/CD Pipeline
+# Build, test, and deploy .NET application to Azure App Service
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  buildConfiguration: 'Release'
+  dotnetVersion: '8.x'
+  vmImageName: 'ubuntu-22.04'
+
+stages:
+- stage: Build
+  displayName: 'Build .NET Application'
+  jobs:
+  - job: Build
+    displayName: 'Build Job'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK $(dotnetVersion)'
+      inputs:
+        version: $(dotnetVersion)
+        packageType: 'sdk'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run unit tests'
+      inputs:
+        command: 'test'
+        projects: '**/*Tests/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"'
+
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Agent.TempDirectory)/**/coverage.cobertura.xml'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish application'
+      inputs:
+        command: 'publish'
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory) --no-build'
+        zipAfterPublish: true
+        modifyOutputPath: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'webapp'
+        publishLocation: 'pipeline'
+
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  jobs:
+  - deployment: DeployStaging
+    displayName: 'Deploy to Azure App Service (Staging)'
+    pool:
+      vmImage: $(vmImageName)
+    environment: staging
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: webapp
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App'
+            inputs:
+              azureSubscription: 'AzureServiceConnection'
+              appType: 'webAppLinux'
+              appName: 'myapp-staging'
+              package: '$(Pipeline.Workspace)/webapp/**/*.zip'
+              runtimeStack: 'DOTNETCORE|8.0'
+
+- stage: DeployProduction
+  displayName: 'Deploy to Production'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployProduction
+    displayName: 'Deploy to Azure App Service (Production)'
+    pool:
+      vmImage: $(vmImageName)
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: webapp
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App'
+            inputs:
+              azureSubscription: 'AzureServiceConnection'
+              appType: 'webAppLinux'
+              appName: 'myapp-prod'
+              package: '$(Pipeline.Workspace)/webapp/**/*.zip'
+              runtimeStack: 'DOTNETCORE|8.0'

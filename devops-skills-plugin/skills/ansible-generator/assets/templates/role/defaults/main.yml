@@ -1,0 +1,29 @@
+---
+# Role: [ROLE_NAME]
+# Default variables (lowest priority - can be easily overridden)
+
+# Package and service names
+[role_name]_package_name: [package_name]
+[role_name]_service_name: [service_name]
+
+# User and group
+[role_name]_user: [service_user]
+[role_name]_group: [service_group]
+
+# Directories
+[role_name]_config_dir: /etc/[service_name]
+[role_name]_data_dir: /var/lib/[service_name]
+[role_name]_log_dir: /var/log/[service_name]
+
+# Configuration
+[role_name]_port: [default_port]
+[role_name]_bind_address: 0.0.0.0
+[role_name]_max_connections: 100
+
+# Feature flags
+[role_name]_enable_ssl: false
+[role_name]_enable_monitoring: true
+[role_name]_enable_backup: true
+
+# Version (if applicable)
+[role_name]_version: latest

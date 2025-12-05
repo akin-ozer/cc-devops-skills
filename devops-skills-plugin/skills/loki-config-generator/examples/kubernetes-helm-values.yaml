@@ -1,0 +1,272 @@
+# Loki Helm Chart Values - Production Configuration
+# For use with: helm install loki grafana/loki -f kubernetes-helm-values.yaml
+# Requires Loki Helm chart 6.x+ (supports Loki 3.x)
+
+# Deployment mode: SimpleScalable (recommended) or Distributed (microservices)
+deploymentMode: SimpleScalable
+
+# Loki configuration
+loki:
+  # Authentication - enable for multi-tenancy
+  auth_enabled: true
+
+  # Schema configuration - CRITICAL: Use TSDB with v13
+  schemaConfig:
+    configs:
+      - from: "2025-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # Ingester settings
+  ingester:
+    chunk_encoding: snappy
+
+  # Querier settings
+  querier:
+    max_concurrent: 4
+
+  # Pattern Ingester (Loki 3.0+) - enables log pattern detection
+  pattern_ingester:
+    enabled: true
+
+  # Limits configuration
+  limits_config:
+    # Ingestion limits
+    ingestion_rate_mb: 50
+    ingestion_burst_size_mb: 100
+    max_line_size: 256KB
+
+    # Stream limits (prevent cardinality explosion)
+    max_streams_per_user: 100000
+    max_global_streams_per_user: 500000
+
+    # Query limits
+    max_entries_limit_per_query: 5000
+    max_query_length: 721h
+    max_query_parallelism: 32
+
+    # Retention
+    retention_period: 30d
+
+    # Structured metadata (required for OTLP)
+    allow_structured_metadata: true
+    max_structured_metadata_size: 64KB
+    max_structured_metadata_entries_count: 128
+
+    # Volume API (for Explore Logs / Grafana Drilldown)
+    volume_enabled: true
+
+    # OTLP Configuration (Loki 3.0+)
+    otlp_config:
+      resource_attributes:
+        attributes_config:
+          - action: index_label
+            attributes:
+              - service.name
+              - service.namespace
+              - deployment.environment
+
+  # Compactor settings (retention)
+  compactor:
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+
+  # Frontend encoding - protobuf recommended
+  frontend:
+    encoding: protobuf
+
+  # Common configuration
+  commonConfig:
+    replication_factor: 3
+
+  # Storage configuration - Choose your backend
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
+    s3:
+      region: us-east-1
+      # Use IAM roles for authentication (recommended)
+      # Or specify endpoint for MinIO/S3-compatible storage
+      # endpoint: http://minio.minio.svc.cluster.local:9000
+      # accessKeyId: ${S3_ACCESS_KEY_ID}
+      # secretAccessKey: ${S3_SECRET_ACCESS_KEY}
+      # s3ForcePathStyle: true
+
+# Simple Scalable mode replicas
+backend:
+  replicas: 3
+  persistence:
+    size: 10Gi
+    storageClass: null  # Use default storage class
+
+read:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+write:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+# Disable components not used in SimpleScalable mode
+ingester:
+  replicas: 0
+querier:
+  replicas: 0
+queryFrontend:
+  replicas: 0
+queryScheduler:
+  replicas: 0
+distributor:
+  replicas: 0
+compactor:
+  replicas: 0
+indexGateway:
+  replicas: 0
+bloomCompactor:
+  replicas: 0
+bloomGateway:
+  replicas: 0
+
+# Single binary mode (disabled for SimpleScalable)
+singleBinary:
+  replicas: 0
+
+# Gateway configuration
+gateway:
+  enabled: true
+  replicas: 2
+  service:
+    type: ClusterIP
+    # type: LoadBalancer  # Uncomment for external access
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 60
+
+# Memcached for caching (included by default)
+memcached:
+  # Chunks cache
+  chunk_cache:
+    enabled: true
+    host: "{{ .Release.Name }}-memcached-chunks"
+    service: memcached-client
+    batch_size: 256
+    parallelism: 10
+
+  # Results cache
+  results_cache:
+    enabled: true
+    host: "{{ .Release.Name }}-memcached-results"
+    service: memcached-client
+    default_validity: 12h
+
+# Memcached chunks subchart
+memcachedChunks:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 100m
+    limits:
+      memory: 2Gi
+      cpu: 500m
+
+# Memcached results subchart
+memcachedResults:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+
+# MinIO for testing (disable in production, use real S3/GCS/Azure)
+minio:
+  enabled: false  # Set to true for local testing
+  # enabled: true
+  # persistence:
+  #   size: 20Gi
+  # resources:
+  #   requests:
+  #     cpu: 100m
+  #     memory: 256Mi
+
+# Monitoring
+monitoring:
+  # ServiceMonitor for Prometheus
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    labels:
+      release: prometheus  # Match your Prometheus operator labels
+
+  # Grafana dashboards
+  dashboards:
+    enabled: true
+    labels:
+      grafana_dashboard: "1"
+
+  # Self-monitoring (sends Loki's logs to itself)
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+
+  # Loki Canary for testing
+  lokiCanary:
+    enabled: true
+
+# Network policies (optional, for enhanced security)
+networkPolicy:
+  enabled: false
+  # ingress:
+  #   - from:
+  #       - namespaceSelector:
+  #           matchLabels:
+  #             name: monitoring
+  # egress:
+  #   - to:
+  #       - namespaceSelector: {}
+
+# Pod disruption budgets
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Global settings
+global:
+  # Image settings
+  image:
+    registry: docker.io
+    # repository: grafana/loki
+    # tag: 3.6.2  # Current stable (Nov 2025) - Specify version or use chart default
+
+  # DNS configuration
+  dnsService: kube-dns
+  dnsNamespace: kube-system
+
+# Test configuration
+test:
+  enabled: true
+  timeout: 1m

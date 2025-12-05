@@ -1,0 +1,182 @@
+# Multi-Stage CI/CD Pipeline
+# Complete pipeline with build, test, and deployment stages
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+    - release/*
+
+variables:
+  nodeVersion: '20.x'
+  buildConfiguration: 'Release'
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Application'
+    pool:
+      vmImage: 'ubuntu-22.04'
+
+    steps:
+    - task: NodeTool@0
+      displayName: 'Install Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: $(nodeVersion)
+
+    - task: Cache@2
+      displayName: 'Cache npm packages'
+      inputs:
+        key: 'npm | "$(Agent.OS)" | package-lock.json'
+        restoreKeys: |
+          npm | "$(Agent.OS)"
+        path: $(Pipeline.Workspace)/.npm
+
+    - script: npm ci --cache $(Pipeline.Workspace)/.npm
+      displayName: 'Install dependencies'
+
+    - script: npm run build
+      displayName: 'Build application'
+
+    - task: CopyFiles@2
+      displayName: 'Copy build artifacts'
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/dist'
+        Contents: '**'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/dist'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish build artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'drop'
+        publishLocation: 'pipeline'
+
+- stage: Test
+  displayName: 'Test Stage'
+  dependsOn: Build
+  jobs:
+  - job: UnitTests
+    displayName: 'Run Unit Tests'
+    pool:
+      vmImage: 'ubuntu-22.04'
+
+    steps:
+    - task: NodeTool@0
+      displayName: 'Install Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: $(nodeVersion)
+
+    - task: Cache@2
+      displayName: 'Cache npm packages'
+      inputs:
+        key: 'npm | "$(Agent.OS)" | package-lock.json'
+        path: $(Pipeline.Workspace)/.npm
+
+    - script: npm ci --cache $(Pipeline.Workspace)/.npm
+      displayName: 'Install dependencies'
+
+    - script: npm test -- --coverage --ci
+      displayName: 'Run unit tests'
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      displayName: 'Publish test results'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/junit.xml'
+        failTaskOnFailedTests: true
+
+    - task: PublishCodeCoverageResults@1
+      condition: succeededOrFailed()
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage/cobertura-coverage.xml'
+
+  - job: LintJob
+    displayName: 'Run Linting'
+    pool:
+      vmImage: 'ubuntu-22.04'
+
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: $(nodeVersion)
+
+    - script: npm ci
+      displayName: 'Install dependencies'
+
+    - script: npm run lint
+      displayName: 'Run ESLint'
+
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  dependsOn: Test
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  jobs:
+  - deployment: DeployStaging
+    displayName: 'Deploy to Staging Environment'
+    pool:
+      vmImage: 'ubuntu-22.04'
+    environment: staging
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+            displayName: 'Download build artifacts'
+
+          - script: echo "Deploying to staging environment"
+            displayName: 'Deploy to Staging'
+
+          - script: echo "Running smoke tests on staging"
+            displayName: 'Smoke Test'
+
+- stage: DeployProduction
+  displayName: 'Deploy to Production'
+  dependsOn:
+  - Test
+  - DeployStaging
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployProduction
+    displayName: 'Deploy to Production Environment'
+    pool:
+      vmImage: 'ubuntu-22.04'
+    environment: production
+    strategy:
+      runOnce:
+        preDeploy:
+          steps:
+          - script: echo "Pre-deployment checks"
+            displayName: 'Pre-Deployment Validation'
+
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+            displayName: 'Download build artifacts'
+
+          - script: echo "Deploying to production environment"
+            displayName: 'Deploy to Production'
+
+        postDeploy:
+          steps:
+          - script: echo "Post-deployment validation"
+            displayName: 'Post-Deployment Validation'
+
+        on:
+          failure:
+            steps:
+            - script: echo "Deployment failed - initiating rollback"
+              displayName: 'Rollback on Failure'
+
+          success:
+            steps:
+            - script: echo "Deployment successful"
+              displayName: 'Deployment Success Notification'

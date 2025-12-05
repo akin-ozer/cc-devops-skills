@@ -1,0 +1,52 @@
+# Pipeline Using Templates
+# Demonstrates how to use reusable templates
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  azureSubscription: 'AzureServiceConnection'
+  appNameBase: 'myapp'
+
+stages:
+# Build stage using template
+- stage: Build
+  displayName: 'Build Application'
+  jobs:
+  - job: BuildApp
+    displayName: 'Build with Template'
+    pool:
+      vmImage: 'ubuntu-22.04'
+
+    steps:
+    # Use the reusable build template
+    - template: templates/build-template.yml
+      parameters:
+        nodeVersion: '20.x'
+        workingDirectory: '.'
+        runTests: true
+        publishArtifacts: true
+
+# Deploy to staging using template
+- template: templates/deploy-template.yml
+  parameters:
+    environment: 'staging'
+    azureSubscription: $(azureSubscription)
+    appName: '$(appNameBase)-staging'
+    appType: 'webAppLinux'
+    artifactName: 'webapp'
+    approvalRequired: false
+
+# Deploy to production using template (only from main branch)
+- ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+  - template: templates/deploy-template.yml
+    parameters:
+      environment: 'production'
+      azureSubscription: $(azureSubscription)
+      appName: '$(appNameBase)-prod'
+      appType: 'webAppLinux'
+      artifactName: 'webapp'
+      approvalRequired: true

@@ -1,0 +1,495 @@
+# Complex Workflow Example
+# Demonstrates advanced GitLab CI/CD features including:
+# - Multiple includes and templates
+# - Matrix builds
+# - Conditional workflows
+# - Release automation
+# - Performance testing
+# - Infrastructure as Code
+
+include:
+  # Use Jobs templates instead of deprecated Security templates
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+
+stages:
+  - .pre
+  - validate
+  - build
+  - test
+  - performance
+  - security
+  - package
+  - deploy
+  - verify
+  - .post
+
+variables:
+  CACHE_VERSION: "v2"
+  DOCKER_BUILDKIT: 1
+  FF_USE_FASTZIP: "true"
+  ARTIFACT_COMPRESSION_LEVEL: "fast"
+  CACHE_COMPRESSION_LEVEL: "fast"
+
+# Workflow rules to control when pipelines run
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: never
+
+# Default settings for all jobs
+default:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  interruptible: true
+  tags:
+    - docker
+
+# Hidden job templates
+.base_node_job:
+  image: node:18-alpine
+  cache:
+    key: ${CACHE_VERSION}-node-${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+      - .npm/
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+.base_go_job:
+  image: golang:1.21-alpine
+  cache:
+    key: ${CACHE_VERSION}-go-${CI_COMMIT_REF_SLUG}
+    paths:
+      - /go/pkg/mod/
+  before_script:
+    - go mod download
+
+.deploy_template:
+  image: google/cloud-sdk:486.0.0-alpine
+  before_script:
+    - echo $GCP_SERVICE_KEY | base64 -d > ${HOME}/gcp-key.json
+    - gcloud auth activate-service-account --key-file ${HOME}/gcp-key.json
+    - gcloud config set project $GCP_PROJECT_ID
+
+# Validation stage
+validate_yaml:
+  stage: .pre
+  image: alpine:3.19
+  before_script:
+    - apk add --no-cache yamllint
+  script:
+    - yamllint -c .yamllint.yml .
+  rules:
+    - changes:
+        - "**/*.yml"
+        - "**/*.yaml"
+
+validate_terraform:
+  stage: validate
+  image: hashicorp/terraform:1.9
+  script:
+    - cd infrastructure/
+    - terraform fmt -check -recursive
+    - terraform init -backend=false
+    - terraform validate
+  rules:
+    - changes:
+        - "infrastructure/**/*.tf"
+
+# Build stage with matrix
+build_frontend:
+  extends: .base_node_job
+  stage: build
+  parallel:
+    matrix:
+      - NODE_VERSION: ["16", "18", "20"]
+  image: node:${NODE_VERSION}-alpine
+  script:
+    - echo "Building with Node ${NODE_VERSION}"
+    - npm run build
+    - npm run build:storybook
+  artifacts:
+    paths:
+      - dist/
+      - storybook-static/
+    expire_in: 1 day
+    name: "frontend-node${NODE_VERSION}-${CI_COMMIT_SHORT_SHA}"
+
+build_backend:
+  extends: .base_go_job
+  stage: build
+  script:
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/server-linux-amd64 ./cmd/server
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o bin/server-darwin-arm64 ./cmd/server
+  artifacts:
+    paths:
+      - bin/
+    expire_in: 1 day
+
+build_docker_images:
+  stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - |
+      docker build \
+        --cache-from $CI_REGISTRY_IMAGE:buildcache \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --build-arg VERSION=$CI_COMMIT_TAG \
+        --build-arg COMMIT=$CI_COMMIT_SHORT_SHA \
+        --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --tag $CI_REGISTRY_IMAGE:latest \
+        .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - if [ -n "$CI_COMMIT_TAG" ]; then docker push $CI_REGISTRY_IMAGE:latest; fi
+  needs:
+    - build_backend
+
+# Test stage
+test_unit:
+  extends: .base_node_job
+  stage: test
+  script:
+    - npm run test:unit -- --coverage
+  artifacts:
+    when: always
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+  coverage: '/Lines\s*:\s*(\d+\.\d+)%/'
+
+test_integration:
+  extends: .base_go_job
+  stage: test
+  services:
+    - name: postgres:15-alpine
+      alias: db
+    - name: redis:7-alpine
+      alias: cache
+    - name: elasticsearch:8.11.0
+      alias: search
+      variables:
+        discovery.type: single-node
+        xpack.security.enabled: "false"
+  variables:
+    DATABASE_URL: $TEST_DATABASE_URL  # Set in CI/CD variables
+    REDIS_URL: $TEST_REDIS_URL
+    ELASTICSEARCH_URL: $TEST_ELASTICSEARCH_URL
+  script:
+    - go test -v -tags=integration -coverprofile=coverage.out ./...
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+test_e2e:
+  image: mcr.microsoft.com/playwright:v1.40.0-jammy
+  stage: test
+  needs:
+    - build_frontend
+  services:
+    - name: postgres:15-alpine
+      alias: db
+  variables:
+    DATABASE_URL: $TEST_DATABASE_URL  # Set in CI/CD variables
+  script:
+    - npm ci
+    - npm run test:e2e
+  artifacts:
+    when: always
+    paths:
+      - playwright-report/
+      - test-results/
+    expire_in: 7 days
+  allow_failure: true
+
+test_accessibility:
+  extends: .base_node_job
+  stage: test
+  needs:
+    - build_frontend
+  script:
+    - npm run test:a11y
+  artifacts:
+    when: always
+    paths:
+      - a11y-report/
+    expire_in: 7 days
+  allow_failure: true
+
+# Performance testing
+performance_lighthouse:
+  image: cypress/browsers:node18.12.0-chrome106-ff106
+  stage: performance
+  needs:
+    - build_frontend
+  script:
+    - npm install -g @lhci/cli
+    - lhci autorun --collect.url=http://localhost:3000
+  artifacts:
+    paths:
+      - .lighthouseci/
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  allow_failure: true
+
+performance_k6:
+  image: grafana/k6:0.52.0
+  stage: performance
+  needs:
+    - deploy_staging
+  script:
+    - k6 run --out json=k6-results.json tests/k6/load-test.js
+  artifacts:
+    paths:
+      - k6-results.json
+    expire_in: 7 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  allow_failure: true
+
+# Security stage (in addition to included templates)
+security_container_scan:
+  image: aquasec/trivy:0.55.0
+  stage: security
+  needs:
+    - build_docker_images
+  script:
+    - trivy image --format json --output container-scan.json $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - trivy image --severity HIGH,CRITICAL --exit-code 1 $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  artifacts:
+    paths:
+      - container-scan.json
+    expire_in: 7 days
+  allow_failure: false
+
+security_license_scan:
+  extends: .base_node_job
+  stage: security
+  script:
+    - npm install -g license-checker
+    - license-checker --json --out licenses.json
+    - license-checker --failOn 'GPL;AGPL'
+  artifacts:
+    paths:
+      - licenses.json
+    expire_in: 30 days
+  allow_failure: true
+
+# Package stage
+package_helm_chart:
+  image: alpine/helm:3.15.3
+  stage: package
+  needs:
+    - build_docker_images
+  script:
+    - helm package helm/app --version $CI_COMMIT_TAG --app-version $CI_COMMIT_TAG
+    - helm push app-$CI_COMMIT_TAG.tgz oci://$CI_REGISTRY/$CI_PROJECT_PATH/charts
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+create_release:
+  image: registry.gitlab.com/gitlab-org/release-cli:v0.17.0
+  stage: package
+  needs:
+    - build_backend
+    - build_frontend
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    name: 'Release $CI_COMMIT_TAG'
+    description: './CHANGELOG.md'
+    assets:
+      links:
+        - name: 'Linux Binary'
+          url: '${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/bin/server-linux-amd64'
+        - name: 'macOS Binary'
+          url: '${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/bin/server-darwin-arm64'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# Deploy stage
+deploy_staging:
+  extends: .deploy_template
+  stage: deploy
+  needs:
+    - test_unit
+    - test_integration
+    - security_container_scan
+  script:
+    - gcloud run deploy $SERVICE_NAME-staging
+        --image $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+        --platform managed
+        --region $GCP_REGION
+        --allow-unauthenticated
+  environment:
+    name: staging
+    url: https://staging.example.com
+    on_stop: stop_staging
+    auto_stop_in: 7 days
+    deployment_tier: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+stop_staging:
+  extends: .deploy_template
+  stage: deploy
+  script:
+    - gcloud run services delete $SERVICE_NAME-staging
+        --platform managed
+        --region $GCP_REGION
+        --quiet
+  environment:
+    name: staging
+    action: stop
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+deploy_production:
+  extends: .deploy_template
+  stage: deploy
+  needs:
+    - test_unit
+    - test_integration
+    - test_e2e
+    - security_container_scan
+  script:
+    - gcloud run deploy $SERVICE_NAME
+        --image $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+        --platform managed
+        --region $GCP_REGION
+        --allow-unauthenticated
+  environment:
+    name: production
+    url: https://example.com
+    deployment_tier: production
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: manual
+      allow_failure: false
+  interruptible: false
+  resource_group: production
+
+deploy_canary:
+  extends: .deploy_template
+  stage: deploy
+  needs:
+    - deploy_production
+  script:
+    - echo "Deploying canary with 10% traffic"
+    - gcloud run services update-traffic $SERVICE_NAME
+        --to-revisions=$CI_COMMIT_SHORT_SHA=10,LATEST=90
+        --platform managed
+        --region $GCP_REGION
+  environment:
+    name: production/canary
+    deployment_tier: production
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: manual
+  interruptible: false
+
+# Verify stage
+verify_deployment:
+  image: curlimages/curl:8.9.0
+  stage: verify
+  needs:
+    - deploy_production
+  script:
+    - |
+      response=$(curl -s -o /dev/null -w "%{http_code}" https://example.com/health)
+      if [ $response -eq 200 ]; then
+        echo "Health check passed"
+      else
+        echo "Health check failed with status $response"
+        exit 1
+      fi
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+smoke_tests:
+  extends: .base_node_job
+  stage: verify
+  needs:
+    - deploy_production
+  script:
+    - npm run test:smoke
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# Post-deployment actions
+notify_success:
+  image: alpine:3.19
+  stage: .post
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      curl -X POST $SLACK_WEBHOOK \
+        -H 'Content-Type: application/json' \
+        -d "{
+          \"text\": \"✅ Pipeline successful!\",
+          \"attachments\": [{
+            \"color\": \"good\",
+            \"fields\": [
+              {\"title\": \"Project\", \"value\": \"$CI_PROJECT_NAME\", \"short\": true},
+              {\"title\": \"Branch\", \"value\": \"$CI_COMMIT_BRANCH\", \"short\": true},
+              {\"title\": \"Commit\", \"value\": \"$CI_COMMIT_SHORT_SHA\", \"short\": true},
+              {\"title\": \"Author\", \"value\": \"$GITLAB_USER_NAME\", \"short\": true}
+            ],
+            \"actions\": [{
+              \"type\": \"button\",
+              \"text\": \"View Pipeline\",
+              \"url\": \"$CI_PIPELINE_URL\"
+            }]
+          }]
+        }"
+  when: on_success
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+notify_failure:
+  image: alpine:3.19
+  stage: .post
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      curl -X POST $SLACK_WEBHOOK \
+        -H 'Content-Type: application/json' \
+        -d "{
+          \"text\": \"❌ Pipeline failed!\",
+          \"attachments\": [{
+            \"color\": \"danger\",
+            \"fields\": [
+              {\"title\": \"Project\", \"value\": \"$CI_PROJECT_NAME\", \"short\": true},
+              {\"title\": \"Branch\", \"value\": \"$CI_COMMIT_BRANCH\", \"short\": true},
+              {\"title\": \"Failed Job\", \"value\": \"$CI_JOB_NAME\", \"short\": true}
+            ],
+            \"actions\": [{
+              \"type\": \"button\",
+              \"text\": \"View Pipeline\",
+              \"url\": \"$CI_PIPELINE_URL\"
+            }]
+          }]
+        }"
+  when: on_failure
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'

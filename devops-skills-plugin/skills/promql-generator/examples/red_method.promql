@@ -1,0 +1,155 @@
+# RED Method Queries
+
+# The RED method focuses on three key metrics for request-driven services:
+# - Rate: Request throughput (requests per second)
+# - Errors: Error rate (failed requests)
+# - Duration: Latency (response time)
+
+## ===== RATE =====
+
+# Total requests per second
+sum(rate(http_requests_total{job="api-server"}[5m]))
+
+# Requests per second by service
+sum by (service) (rate(http_requests_total[5m]))
+
+# Requests per second by endpoint
+sum by (endpoint) (rate(http_requests_total{job="api-server"}[5m]))
+
+# Requests per second by method
+sum by (method) (rate(http_requests_total{job="api-server"}[5m]))
+
+# Requests per second by status code
+sum by (status_code) (rate(http_requests_total{job="api-server"}[5m]))
+
+# Requests per second by method and endpoint
+sum by (method, endpoint) (rate(http_requests_total{job="api-server"}[5m]))
+
+## ===== ERRORS =====
+
+# Error ratio (0 to 1)
+sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+/
+sum(rate(http_requests_total{job="api-server"}[5m]))
+
+# Error percentage (0 to 100)
+(
+  sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api-server"}[5m]))
+) * 100
+
+# Error rate by service
+sum by (service) (rate(http_requests_total{status_code=~"5.."}[5m]))
+/
+sum by (service) (rate(http_requests_total[5m]))
+
+# Error rate by endpoint
+sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+/
+sum by (endpoint) (rate(http_requests_total[5m]))
+
+# 4xx vs 5xx errors
+sum by (status_code) (rate(http_requests_total{status_code=~"[45].."}[5m]))
+
+# Success rate (inverse of error rate)
+1 - (
+  sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total[5m]))
+)
+
+## ===== DURATION =====
+
+# P50 (median) latency
+histogram_quantile(0.50,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# P90 latency
+histogram_quantile(0.90,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# P95 latency
+histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# P99 latency
+histogram_quantile(0.99,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# P99.9 latency
+histogram_quantile(0.999,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+)
+
+# Average latency
+sum(rate(http_request_duration_seconds_sum{job="api-server"}[5m]))
+/
+sum(rate(http_request_duration_seconds_count{job="api-server"}[5m]))
+
+# Latency by endpoint
+histogram_quantile(0.95,
+  sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+# Latency by service
+histogram_quantile(0.95,
+  sum by (service, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+## ===== COMBINED RED DASHBOARD =====
+
+# These queries work well together on a single dashboard
+
+# Panel 1: Request rate
+sum(rate(http_requests_total{job="api-server"}[5m]))
+
+# Panel 2: Error rate percentage
+(
+  sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api-server"}[5m]))
+) * 100
+
+# Panel 3: Latency percentiles (multiple queries)
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))  # P50
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))  # P95
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))  # P99
+
+# Panel 4: Top 5 slowest endpoints
+topk(5,
+  histogram_quantile(0.95,
+    sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))
+  )
+)
+
+# Panel 5: Top 5 endpoints by error rate
+topk(5,
+  sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m]))
+  /
+  sum by (endpoint) (rate(http_requests_total[5m]))
+)
+
+## ===== ALERTING RULES (RED) =====
+
+# High error rate alert (> 5%)
+(
+  sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m]))
+  /
+  sum(rate(http_requests_total{job="api-server"}[5m]))
+) > 0.05
+
+# High latency alert (P95 > 1 second)
+histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))
+) > 1
+
+# Low request rate alert (< 10 req/s, possible outage)
+sum(rate(http_requests_total{job="api-server"}[5m])) < 10
+
+# High request rate alert (> 1000 req/s, possible attack/spike)
+sum(rate(http_requests_total{job="api-server"}[5m])) > 1000

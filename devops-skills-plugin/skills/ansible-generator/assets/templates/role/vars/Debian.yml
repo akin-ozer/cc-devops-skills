@@ -1,0 +1,6 @@
+---
+# OS-specific variables for Debian/Ubuntu
+
+[role_name]_package_name: [debian_package_name]
+[role_name]_service_name: [debian_service_name]
+[role_name]_config_dir: /etc/[service_name]

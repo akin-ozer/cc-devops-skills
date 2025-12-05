@@ -1,0 +1,63 @@
+# Docker Build and Push Pipeline
+# Builds a Docker image and pushes to Azure Container Registry
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-22.04'
+
+variables:
+  imageRepository: 'myapp'
+  containerRegistry: 'myacr.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+stages:
+  - stage: Build
+    displayName: 'Build and Push Docker Image'
+    jobs:
+      - job: Docker
+        displayName: 'Docker Build Job'
+        steps:
+          - task: Docker@2
+            displayName: 'Build Docker Image'
+            inputs:
+              command: 'build'
+              repository: '$(imageRepository)'
+              dockerfile: '$(dockerfilePath)'
+              tags: |
+                $(tag)
+                latest
+
+          - task: Docker@2
+            displayName: 'Push to Container Registry'
+            inputs:
+              command: 'push'
+              repository: '$(imageRepository)'
+              containerRegistry: '$(containerRegistry)'
+              tags: |
+                $(tag)
+
+  - stage: SecurityScan
+    displayName: 'Security Scanning'
+    dependsOn: Build
+    jobs:
+      - job: Scan
+        displayName: 'Container Security Scan'
+        steps:
+          - task: ContainerStructureTest@0
+            displayName: 'Container Structure Test'
+            inputs:
+              dockerRegistryServiceConnection: '$(containerRegistry)'
+              repository: '$(imageRepository)'
+              tag: '$(tag)'
+              configFile: 'container-structure-test.yaml'
+              testRunTitle: 'Container Structure Tests'

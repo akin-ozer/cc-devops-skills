@@ -1,0 +1,16 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Tools directory (created by install_tools.sh)
+.tools/
+
+# Node modules (if gitlab-ci-local installed locally)
+node_modules/
+package-lock.json
+
+# Test artifacts
+*.log
+test-results/

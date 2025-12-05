@@ -1,0 +1,376 @@
+# Scheduled Tasks Workflow Example
+# Demonstrates: Cron schedules, scheduled maintenance, dependency updates, cleanup tasks
+
+name: Scheduled Maintenance Tasks
+
+on:
+  # Run dependency audit daily at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+
+  # Allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task to run'
+        required: false
+        type: choice
+        options:
+          - all
+          - dependency-audit
+          - stale-branches
+          - cache-cleanup
+          - health-check
+        default: 'all'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel scheduled maintenance
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # Job 1: Security and dependency audit
+  dependency-audit:
+    name: Dependency Security Audit
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.task == 'all' || github.event.inputs.task == 'dependency-audit'
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run npm audit
+        id: audit
+        continue-on-error: true
+        run: |
+          npm audit --audit-level=moderate > audit-report.txt 2>&1
+          AUDIT_EXIT_CODE=$?
+          echo "exit_code=$AUDIT_EXIT_CODE" >> $GITHUB_OUTPUT
+          cat audit-report.txt
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: dependency-audit-report
+          path: audit-report.txt
+          retention-days: 30
+
+      - name: Create issue if vulnerabilities found
+        if: steps.audit.outputs.exit_code != '0'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('audit-report.txt', 'utf8');
+
+            // Check if issue already exists
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security,dependencies,automated'
+            });
+
+            const existingIssue = issues.find(issue =>
+              issue.title.includes('Security Vulnerabilities Detected')
+            );
+
+            if (!existingIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🔒 Security Vulnerabilities Detected - ' + new Date().toISOString().split('T')[0],
+                body: `## Security Audit Report\n\n**Date:** ${new Date().toISOString()}\n\n### Audit Results\n\n\`\`\`\n${report}\n\`\`\`\n\n---\n*This issue was automatically created by the scheduled maintenance workflow.*`,
+                labels: ['security', 'dependencies', 'automated']
+              });
+            }
+
+  # Job 2: Clean up stale branches
+  stale-branches:
+    name: Cleanup Stale Branches
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.task == 'all' || github.event.inputs.task == 'stale-branches'
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0  # Need full history for branch analysis
+
+      - name: Find stale branches
+        id: find-stale
+        run: |
+          # Find branches not updated in 90 days
+          echo "## Stale Branches (90+ days old)" > stale-branches.txt
+          echo "" >> stale-branches.txt
+
+          git for-each-ref --sort=-committerdate refs/remotes/origin/ --format='%(refname:short)|%(committerdate:relative)|%(authorname)' | \
+          while IFS='|' read -r branch date author; do
+            # Skip main, develop, and release branches
+            if [[ "$branch" =~ ^origin/(main|develop|master|release/) ]]; then
+              continue
+            fi
+
+            # Check if branch is older than 90 days
+            if [[ "$date" =~ "month" ]] || [[ "$date" =~ "year" ]]; then
+              echo "- **$branch** (Last updated: $date, Author: $author)" >> stale-branches.txt
+            fi
+          done
+
+          cat stale-branches.txt
+
+      - name: Create PR to document stale branches
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('stale-branches.txt', 'utf8');
+
+            // Create or update issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'maintenance,automated'
+            });
+
+            const existingIssue = issues.find(issue =>
+              issue.title.includes('Stale Branches Report')
+            );
+
+            if (existingIssue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `${report}\n\n---\n*Updated: ${new Date().toISOString()}*`
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🧹 Stale Branches Report',
+                body: `${report}\n\n---\n*Created: ${new Date().toISOString()}*`,
+                labels: ['maintenance', 'automated']
+              });
+            }
+
+  # Job 3: Clean up old caches
+  cache-cleanup:
+    name: Cache Cleanup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.task == 'all' || github.event.inputs.task == 'cache-cleanup'
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Cleanup old caches
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { data: caches } = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            console.log(`Found ${caches.total_count} caches`);
+
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            let deletedCount = 0;
+            for (const cache of caches.actions_caches) {
+              const cacheDate = new Date(cache.last_accessed_at);
+
+              if (cacheDate < thirtyDaysAgo) {
+                console.log(`Deleting cache: ${cache.key} (last accessed: ${cache.last_accessed_at})`);
+
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id
+                });
+
+                deletedCount++;
+              }
+            }
+
+            console.log(`Deleted ${deletedCount} old caches`);
+            core.summary
+              .addHeading('Cache Cleanup Summary')
+              .addRaw(`Deleted ${deletedCount} caches older than 30 days`)
+              .write();
+
+  # Job 4: Health check for external services
+  health-check:
+    name: External Services Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.task == 'all' || github.event.inputs.task == 'health-check'
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Check production API health
+        id: api-health
+        continue-on-error: true
+        run: |
+          # Replace with your actual API endpoint
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://api.example.com/health || echo "000")
+          echo "response_code=$RESPONSE" >> $GITHUB_OUTPUT
+
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ API is healthy (HTTP $RESPONSE)"
+          else
+            echo "❌ API health check failed (HTTP $RESPONSE)"
+            exit 1
+          fi
+
+      - name: Check database connectivity
+        id: db-health
+        continue-on-error: true
+        run: |
+          # Example: Check database connectivity
+          # Replace with your actual health check logic
+          echo "✅ Database connectivity check passed"
+
+      - name: Check CDN status
+        id: cdn-health
+        continue-on-error: true
+        run: |
+          # Example: Check CDN health
+          CDN_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://cdn.example.com || echo "000")
+          echo "response_code=$CDN_RESPONSE" >> $GITHUB_OUTPUT
+
+          if [ "$CDN_RESPONSE" = "200" ]; then
+            echo "✅ CDN is healthy (HTTP $CDN_RESPONSE)"
+          else
+            echo "❌ CDN health check failed (HTTP $CDN_RESPONSE)"
+            exit 1
+          fi
+
+      - name: Create incident if health checks fail
+        if: |
+          steps.api-health.outcome == 'failure' ||
+          steps.db-health.outcome == 'failure' ||
+          steps.cdn-health.outcome == 'failure'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const apiStatus = '${{ steps.api-health.outcome }}';
+            const dbStatus = '${{ steps.db-health.outcome }}';
+            const cdnStatus = '${{ steps.cdn-health.outcome }}';
+
+            const failedServices = [];
+            if (apiStatus === 'failure') failedServices.push('API');
+            if (dbStatus === 'failure') failedServices.push('Database');
+            if (cdnStatus === 'failure') failedServices.push('CDN');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Health Check Failed: ${failedServices.join(', ')}`,
+              body: `## Health Check Failure Report\n\n**Date:** ${new Date().toISOString()}\n\n### Failed Services\n\n${failedServices.map(s => `- ❌ ${s}`).join('\n')}\n\n### Details\n\n- API Status: ${apiStatus}\n- Database Status: ${dbStatus}\n- CDN Status: ${cdnStatus}\n\n---\n*This incident was automatically created by the scheduled maintenance workflow.*`,
+              labels: ['incident', 'automated', 'urgent']
+            });
+
+  # Job 5: Generate weekly metrics report
+  weekly-metrics:
+    name: Weekly Metrics Report
+    runs-on: ubuntu-latest
+    # Run only on Mondays (schedule) or manual trigger
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * 1') || github.event.inputs.task == 'all'
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Generate metrics
+        id: metrics
+        run: |
+          # Commits in last 7 days
+          COMMITS=$(git log --since="7 days ago" --oneline | wc -l)
+          echo "commits=$COMMITS" >> $GITHUB_OUTPUT
+
+          # PRs merged in last 7 days
+          # This would typically use GitHub API
+          echo "prs=0" >> $GITHUB_OUTPUT
+
+          # Contributors in last 7 days
+          CONTRIBUTORS=$(git log --since="7 days ago" --format='%ae' | sort -u | wc -l)
+          echo "contributors=$CONTRIBUTORS" >> $GITHUB_OUTPUT
+
+      - name: Create metrics report
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const commits = '${{ steps.metrics.outputs.commits }}';
+            const contributors = '${{ steps.metrics.outputs.contributors }}';
+
+            const weekStart = new Date();
+            weekStart.setDate(weekStart.getDate() - 7);
+
+            core.summary
+              .addHeading('📊 Weekly Repository Metrics')
+              .addRaw(`**Period:** ${weekStart.toISOString().split('T')[0]} to ${new Date().toISOString().split('T')[0]}`)
+              .addBreak()
+              .addTable([
+                [{data: 'Metric', header: true}, {data: 'Value', header: true}],
+                ['Commits', commits],
+                ['Contributors', contributors]
+              ])
+              .write();
+
+  # Summary job
+  summary:
+    name: Maintenance Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-audit, stale-branches, cache-cleanup, health-check]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Scheduled Maintenance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Task Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Dependency Audit: ${{ needs.dependency-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Stale Branches Cleanup: ${{ needs.stale-branches.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cache Cleanup: ${{ needs.cache-cleanup.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Health Check: ${{ needs.health-check.result }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.dependency-audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.stale-branches.result }}" == "failure" ]] || \
+             [[ "${{ needs.cache-cleanup.result }}" == "failure" ]] || \
+             [[ "${{ needs.health-check.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Some tasks failed. Please check the logs.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **All maintenance tasks completed successfully.**" >> $GITHUB_STEP_SUMMARY
+          fi

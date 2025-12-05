@@ -1,0 +1,417 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Helm Chart Values Schema",
+  "description": "JSON Schema for validating Helm chart values. This is an example that should be customized for your specific chart.",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "description": "Number of pod replicas",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 1
+    },
+    "image": {
+      "description": "Container image configuration",
+      "type": "object",
+      "properties": {
+        "repository": {
+          "description": "Container image repository",
+          "type": "string",
+          "pattern": "^[a-z0-9.-]+(/[a-z0-9._-]+)*$"
+        },
+        "pullPolicy": {
+          "description": "Image pull policy",
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "default": "IfNotPresent"
+        },
+        "tag": {
+          "description": "Container image tag",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": ["repository"]
+    },
+    "imagePullSecrets": {
+      "description": "List of image pull secrets",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "default": []
+    },
+    "nameOverride": {
+      "description": "Override the chart name",
+      "type": "string",
+      "default": ""
+    },
+    "fullnameOverride": {
+      "description": "Override the full resource name",
+      "type": "string",
+      "default": ""
+    },
+    "serviceAccount": {
+      "description": "Service account configuration",
+      "type": "object",
+      "properties": {
+        "create": {
+          "description": "Create a service account",
+          "type": "boolean",
+          "default": true
+        },
+        "annotations": {
+          "description": "Annotations for service account",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "name": {
+          "description": "Service account name",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "podAnnotations": {
+      "description": "Annotations for pods",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "podSecurityContext": {
+      "description": "Security context for pods",
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": {
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fsGroup": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "securityContext": {
+      "description": "Security context for containers",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "drop": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "readOnlyRootFilesystem": {
+          "type": "boolean"
+        },
+        "runAsNonRoot": {
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "service": {
+      "description": "Service configuration",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Service type",
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"],
+          "default": "ClusterIP"
+        },
+        "port": {
+          "description": "Service port",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 80
+        },
+        "targetPort": {
+          "description": "Target port on the pod",
+          "anyOf": [
+            {"type": "integer", "minimum": 1, "maximum": 65535},
+            {"type": "string"}
+          ]
+        },
+        "nodePort": {
+          "description": "Node port for NodePort service",
+          "type": "integer",
+          "minimum": 30000,
+          "maximum": 32767
+        }
+      },
+      "required": ["type", "port"]
+    },
+    "ingress": {
+      "description": "Ingress configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable ingress",
+          "type": "boolean",
+          "default": false
+        },
+        "className": {
+          "description": "Ingress class name",
+          "type": "string",
+          "default": ""
+        },
+        "annotations": {
+          "description": "Ingress annotations",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "hosts": {
+          "description": "Ingress hosts",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "format": "hostname"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Prefix", "Exact", "ImplementationSpecific"]
+                    }
+                  },
+                  "required": ["path", "pathType"]
+                }
+              }
+            },
+            "required": ["host", "paths"]
+          },
+          "default": []
+        },
+        "tls": {
+          "description": "Ingress TLS configuration",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "secretName": {
+                "type": "string"
+              },
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "hostname"
+                }
+              }
+            },
+            "required": ["hosts"]
+          },
+          "default": []
+        }
+      }
+    },
+    "resources": {
+      "description": "Resource limits and requests",
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "pattern": "^[0-9]+(m|[0-9]*\\.?[0-9]+)?$"
+            },
+            "memory": {
+              "type": "string",
+              "pattern": "^[0-9]+(Mi|Gi|Ki|M|G|K)?$"
+            }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "pattern": "^[0-9]+(m|[0-9]*\\.?[0-9]+)?$"
+            },
+            "memory": {
+              "type": "string",
+              "pattern": "^[0-9]+(Mi|Gi|Ki|M|G|K)?$"
+            }
+          }
+        }
+      }
+    },
+    "autoscaling": {
+      "description": "Horizontal pod autoscaling configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable autoscaling",
+          "type": "boolean",
+          "default": false
+        },
+        "minReplicas": {
+          "description": "Minimum number of replicas",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "maxReplicas": {
+          "description": "Maximum number of replicas",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "targetCPUUtilizationPercentage": {
+          "description": "Target CPU utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "targetMemoryUtilizationPercentage": {
+          "description": "Target memory utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "nodeSelector": {
+      "description": "Node selector for pod assignment",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "tolerations": {
+      "description": "Tolerations for pod assignment",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["Equal", "Exists"]
+          },
+          "value": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+          },
+          "tolerationSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "default": []
+    },
+    "affinity": {
+      "description": "Affinity rules for pod assignment",
+      "type": "object",
+      "default": {}
+    },
+    "env": {
+      "description": "Environment variables",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object"
+          }
+        },
+        "required": ["name"]
+      },
+      "default": []
+    },
+    "volumeMounts": {
+      "description": "Volume mounts",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "readOnly": {
+            "type": "boolean"
+          }
+        },
+        "required": ["name", "mountPath"]
+      },
+      "default": []
+    },
+    "volumes": {
+      "description": "Volumes",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "default": []
+    }
+  },
+  "required": ["replicaCount", "image", "service"]
+}

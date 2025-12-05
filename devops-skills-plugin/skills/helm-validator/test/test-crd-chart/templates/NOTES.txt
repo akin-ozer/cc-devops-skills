@@ -1,0 +1,37 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+{{- if .Values.certManager.enabled }}
+
+CERTIFICATE STATUS:
+  A Certificate resource has been created for TLS.
+
+  Check certificate status:
+    kubectl get certificate {{ .Release.Name }}-cert -n {{ .Release.Namespace }}
+
+  Check certificate secret:
+    kubectl get secret {{ .Release.Name }}-tls -n {{ .Release.Namespace }}
+
+  DNS Names configured:
+  {{- range .Values.certManager.certificate.dnsNames }}
+    - {{ . }}
+  {{- end }}
+
+  NOTE: Ensure cert-manager is installed and a ClusterIssuer named 'letsencrypt-prod' exists.
+{{- end }}
+
+{{- if .Values.prometheus.enabled }}
+
+SERVICEMONITOR STATUS:
+  A ServiceMonitor has been created for Prometheus scraping.
+
+  Check ServiceMonitor:
+    kubectl get servicemonitor {{ .Release.Name }}-monitor -n {{ .Release.Namespace }}
+
+  NOTE: Ensure Prometheus Operator is installed and configured to watch this namespace.
+{{- end }}
+
+To learn more about the release, try:
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}

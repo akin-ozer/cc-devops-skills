@@ -1,0 +1,92 @@
+---
+# yamllint configuration for Ansible files
+
+extends: default
+
+rules:
+  # Line length - Allow longer lines for readability
+  line-length:
+    max: 160
+    level: warning
+
+  # Indentation - Ansible standard is 2 spaces
+  indentation:
+    spaces: 2
+    indent-sequences: yes
+    check-multi-line-strings: no
+
+  # Comments - Allow comments to go over line length
+  comments:
+    min-spaces-from-content: 1
+    require-starting-space: yes
+    ignore-shebangs: yes
+
+  # Trailing spaces - No trailing spaces
+  trailing-spaces: {}
+
+  # Empty lines - Reasonable limits
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  # Brackets - Consistent spacing
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Braces - Consistent spacing
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Colons - Standard Ansible formatting
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  # Commas - Standard formatting
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+
+  # Truthy values - Allow yes/no for readability
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: yes
+
+  # Document start - Optional for Ansible
+  document-start:
+    present: no
+
+  # Document end - Not required
+  document-end:
+    present: no
+
+  # Key duplicates - Error on duplicates
+  key-duplicates: {}
+
+  # Hyphens - Consistent spacing
+  hyphens:
+    max-spaces-after: 1
+
+  # New lines - Unix style
+  new-lines:
+    type: unix
+
+  # Quoted strings - Allow both styles
+  quoted-strings:
+    quote-type: any
+    required: no
+
+# Ignore certain paths
+ignore: |
+  .git/
+  venv/
+  .venv/
+  __pycache__/
+  *.pyc
+  .molecule/
+  .cache/
+  .tox/

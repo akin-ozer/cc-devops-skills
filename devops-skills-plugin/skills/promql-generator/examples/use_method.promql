@@ -1,0 +1,263 @@
+# USE Method Queries
+
+# The USE method focuses on resources (CPU, memory, disk, network):
+# - Utilization: Percentage of resource in use
+# - Saturation: Queue depth or resource contention
+# - Errors: Error counters
+
+## ===== CPU UTILIZATION =====
+
+# Overall CPU utilization percentage
+(
+  1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
+) * 100
+
+# CPU utilization by instance
+100 - (
+  avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100
+)
+
+# CPU utilization by mode
+sum by (mode) (rate(node_cpu_seconds_total[5m])) * 100
+
+# CPU user mode percentage
+avg(rate(node_cpu_seconds_total{mode="user"}[5m])) * 100
+
+# CPU system mode percentage
+avg(rate(node_cpu_seconds_total{mode="system"}[5m])) * 100
+
+## ===== CPU SATURATION =====
+
+# Load average (1 minute)
+node_load1
+
+# Load average normalized by CPU count
+node_load1
+/
+count without (cpu, mode) (node_cpu_seconds_total{mode="idle"})
+
+# Load average (5 minute)
+node_load5
+
+# Load average (15 minute)
+node_load15
+
+# CPU run queue length (if available)
+node_schedstat_running
+
+## ===== CPU ERRORS =====
+
+# CPU thermal throttling events
+rate(node_cpu_guest_seconds_total[5m])
+
+## ===== MEMORY UTILIZATION =====
+
+# Memory utilization percentage
+(
+  (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  /
+  node_memory_MemTotal_bytes
+) * 100
+
+# Memory utilization by instance
+(
+  (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  /
+  node_memory_MemTotal_bytes
+) * 100
+
+# Available memory in GB
+node_memory_MemAvailable_bytes / 1024 / 1024 / 1024
+
+# Used memory in GB
+(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / 1024 / 1024 / 1024
+
+# Swap usage percentage
+(
+  (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+  /
+  node_memory_SwapTotal_bytes
+) * 100
+
+## ===== MEMORY SATURATION =====
+
+# Swap in rate (pages/sec)
+rate(node_vmstat_pswpin[5m])
+
+# Swap out rate (pages/sec)
+rate(node_vmstat_pswpout[5m])
+
+# Page faults
+rate(node_vmstat_pgfault[5m])
+
+# Major page faults
+rate(node_vmstat_pgmajfault[5m])
+
+## ===== MEMORY ERRORS =====
+
+# OOM (Out of Memory) kills
+rate(node_vmstat_oom_kill[5m])
+
+# Memory allocation failures
+rate(node_vmstat_allocstall[5m])
+
+## ===== DISK UTILIZATION =====
+
+# Disk space utilization percentage
+(
+  (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+  /
+  node_filesystem_size_bytes
+) * 100
+
+# Disk space utilization by mount point
+(
+  (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+  /
+  node_filesystem_size_bytes
+) * 100
+
+# Available disk space in GB
+node_filesystem_avail_bytes / 1024 / 1024 / 1024
+
+# Disk I/O utilization percentage (0-100%)
+rate(node_disk_io_time_seconds_total[5m]) * 100
+
+## ===== DISK SATURATION =====
+
+# Average I/O queue length
+rate(node_disk_io_time_weighted_seconds_total[5m])
+
+# Read operations per second
+rate(node_disk_reads_completed_total[5m])
+
+# Write operations per second
+rate(node_disk_writes_completed_total[5m])
+
+# Total I/O operations per second
+rate(node_disk_reads_completed_total[5m]) + rate(node_disk_writes_completed_total[5m])
+
+# Read throughput in MB/s
+rate(node_disk_read_bytes_total[5m]) / 1024 / 1024
+
+# Write throughput in MB/s
+rate(node_disk_written_bytes_total[5m]) / 1024 / 1024
+
+# Average read latency
+rate(node_disk_read_time_seconds_total[5m])
+/
+rate(node_disk_reads_completed_total[5m])
+
+# Average write latency
+rate(node_disk_write_time_seconds_total[5m])
+/
+rate(node_disk_writes_completed_total[5m])
+
+## ===== DISK ERRORS =====
+
+# Disk I/O errors
+rate(node_disk_io_errors_total[5m])
+
+# Filesystem errors
+rate(node_filesystem_device_error[5m])
+
+## ===== NETWORK UTILIZATION =====
+
+# Network receive rate in MB/s
+rate(node_network_receive_bytes_total[5m]) / 1024 / 1024
+
+# Network transmit rate in MB/s
+rate(node_network_transmit_bytes_total[5m]) / 1024 / 1024
+
+# Total network throughput in MB/s
+(
+  rate(node_network_receive_bytes_total[5m])
+  +
+  rate(node_network_transmit_bytes_total[5m])
+) / 1024 / 1024
+
+# Network utilization as percentage of link speed
+(
+  rate(node_network_transmit_bytes_total[5m])
+  /
+  node_network_speed_bytes
+) * 100
+
+## ===== NETWORK SATURATION =====
+
+# TCP connection states
+node_netstat_Tcp_CurrEstab  # Established connections
+node_netstat_Tcp_ActiveOpens  # Active opens
+node_netstat_Tcp_PassiveOpens  # Passive opens
+
+# TCP listen queue
+node_sockstat_TCP_alloc  # Allocated sockets
+
+# Network queue drops
+rate(node_network_transmit_drop_total[5m])
+
+## ===== NETWORK ERRORS =====
+
+# Network receive errors
+rate(node_network_receive_errs_total[5m])
+
+# Network transmit errors
+rate(node_network_transmit_errs_total[5m])
+
+# Total network errors
+rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m])
+
+# Network receive drops
+rate(node_network_receive_drop_total[5m])
+
+# Network transmit drops
+rate(node_network_transmit_drop_total[5m])
+
+## ===== COMBINED USE DASHBOARD =====
+
+# CPU Panel
+(1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
+
+# CPU Saturation Panel
+node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"})
+
+# Memory Panel
+((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100
+
+# Memory Saturation Panel
+rate(node_vmstat_pswpout[5m])
+
+# Disk Utilization Panel
+((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100
+
+# Disk Saturation Panel
+rate(node_disk_io_time_weighted_seconds_total[5m])
+
+# Network Utilization Panel
+rate(node_network_receive_bytes_total[5m]) / 1024 / 1024
+
+# Network Errors Panel
+rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m])
+
+## ===== ALERTING RULES (USE) =====
+
+# High CPU utilization (> 80%)
+(1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 80
+
+# High CPU saturation (load > 2x CPU count)
+node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 2
+
+# High memory utilization (> 90%)
+((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 90
+
+# Memory saturation (excessive swapping)
+rate(node_vmstat_pswpout[5m]) > 1024
+
+# Low disk space (< 10%)
+((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100 > 90
+
+# High disk I/O saturation
+rate(node_disk_io_time_weighted_seconds_total[5m]) > 1
+
+# Network errors
+rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 1

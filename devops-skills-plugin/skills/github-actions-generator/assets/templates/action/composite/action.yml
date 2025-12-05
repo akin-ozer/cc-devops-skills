@@ -1,0 +1,82 @@
+name: '[ACTION_NAME]'
+description: '[ACTION_DESCRIPTION]'
+author: '[AUTHOR_NAME]'
+
+# Define inputs that users can provide
+inputs:
+  [input-name]:
+    description: '[INPUT_DESCRIPTION]'
+    required: [true/false]
+    default: '[DEFAULT_VALUE]'
+
+  [input-name-2]:
+    description: '[INPUT_DESCRIPTION]'
+    required: [true/false]
+
+# Define outputs that the action produces
+outputs:
+  [output-name]:
+    description: '[OUTPUT_DESCRIPTION]'
+    value: ${{ steps.[step-id].outputs.[output-name] }}
+
+  [output-name-2]:
+    description: '[OUTPUT_DESCRIPTION]'
+    value: ${{ steps.[step-id].outputs.[output-name-2] }}
+
+# Branding (optional - for GitHub Marketplace)
+branding:
+  icon: '[ICON_NAME]'  # Feather icon name
+  color: '[COLOR]'     # white, yellow, blue, green, orange, red, purple, gray-dark
+
+runs:
+  using: 'composite'
+  steps:
+    # Step 1: Validation
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.[input-name] }}" ]; then
+          echo "::error::Input [input-name] is required"
+          exit 1
+        fi
+        echo "✅ Inputs validated"
+
+    # Step 2: Setup
+    - name: [SETUP_STEP_NAME]
+      uses: [SETUP_ACTION]@[SHA] # [VERSION]
+      with:
+        [SETUP_INPUT]: ${{ inputs.[input-name] }}
+
+    # Step 3: Main logic
+    - name: [MAIN_STEP_NAME]
+      id: [step-id]
+      shell: bash
+      env:
+        INPUT_VALUE: ${{ inputs.[input-name] }}
+      run: |
+        echo "::group::Running [MAIN_STEP_NAME]"
+
+        # Main action logic here
+        [MAIN_COMMAND]
+
+        # Set outputs
+        echo "[output-name]=[OUTPUT_VALUE]" >> $GITHUB_OUTPUT
+        echo "[output-name-2]=[OUTPUT_VALUE_2]" >> $GITHUB_OUTPUT
+
+        echo "::endgroup::"
+
+    # Step 4: Post-processing (optional)
+    - name: Post-processing
+      if: success()
+      shell: bash
+      run: |
+        echo "✅ Action completed successfully"
+        echo "Output: ${{ steps.[step-id].outputs.[output-name] }}"
+
+    # Step 5: Cleanup (optional)
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: |
+        # Cleanup logic here
+        echo "Cleanup completed"

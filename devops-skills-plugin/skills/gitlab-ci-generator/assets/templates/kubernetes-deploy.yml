@@ -1,0 +1,449 @@
+# Kubernetes Deployment Pipeline Template
+# Deploys applications to Kubernetes clusters using kubectl, Helm, or Kustomize
+#
+# Usage: Copy this template and customize for your needs
+# - Replace [PLACEHOLDERS] with actual values
+# - Choose deployment method: kubectl, Helm, or Kustomize
+# - Configure cluster authentication
+# - Validate with gitlab-ci-validator skill
+
+stages:
+  - build
+  - deploy
+  - verify
+
+# Global variables
+variables:
+  # Kubernetes configuration
+  KUBE_NAMESPACE: production              # [PLACEHOLDER: Set your namespace]
+  KUBE_CONTEXT: ""                        # [PLACEHOLDER: Set if using specific context]
+
+  # Image configuration
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+
+  # Deployment configuration
+  APP_NAME: myapp                         # [PLACEHOLDER: Set your application name]
+  REPLICAS: "3"                           # [PLACEHOLDER: Set desired replicas]
+
+# ============================================================================
+# BUILD DOCKER IMAGE
+# ============================================================================
+
+build-image:
+  stage: build
+
+  image: docker:24-dind
+
+  services:
+    - docker:24-dind
+
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+  script:
+    - docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+    - docker push ${IMAGE_NAME}:${IMAGE_TAG}
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# ============================================================================
+# DEPLOY WITH KUBECTL
+# ============================================================================
+
+deploy-kubectl-staging:
+  stage: deploy
+
+  image: bitnami/kubectl:1.29
+
+  before_script:
+    # Configure kubectl (using GitLab Kubernetes integration or kubeconfig)
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+    - kubectl config set-context --current --namespace=$KUBE_NAMESPACE
+
+    # Verify connection
+    - kubectl cluster-info
+    - kubectl get nodes
+
+  script:
+    # Update deployment image
+    - kubectl set image deployment/${APP_NAME}
+        ${APP_NAME}=${IMAGE_NAME}:${IMAGE_TAG}
+        -n $KUBE_NAMESPACE
+        --record
+
+    # Wait for rollout to complete
+    - kubectl rollout status deployment/${APP_NAME}
+        -n $KUBE_NAMESPACE
+        --timeout=5m
+
+    # Verify deployment
+    - kubectl get deployment ${APP_NAME} -n $KUBE_NAMESPACE
+    - kubectl get pods -n $KUBE_NAMESPACE -l app=${APP_NAME}
+
+  environment:
+    name: staging
+    url: https://staging.example.com      # [PLACEHOLDER: Set your staging URL]
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  resource_group: k8s-staging
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+  needs: [build-image]
+
+deploy-kubectl-production:
+  stage: deploy
+
+  image: bitnami/kubectl:1.29
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+    - kubectl config set-context --current --namespace=$KUBE_NAMESPACE
+
+  script:
+    # Update deployment
+    - kubectl set image deployment/${APP_NAME}
+        ${APP_NAME}=${IMAGE_NAME}:${IMAGE_TAG}
+        -n $KUBE_NAMESPACE
+        --record
+
+    # Wait for rollout
+    - kubectl rollout status deployment/${APP_NAME}
+        -n $KUBE_NAMESPACE
+        --timeout=10m
+
+  environment:
+    name: production
+    url: https://example.com               # [PLACEHOLDER: Set your production URL]
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  resource_group: k8s-production
+
+  when: manual
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+    - when: never
+
+  needs: [build-image]
+
+# ============================================================================
+# DEPLOY WITH HELM
+# ============================================================================
+
+deploy-helm-staging:
+  stage: deploy
+
+  image: alpine/helm:3.14.0
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+    - helm version
+
+  script:
+    # Add Helm repositories if needed
+    # - helm repo add myrepo https://charts.example.com
+    # - helm repo update
+
+    # Deploy or upgrade with Helm
+    - helm upgrade --install ${APP_NAME} ./helm/${APP_NAME}
+        --namespace $KUBE_NAMESPACE
+        --create-namespace
+        --set image.repository=${IMAGE_NAME}
+        --set image.tag=${IMAGE_TAG}
+        --set replicaCount=${REPLICAS}
+        --set environment=staging
+        --wait
+        --timeout 5m
+        --atomic                             # Rollback on failure
+
+    # Verify deployment
+    - helm list -n $KUBE_NAMESPACE
+    - helm status ${APP_NAME} -n $KUBE_NAMESPACE
+
+  environment:
+    name: staging
+    url: https://staging.example.com
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  resource_group: k8s-staging
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+  needs: [build-image]
+
+deploy-helm-production:
+  stage: deploy
+
+  image: alpine/helm:3.14.0
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+    - helm version
+
+  script:
+    - helm upgrade --install ${APP_NAME} ./helm/${APP_NAME}
+        --namespace $KUBE_NAMESPACE
+        --create-namespace
+        --set image.repository=${IMAGE_NAME}
+        --set image.tag=${IMAGE_TAG}
+        --set replicaCount=${REPLICAS}
+        --set environment=production
+        --wait
+        --timeout 10m
+        --atomic
+
+  environment:
+    name: production
+    url: https://example.com
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  resource_group: k8s-production
+
+  when: manual
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+    - when: never
+
+  needs: [build-image]
+
+# ============================================================================
+# DEPLOY WITH KUSTOMIZE
+# ============================================================================
+
+deploy-kustomize-staging:
+  stage: deploy
+
+  image:
+    name: registry.k8s.io/kubectl:v1.29.1
+    entrypoint: [""]
+
+  variables:
+    KUSTOMIZE_DIR: k8s/overlays/staging   # [PLACEHOLDER: Set your kustomize directory]
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+
+  script:
+    # Update image in kustomization
+    - cd ${KUSTOMIZE_DIR}
+    - kustomize edit set image ${APP_NAME}=${IMAGE_NAME}:${IMAGE_TAG}
+
+    # Apply kustomization
+    - kustomize build . | kubectl apply -f -
+
+    # Wait for rollout
+    - kubectl rollout status deployment/${APP_NAME} -n $KUBE_NAMESPACE --timeout=5m
+
+  environment:
+    name: staging
+    url: https://staging.example.com
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  resource_group: k8s-staging
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+  needs: [build-image]
+
+# ============================================================================
+# DEPLOY WITH MANIFEST FILES
+# ============================================================================
+
+deploy-manifests:
+  stage: deploy
+
+  image: bitnami/kubectl:1.29
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+
+  script:
+    # Apply all manifests
+    - kubectl apply -f k8s/namespace.yaml
+    - kubectl apply -f k8s/configmap.yaml
+    - kubectl apply -f k8s/secret.yaml
+    - kubectl apply -f k8s/deployment.yaml
+    - kubectl apply -f k8s/service.yaml
+    - kubectl apply -f k8s/ingress.yaml
+
+    # Wait for deployment
+    - kubectl rollout status deployment/${APP_NAME} -n $KUBE_NAMESPACE
+
+  environment:
+    name: staging
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+  needs: [build-image]
+
+# ============================================================================
+# ROLLBACK
+# ============================================================================
+
+rollback-kubectl:
+  stage: deploy
+
+  image: bitnami/kubectl:1.29
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+
+  script:
+    # Rollback to previous revision
+    - kubectl rollout undo deployment/${APP_NAME} -n $KUBE_NAMESPACE
+    - kubectl rollout status deployment/${APP_NAME} -n $KUBE_NAMESPACE
+
+  environment:
+    name: production
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  when: manual
+
+  resource_group: k8s-production
+
+rollback-helm:
+  stage: deploy
+
+  image: alpine/helm:3.14.0
+
+  before_script:
+    - if [ -n "$KUBE_CONTEXT" ]; then kubectl config use-context $KUBE_CONTEXT; fi
+
+  script:
+    # Rollback Helm release
+    - helm rollback ${APP_NAME} -n $KUBE_NAMESPACE
+    - helm status ${APP_NAME} -n $KUBE_NAMESPACE
+
+  environment:
+    name: production
+    kubernetes:
+      namespace: $KUBE_NAMESPACE
+
+  when: manual
+
+  resource_group: k8s-production
+
+# ============================================================================
+# VERIFY DEPLOYMENT
+# ============================================================================
+
+verify-deployment:
+  stage: verify
+
+  image: curlimages/curl:8.6.0
+
+  script:
+    # Wait for service to be ready
+    - sleep 30
+
+    # Health check
+    - curl -f https://staging.example.com/health || exit 1
+
+    # Smoke tests
+    - curl -f https://staging.example.com/api/status || exit 1
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+  needs: [deploy-kubectl-staging]
+
+  allow_failure: true
+
+# ============================================================================
+# EXAMPLE KUBERNETES MANIFESTS
+# ============================================================================
+#
+# k8s/deployment.yaml:
+#
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: myapp
+#   namespace: production
+# spec:
+#   replicas: 3
+#   selector:
+#     matchLabels:
+#       app: myapp
+#   template:
+#     metadata:
+#       labels:
+#         app: myapp
+#     spec:
+#       containers:
+#       - name: myapp
+#         image: registry.gitlab.com/group/project:latest
+#         ports:
+#         - containerPort: 3000
+#         env:
+#         - name: NODE_ENV
+#           value: "production"
+#         resources:
+#           requests:
+#             memory: "128Mi"
+#             cpu: "100m"
+#           limits:
+#             memory: "512Mi"
+#             cpu: "500m"
+#         livenessProbe:
+#           httpGet:
+#             path: /health
+#             port: 3000
+#           initialDelaySeconds: 30
+#           periodSeconds: 10
+#         readinessProbe:
+#           httpGet:
+#             path: /ready
+#             port: 3000
+#           initialDelaySeconds: 5
+#           periodSeconds: 5
+#
+# ---
+# k8s/service.yaml:
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: myapp
+#   namespace: production
+# spec:
+#   selector:
+#     app: myapp
+#   ports:
+#   - protocol: TCP
+#     port: 80
+#     targetPort: 3000
+#   type: ClusterIP

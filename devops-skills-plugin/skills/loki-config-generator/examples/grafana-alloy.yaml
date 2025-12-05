@@ -1,0 +1,388 @@
+# Grafana Alloy Configuration for Loki Log Collection
+# Replaces deprecated Promtail (support ends Feb 2026)
+# Reference: https://grafana.com/docs/alloy/latest/
+#
+# Deploy as DaemonSet in Kubernetes to collect logs from all pods
+# This file is in Alloy's River configuration format (.alloy extension)
+#
+# Save as: alloy-config.alloy
+# Run with: alloy run alloy-config.alloy
+
+// =============================================================================
+// DISCOVERY: Find Kubernetes pods to collect logs from
+// =============================================================================
+
+discovery.kubernetes "pods" {
+  role = "pod"
+}
+
+// =============================================================================
+// RELABELING: Extract Kubernetes metadata as labels
+// =============================================================================
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  // Keep only running pods
+  rule {
+    source_labels = ["__meta_kubernetes_pod_phase"]
+    regex         = "Pending|Succeeded|Failed|Unknown"
+    action        = "drop"
+  }
+
+  // Namespace label
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+
+  // Pod name (stored as structured metadata due to high cardinality)
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+
+  // Container name
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+
+  // App label (common label for service identification)
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    target_label  = "app"
+  }
+
+  // App.kubernetes.io/name label (standard K8s label)
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+    target_label  = "app"
+  }
+
+  // Node name
+  rule {
+    source_labels = ["__meta_kubernetes_pod_node_name"]
+    target_label  = "node"
+  }
+
+  // Controller name (deployment, statefulset, etc.)
+  rule {
+    source_labels = ["__meta_kubernetes_pod_controller_name"]
+    target_label  = "controller"
+  }
+
+  // Controller kind
+  rule {
+    source_labels = ["__meta_kubernetes_pod_controller_kind"]
+    target_label  = "controller_kind"
+  }
+
+  // Set log file path
+  rule {
+    source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+    target_label  = "__path__"
+    separator     = "/"
+    replacement   = "/var/log/pods/*$1/$2/*.log"
+  }
+}
+
+// =============================================================================
+// LOG COLLECTION: Read logs from Kubernetes pods
+// =============================================================================
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.process.pipeline.receiver]
+}
+
+// =============================================================================
+// LOG PROCESSING: Parse and enrich logs
+// =============================================================================
+
+loki.process "pipeline" {
+  forward_to = [loki.write.default.receiver]
+
+  // Parse JSON logs (if applicable)
+  stage.json {
+    expressions = {
+      level   = "level",
+      message = "msg",
+      // Extract trace_id and span_id for correlation
+      trace_id = "trace_id",
+      span_id  = "span_id",
+    }
+  }
+
+  // Fallback: Extract level from log line
+  stage.regex {
+    expression = "(?P<level>DEBUG|INFO|WARN|ERROR|FATAL)"
+  }
+
+  // Add level label if extracted
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  // Store high-cardinality data as structured metadata (Loki 3.0+)
+  // This prevents label cardinality explosion
+  stage.structured_metadata {
+    values = {
+      trace_id = "",
+      span_id  = "",
+      // Pod name moved to structured metadata (high cardinality)
+      pod_name = "pod",
+    }
+  }
+
+  // Timestamp parsing (if logs have custom timestamps)
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339"
+  }
+
+  // Drop debug logs in production (optional)
+  // stage.drop {
+  //   expression = ".*level=debug.*"
+  //   drop_counter_reason = "debug_logs"
+  // }
+
+  // Multi-line log handling (for stack traces)
+  stage.multiline {
+    firstline     = "^\\d{4}-\\d{2}-\\d{2}|^\\[\\d{4}"
+    max_wait_time = "3s"
+    max_lines     = 128
+  }
+}
+
+// =============================================================================
+// LOKI OUTPUT: Send logs to Loki
+// =============================================================================
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push"
+
+    // Multi-tenant: Set tenant ID from namespace or static value
+    tenant_id = "default"
+
+    // For multi-tenant based on namespace:
+    // tenant_id = "{{ .namespace }}"
+
+    // Authentication (if required)
+    // basic_auth {
+    //   username = env("LOKI_USERNAME")
+    //   password = env("LOKI_PASSWORD")
+    // }
+
+    // TLS configuration (if Loki uses TLS)
+    // tls_config {
+    //   ca_file              = "/etc/alloy/tls/ca.crt"
+    //   cert_file            = "/etc/alloy/tls/tls.crt"
+    //   key_file             = "/etc/alloy/tls/tls.key"
+    //   insecure_skip_verify = false
+    // }
+  }
+
+  // Batching and retry configuration
+  external_labels = {
+    cluster = "production",
+    env     = "prod",
+  }
+}
+
+// =============================================================================
+// OPTIONAL: File-based log collection (for non-Kubernetes or specific files)
+// =============================================================================
+
+// local.file_match "var_logs" {
+//   path_targets = [
+//     {__path__ = "/var/log/*.log"},
+//     {__path__ = "/var/log/syslog"},
+//   ]
+// }
+//
+// loki.source.file "var_logs" {
+//   targets    = local.file_match.var_logs.targets
+//   forward_to = [loki.write.default.receiver]
+// }
+
+// =============================================================================
+// OPTIONAL: Journal/Systemd log collection
+// =============================================================================
+
+// loki.source.journal "systemd" {
+//   forward_to = [loki.write.default.receiver]
+//   relabel_rules = loki.relabel.journal.rules
+//   labels = {
+//     job = "systemd-journal",
+//   }
+// }
+
+// =============================================================================
+// OPTIONAL: OTLP receiver (receive logs from OpenTelemetry SDKs)
+// =============================================================================
+
+// otelcol.receiver.otlp "default" {
+//   grpc {
+//     endpoint = "0.0.0.0:4317"
+//   }
+//   http {
+//     endpoint = "0.0.0.0:4318"
+//   }
+//   output {
+//     logs = [otelcol.exporter.loki.default.input]
+//   }
+// }
+//
+// otelcol.exporter.loki "default" {
+//   forward_to = [loki.write.default.receiver]
+// }
+
+---
+# Kubernetes DaemonSet deployment for Grafana Alloy
+# Save as: alloy-daemonset.yaml
+# Deploy with: kubectl apply -f alloy-daemonset.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: alloy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: alloy
+data:
+  config.alloy: |
+    // Paste the Alloy configuration above here
+    // Or mount from a separate ConfigMap
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: alloy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: alloy
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: alloy
+  labels:
+    app.kubernetes.io/name: alloy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alloy
+    spec:
+      serviceAccountName: alloy
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.4.0
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - containerPort: 12345
+              name: http
+              protocol: TCP
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [DAC_READ_SEARCH]
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: data
+          emptyDir: {}
+
+---
+# Migration from Promtail
+# Convert existing Promtail config to Alloy format:
+#
+# alloy convert --source-format=promtail --output=alloy-config.alloy promtail.yaml
+#
+# Key differences from Promtail:
+# - River configuration language instead of YAML
+# - Components connected via forward_to (flow-based)
+# - discovery.kubernetes replaces kubernetes_sd_configs
+# - loki.source.kubernetes replaces scrape_configs
+# - loki.process replaces pipeline_stages
+# - loki.write replaces clients
+#
+# Documentation: https://grafana.com/docs/alloy/latest/reference/components/

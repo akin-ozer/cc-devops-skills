@@ -1,0 +1,22 @@
+---
+# Variables specific to databases group
+
+# Database type
+db_type: postgresql  # postgresql, mysql, mongodb, etc.
+
+# PostgreSQL specific
+postgresql_version: 15
+postgresql_port: 5432
+postgresql_data_dir: /var/lib/postgresql/{{ postgresql_version }}/main
+postgresql_listen_addresses: localhost
+postgresql_max_connections: 100
+
+# Backup configuration
+db_backup_enabled: true
+db_backup_dir: /var/backups/databases
+db_backup_retention_days: 7
+db_backup_schedule: "0 2 * * *"  # Daily at 2 AM
+
+# Monitoring
+db_monitoring_enabled: true
+db_slow_query_logging: true

@@ -1,0 +1,84 @@
+---
+# Example of a poorly-written Ansible playbook
+# This playbook has multiple issues that should be caught by validation
+
+- name: Setup server
+  hosts: all
+  become: yes
+  vars:
+    password: "hardcoded_password_123"  # SECURITY ISSUE: Hardcoded password
+
+  tasks:
+    # ISSUE: Task without name
+    - apt:
+        name: nginx
+
+    # ISSUE: Using shell instead of module
+    - name: Create directory
+      shell: mkdir -p /opt/myapp
+
+    # ISSUE: No changed_when for command
+    - name: Check service
+      command: systemctl status nginx
+
+    # ISSUE: Unquoted variable in shell (command injection risk)
+    - name: Process file
+      shell: cat {{ user_file }}
+
+    # ISSUE: Missing mode on file
+    - name: Create config
+      copy:
+        src: config.yml
+        dest: /etc/app/config.yml
+
+    # ISSUE: Using deprecated with_items
+    - name: Install packages
+      apt:
+        name: "{{ item }}"
+      with_items:
+        - git
+        - curl
+
+    # ISSUE: Unnecessary become on read-only task
+    - name: Read file
+      slurp:
+        src: /etc/hostname
+      become: yes
+
+    # ISSUE: Handler name mismatch
+    - name: Update config
+      template:
+        src: app.conf.j2
+        dest: /etc/app.conf
+      notify: restart service  # Handler doesn't exist
+
+    # ISSUE: No when condition for OS-specific package manager
+    - name: Install package
+      yum:
+        name: httpd
+
+    # ISSUE: Overly permissive file permissions
+    - name: Create script
+      copy:
+        src: script.sh
+        dest: /usr/local/bin/script.sh
+        mode: '0777'  # World writable!
+
+    # ISSUE: Disabled SSL verification
+    - name: Download file
+      get_url:
+        url: https://example.com/file.tar.gz
+        dest: /tmp/file.tar.gz
+        validate_certs: no  # Security issue
+
+    # ISSUE: Using short module name instead of FQCN
+    - name: Install package
+      package:
+        name: vim
+
+  # ISSUE: Handler name doesn't match notification
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted

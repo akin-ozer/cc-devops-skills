@@ -1,0 +1,363 @@
+# PromQL Optimization Examples
+# Before and after optimization with performance improvements
+
+# ==============================================================================
+# OPTIMIZATION 1: Reduce Cardinality with Specific Labels
+# ==============================================================================
+
+# BEFORE: Matches all pods across all namespaces
+# Estimated series: 10,000+
+# Query time: ~2-5 seconds
+sum(rate(container_cpu_usage_seconds_total[5m]))
+
+# AFTER: Filter to specific namespace and deployment
+# Estimated series: 50
+# Query time: ~100-200ms
+sum(rate(container_cpu_usage_seconds_total{
+  namespace="production",
+  deployment="api-service"
+}[5m]))
+
+# Performance gain: 10-50x faster
+
+
+# ==============================================================================
+# OPTIMIZATION 2: Use Exact Match Instead of Regex
+# ==============================================================================
+
+# BEFORE: Regex match (slower pattern matching)
+# Query time: ~500ms
+sum(rate(http_requests_total{status=~"200"}[5m]))
+
+# AFTER: Exact string match (index lookup)
+# Query time: ~100ms
+sum(rate(http_requests_total{status="200"}[5m]))
+
+# Performance gain: 5x faster
+
+
+# ==============================================================================
+# OPTIMIZATION 3: Recording Rules for Complex Queries
+# ==============================================================================
+
+# BEFORE: Complex query run repeatedly (in alerting rules, dashboards)
+# Query time per execution: ~1-2 seconds
+# Executed: 100 times/minute (alerts + dashboards)
+# Total compute: 100-200 seconds/minute
+sum by (job, instance, path) (
+  rate(http_request_duration_seconds_sum{job="api"}[5m])
+) /
+sum by (job, instance, path) (
+  rate(http_request_duration_seconds_count{job="api"}[5m])
+)
+
+# AFTER: Pre-compute with recording rule, then query
+# Recording rule (runs once per evaluation cycle):
+# - record: job_instance_path:http_request_duration_seconds:mean5m
+#   expr: |
+#     sum by (job, instance, path) (
+#       rate(http_request_duration_seconds_sum{job="api"}[5m])
+#     ) /
+#     sum by (job, instance, path) (
+#       rate(http_request_duration_seconds_count{job="api"}[5m])
+#     )
+
+# Query the pre-computed metric:
+# Query time: ~50ms
+job_instance_path:http_request_duration_seconds:mean5m
+
+# Performance gain: 20-40x faster
+# Resource savings: Significant reduction in Prometheus CPU usage
+
+
+# ==============================================================================
+# OPTIMIZATION 4: Appropriate irate vs rate Usage
+# ==============================================================================
+
+# BEFORE: irate over 1 hour (wastes the range, only uses last 2 samples)
+# Not using the full hour of data effectively
+irate(http_requests_total{job="api"}[1h])
+
+# AFTER: Use rate for longer ranges (considers all samples in range)
+# More accurate and stable results
+rate(http_requests_total{job="api"}[1h])
+
+# OR: Use irate with appropriate short range for high-frequency monitoring
+irate(http_requests_total{job="api"}[2m])
+
+
+# ==============================================================================
+# OPTIMIZATION 5: Efficient Label Filtering with Regex
+# ==============================================================================
+
+# BEFORE: Multiple separate queries combined with OR
+# Query time: ~800ms
+# Memory: High (multiple independent queries)
+sum(rate(http_requests_total{path="/api/users"}[5m]))
+or
+sum(rate(http_requests_total{path="/api/products"}[5m]))
+or
+sum(rate(http_requests_total{path="/api/orders"}[5m]))
+
+# AFTER: Single query with regex alternation
+# Query time: ~200ms
+# Memory: Lower (single query execution)
+sum by (path) (
+  rate(http_requests_total{path=~"/api/(users|products|orders)"}[5m])
+)
+
+# Performance gain: 4x faster, lower memory usage
+
+
+# ==============================================================================
+# OPTIMIZATION 6: Push Down Filters Before Aggregation
+# ==============================================================================
+
+# BEFORE: Filter after expensive aggregation
+# Processes all series then filters
+sum(rate(http_requests_total[5m])) and {job="api"}
+
+# AFTER: Filter before aggregation
+# Only processes relevant series
+sum(rate(http_requests_total{job="api"}[5m]))
+
+# Performance gain: 10-100x faster depending on cardinality
+
+
+# ==============================================================================
+# OPTIMIZATION 7: Use without() Instead of by() for High-Cardinality Labels
+# ==============================================================================
+
+# BEFORE: Enumerate all labels to keep (error-prone and verbose)
+sum by (job, instance, environment, datacenter, region, cluster) (
+  rate(http_requests_total[5m])
+)
+
+# AFTER: Drop only the high-cardinality label you don't need
+sum without (pod, container) (
+  rate(http_requests_total[5m])
+)
+
+# Benefit: More maintainable, less prone to errors
+
+
+# ==============================================================================
+# OPTIMIZATION 8: Simplify Nested Aggregations
+# ==============================================================================
+
+# BEFORE: Unnecessary nested aggregation
+avg(sum by (instance) (rate(http_requests_total[5m])))
+
+# AFTER: Single aggregation level
+avg(rate(http_requests_total[5m]))
+
+# Performance gain: 2x faster, clearer intent
+
+
+# ==============================================================================
+# OPTIMIZATION 9: Limit Subquery Time Ranges
+# ==============================================================================
+
+# BEFORE: 95-day subquery (extremely expensive!)
+# Query time: 60+ seconds or timeout
+# Memory: Several GB
+max_over_time(rate(http_requests_total[5m])[95d:1m])
+
+# AFTER: Reasonable time range OR use recording rules
+# Query time: ~500ms
+max_over_time(rate(http_requests_total[5m])[7d:1m])
+
+# OR BETTER: Create recording rule for base metric
+# - record: :http_requests:rate5m
+#   expr: rate(http_requests_total[5m])
+# Then:
+max_over_time(:http_requests:rate5m[30d:5m])
+
+# Performance gain: 100x+ faster
+
+
+# ==============================================================================
+# OPTIMIZATION 10: Optimize Histogram Quantile Calculations
+# ==============================================================================
+
+# BEFORE: Calculate quantile without pre-aggregation
+# Processes all label combinations
+histogram_quantile(0.95,
+  rate(http_request_duration_seconds_bucket[5m])
+)
+
+# AFTER: Pre-aggregate by relevant labels
+# Reduces series count before quantile calculation
+histogram_quantile(0.95,
+  sum by (job, le) (
+    rate(http_request_duration_seconds_bucket[5m])
+  )
+)
+
+# Performance gain: 5-10x faster
+
+
+# ==============================================================================
+# OPTIMIZATION 11: Avoid Unnecessary label_replace Operations
+# ==============================================================================
+
+# BEFORE: Replace labels in query
+# Adds processing overhead
+label_replace(
+  rate(http_requests_total[5m]),
+  "service",
+  "$1",
+  "job",
+  "(.+)-service"
+)
+
+# AFTER: Fix labels at ingestion time (relabel_configs in scrape config)
+# OR: Use recording rule if transformation is needed
+# prometheus.yml:
+# relabel_configs:
+#   - source_labels: [job]
+#     regex: '(.+)-service'
+#     target_label: service
+#     replacement: '$1'
+
+rate(http_requests_total[5m])
+
+
+# ==============================================================================
+# OPTIMIZATION 12: Efficient Error Rate Calculation
+# ==============================================================================
+
+# BEFORE: Separate queries for errors and total
+# Requires two metric scans
+rate(http_requests_total{status=~"5.."}[5m])
+/
+rate(http_requests_total[5m])
+
+# AFTER: Same but with shared label filters
+# Ensures both sides filter the same series
+rate(http_requests_total{job="api", status=~"5.."}[5m])
+/
+rate(http_requests_total{job="api"}[5m])
+
+# EVEN BETTER: Use recording rules for frequently accessed ratios
+# - record: job:http_requests:error_rate5m
+#   expr: |
+#     sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+#     /
+#     sum by (job) (rate(http_requests_total[5m]))
+
+job:http_requests:error_rate5m{job="api"}
+
+
+# ==============================================================================
+# OPTIMIZATION 13: Aggregate Before Arithmetic Operations
+# ==============================================================================
+
+# BEFORE: Arithmetic first, then aggregate (more data to process)
+sum(
+  rate(http_request_duration_seconds_sum[5m])
+  /
+  rate(http_request_duration_seconds_count[5m])
+)
+
+# AFTER: Aggregate first, then divide (fewer series)
+sum(rate(http_request_duration_seconds_sum[5m]))
+/
+sum(rate(http_request_duration_seconds_count[5m]))
+
+# Performance gain: 3-5x faster
+
+
+# ==============================================================================
+# OPTIMIZATION 14: Use topk/bottomk to Limit Results Early
+# ==============================================================================
+
+# BEFORE: Process all series, display only top 10 in dashboard
+# Prometheus computes all series
+sum by (pod) (rate(container_cpu_usage_seconds_total[5m]))
+# (Display limited in Grafana to 10)
+
+# AFTER: Limit in query itself
+# Prometheus only tracks top 10
+topk(10,
+  sum by (pod) (rate(container_cpu_usage_seconds_total[5m]))
+)
+
+# Performance gain: Lower memory usage, faster rendering
+
+
+# ==============================================================================
+# OPTIMIZATION 15: Combine Filters with AND Instead of Separate Queries
+# ==============================================================================
+
+# BEFORE: Multiple conditions checked separately
+(rate(http_requests_total[5m]) > 100)
+and
+(rate(http_requests_total[5m]) < 1000)
+
+# AFTER: Can be simplified depending on use case
+# For alerting, this is fine. For other cases:
+rate(http_requests_total[5m]) > 100 < 1000  # Not valid PromQL
+
+# Actually, the BEFORE example is already optimal for this case
+# But ensure both sides use same label filters:
+rate(http_requests_total{job="api"}[5m]) > 100
+and
+rate(http_requests_total{job="api"}[5m]) < 1000
+
+
+# ==============================================================================
+# OPTIMIZATION 16: Minimize Work in Frequent Alerts
+# ==============================================================================
+
+# BEFORE: Complex calculation in every alert evaluation (every 15s)
+# Cost: High CPU usage on Prometheus
+alert: HighErrorRate
+expr: |
+  (
+    sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+    /
+    sum by (job) (rate(http_requests_total[5m]))
+  ) > 0.05
+
+# AFTER: Use recording rule, alert on pre-computed metric
+# prometheus.yml:
+# groups:
+#   - name: recordings
+#     interval: 30s
+#     rules:
+#       - record: job:http_requests:error_rate5m
+#         expr: |
+#           sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+#           /
+#           sum by (job) (rate(http_requests_total[5m]))
+#
+#   - name: alerts
+#     interval: 15s
+#     rules:
+#       - alert: HighErrorRate
+#         expr: job:http_requests:error_rate5m > 0.05
+
+# Benefit: Alerts evaluate faster, lower CPU usage
+
+
+# ==============================================================================
+# OPTIMIZATION 17: Efficient Multi-Quantile Queries
+# ==============================================================================
+
+# BEFORE: Separate query for each quantile
+# Dashboard with 3 panels, each running own query
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+
+# AFTER: Recording rule for base aggregation
+# - record: :http_request_duration_seconds_bucket:rate5m
+#   expr: sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
+
+# Then query different quantiles of the same recording:
+histogram_quantile(0.99, :http_request_duration_seconds_bucket:rate5m)
+histogram_quantile(0.95, :http_request_duration_seconds_bucket:rate5m)
+histogram_quantile(0.50, :http_request_duration_seconds_bucket:rate5m)
+
+# Benefit: Shared computation, 3x reduction in work

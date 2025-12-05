@@ -1,0 +1,73 @@
+# yamllint configuration for Azure Pipelines YAML files
+# Tailored for Azure DevOps Pipeline syntax and conventions
+
+extends: default
+
+rules:
+  # Azure Pipelines often have long lines in scripts, conditions, and expressions
+  line-length:
+    max: 150
+    level: warning
+
+  # Azure Pipelines use 2-space indentation
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Allow comments without space from content
+  comments:
+    min-spaces-from-content: 1
+    require-starting-space: true
+    ignore-shebangs: true
+
+  # Azure Pipelines files typically don't use document start markers
+  document-start: disable
+
+  # Azure Pipelines use various truthy values
+  truthy:
+    allowed-values: ['true', 'false', 'True', 'False', 'yes', 'no', 'on', 'off']
+    check-keys: true
+
+  # Allow empty values (common in Azure Pipelines for optional fields)
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+
+  # Enforce no key duplicates (important for Azure Pipelines)
+  key-duplicates: enable
+
+  # Be lenient with trailing spaces
+  trailing-spaces:
+    level: warning
+
+  # Require new line at end of file
+  new-line-at-end-of-file: enable
+
+  # Azure Pipelines have complex nested structures
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Allow quoted strings (Azure Pipelines use $(variables) and ${{ expressions }})
+  quoted-strings:
+    quote-type: any
+    required: false
+
+  # Allow colons in values (common in Azure Pipelines for time formats, etc.)
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  # Hyphens are used for list items
+  hyphens:
+    max-spaces-after: 1
+
+  # Allow octal values (might be used in scripts)
+  octal-values:
+    forbid-implicit-octal: false
+    forbid-explicit-octal: false

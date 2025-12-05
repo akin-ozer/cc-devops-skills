@@ -1,0 +1,123 @@
+---
+# ansible-lint configuration
+
+# Enable offline mode for faster linting (no external checks)
+offline: false
+
+# Use default profile with some customization
+# Profiles: min, basic, moderate, safety, shared, production
+profile: production
+
+# Exclude paths (glob patterns)
+exclude_paths:
+  - .git/
+  - .github/
+  - venv/
+  - .venv/
+  - __pycache__/
+  - '*.pyc'
+  - .molecule/
+  - .cache/
+  - .tox/
+  - test/
+  - tests/fixtures/
+
+# Skip certain rules (by tag or rule ID)
+skip_list: []
+  # Skip git-related rules if not using git
+  # - git-latest
+
+  # Skip YAML formatting if using yamllint separately
+  # - yaml[line-length]
+
+  # Uncomment to skip experimental rules
+  # - experimental
+
+# Enable specific rules explicitly
+enable_list:
+  - name[casing]           # Enforce task naming conventions
+  - name[missing]          # All tasks should be named
+  - fqcn[action-core]     # Use FQCN for builtin modules
+  - no-changed-when       # command/shell should have changed_when
+  - no-handler            # Tasks should notify handlers
+  - var-naming            # Variable naming conventions
+
+# Warn instead of error for certain rules
+warn_list:
+  - yaml[line-length]     # Line length is a warning
+  - name[casing]          # Task naming is a warning
+  - role-name             # Role naming is a warning
+  - galaxy[tags]          # Galaxy tags are a warning
+
+# Task naming conventions
+task_name_prefix: "{path}:"
+
+# Variable naming pattern (snake_case recommended)
+var_naming_pattern: '^[a-z_][a-z0-9_]*$'
+
+# Offline mode (faster, no external checks)
+# offline: true
+
+# Mock modules that might not be available
+mock_modules:
+  - community.general.ufw
+
+# Mock roles that might not be available
+# mock_roles:
+#   - custom.role
+
+# Custom rules directory (if you have custom rules)
+# rulesdir:
+#   - .ansible-lint-rules/
+
+# Parseable output format
+# parseable: true
+
+# Quiet mode (only errors)
+# quiet: false
+
+# Show progress
+# progressbar: true
+
+# Verbosity level (0-2)
+# verbosity: 1
+
+# Write output to file
+# output_file: ansible-lint.log
+
+# Use color in output
+# colored: true
+
+# Exit with error code 0 even if violations found (useful for CI)
+# strict: false
+
+# Generate SARIF output (for GitHub Code Scanning)
+# sarif_file: ansible-lint.sarif
+
+# Additional kinds to lint
+# kinds:
+#   - playbook: "*.yml"
+#   - tasks: "**/tasks/*.yml"
+#   - vars: "**/vars/*.yml"
+#   - meta: "**/meta/*.yml"
+#   - yaml: ".yamllint"
+
+# Loop variable prefix (for better readability)
+loop_var_prefix: "{role}_"
+
+# Minimum required Ansible version
+# This enforces compatibility checks
+# min_ansible_version: "2.9"
+
+# Tags to run or skip
+# tags:
+#   - yaml
+#   - security
+
+# Only check specific directories
+# include_paths:
+#   - playbooks/
+#   - roles/
+
+# Use project-specific config
+# project: true
