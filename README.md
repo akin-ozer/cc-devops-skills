@@ -7,11 +7,6 @@ A comprehensive collection of Claude Code skills for DevOps engineers, providing
 
 Skills are reusable prompt templates that help Claude provide expert guidance on specific topics. When you invoke a skill, Claude assumes the role of an expert in that domain and provides detailed, actionable advice with automatic validation.
 
-Now available for Codex desktop 🎉
-
-```
-$skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
-```
 ## Available Skills (31 skills)
 
 ### Ansible (2 skills)
@@ -139,6 +134,12 @@ To automatically install for your team, add to your project's `.claude/settings.
 ```
 
 When team members trust the repository folder, Claude Code automatically installs the marketplace.
+
+Now available for Codex desktop 🎉
+
+```
+$skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
+```
 
 ## How to Use
 
