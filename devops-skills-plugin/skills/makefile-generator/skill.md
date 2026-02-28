@@ -19,6 +19,14 @@ Generate production-ready Makefiles with best practices for C/C++, Python, Go, J
 
 **Do NOT use for:** Validating existing Makefiles (use devops-skills:makefile-validator), debugging (use `make -d`), or running builds.
 
+## Trigger Phrases
+
+Use this skill when prompts look like:
+- "Generate a Makefile for a Go service"
+- "Create a production Makefile with install/test/help targets"
+- "Write a Makefile for a C project with dependency tracking"
+- "Add standard GNU targets to this existing Makefile"
+
 ## Generation Workflow
 
 ### Stage 1: Gather Requirements
@@ -75,50 +83,67 @@ Collect information for the following categories. **Use AskUserQuestion when inf
 
 **Lookup Process (follow in order):**
 
-1. **ALWAYS consult internal docs/ FIRST using the Read tool** (primary source of truth):
+1. **ALWAYS consult internal docs first using explicit file-open commands** (primary source of truth):
+
+   **Full doc path map (prefer full paths for deterministic access):**
+
+   | Doc | Full Path |
+   |-----|-----------|
+   | Structure guide | `devops-skills-plugin/skills/makefile-generator/docs/makefile-structure.md` |
+   | Variables guide | `devops-skills-plugin/skills/makefile-generator/docs/variables-guide.md` |
+   | Targets guide | `devops-skills-plugin/skills/makefile-generator/docs/targets-guide.md` |
+   | Patterns guide | `devops-skills-plugin/skills/makefile-generator/docs/patterns-guide.md` |
+   | Optimization guide | `devops-skills-plugin/skills/makefile-generator/docs/optimization-guide.md` |
+   | Security guide | `devops-skills-plugin/skills/makefile-generator/docs/security-guide.md` |
 
    | Requirement | Read This Doc |
    |-------------|---------------|
-   | Docker/container targets | `docs/patterns-guide.md` (Pattern 8: Docker Integration) |
-   | Multi-binary projects | `docs/patterns-guide.md` (Pattern 7: Multi-Binary Project) |
-   | Go projects with version embedding | `docs/patterns-guide.md` (Pattern 5: Go Project) |
-   | Parallel builds, caching, ccache | `docs/optimization-guide.md` |
-   | Credentials, secrets, API keys | `docs/security-guide.md` |
-   | Complex dependencies, pattern rules | `docs/patterns-guide.md` |
-   | Order-only prerequisites | `docs/optimization-guide.md` or `docs/targets-guide.md` |
-   | Variables, assignment operators | `docs/variables-guide.md` |
+   | Docker/container targets | `.../docs/patterns-guide.md` (Pattern 8: Docker Integration) |
+   | Multi-binary projects | `.../docs/patterns-guide.md` (Pattern 7: Multi-Binary Project) |
+   | Go projects with version embedding | `.../docs/patterns-guide.md` (Pattern 5: Go Project) |
+   | Parallel builds, caching, ccache | `.../docs/optimization-guide.md` |
+   | Credentials, secrets, API keys | `.../docs/security-guide.md` |
+   | Complex dependencies, pattern rules | `.../docs/patterns-guide.md` |
+   | Order-only prerequisites | `.../docs/optimization-guide.md` or `.../docs/targets-guide.md` |
+   | Variables, assignment operators | `.../docs/variables-guide.md` |
 
-   **CRITICAL:** You MUST explicitly use the Read tool to consult relevant docs during generation, even if you have prior knowledge. Do NOT rely on context from earlier in the conversation. This ensures patterns are always current and correctly applied.
+   **Deterministic open/read commands:**
+   ```bash
+   # From repository root:
+   sed -n '1,220p' devops-skills-plugin/skills/makefile-generator/docs/patterns-guide.md
+   rg -n "Pattern 5|Pattern 8" devops-skills-plugin/skills/makefile-generator/docs/patterns-guide.md
+
+   # From skill directory:
+   sed -n '1,220p' docs/security-guide.md
+   ```
+
+   If shell commands are unavailable, use the environment's file-open/read capability on the same paths.
 
    **Required Workflow Example (Docker + Go with version embedding):**
+   ```bash
+   # Step 1: Read Go pattern
+   rg -n "Pattern 5" devops-skills-plugin/skills/makefile-generator/docs/patterns-guide.md
+
+   # Step 2: Read Docker pattern
+   rg -n "Pattern 8" devops-skills-plugin/skills/makefile-generator/docs/patterns-guide.md
+
+   # Step 3: Read security guidance
+   sed -n '1,220p' devops-skills-plugin/skills/makefile-generator/docs/security-guide.md
    ```
-   # Step 1: Use Read tool to get Go pattern
-   Read: docs/patterns-guide.md (find Pattern 5: Go Project)
-
-   # Step 2: Use Read tool to get Docker pattern
-   Read: docs/patterns-guide.md (find Pattern 8: Docker Integration)
-
-   # Step 3: Use Read tool for security considerations
-   Read: docs/security-guide.md (credential handling for docker-push)
-
-   # Step 4: Generate Makefile combining patterns
-   # Step 5: Document which docs were consulted in Makefile header
-   ```
-
-   **Important:** Internal docs contain vetted, production-ready patterns. Always read the relevant docs before external lookups.
+   Then generate Makefile and list consulted docs in a header comment.
 
 2. **Try context7 for external tool documentation** (when internal docs don't cover a specific tool):
    ```
    # Only needed for tools/frameworks NOT covered in internal docs
    mcp__context7__resolve-library-id: "<tool-name>"
-   mcp__context7__get-library-docs: topic="<integration-topic>"
+   mcp__context7__query-docs: query="<integration-topic>"
 
-   # Example topics:
-   # - For Docker: topic="dockerfile best practices"
-   # - For Go: topic="go build ldflags"
-   # - For specific tools: topic="<tool> makefile integration"
+   # Example queries:
+   # - For Docker: query="dockerfile best practices"
+   # - For Go: query="go build ldflags"
+   # - For specific tools: query="<tool> makefile integration"
    ```
-   **Note:** Context7 may not have GNU Make-specific documentation. Skip if internal docs provide sufficient patterns.
+   **Fallback:** If context7 is unavailable or returns nothing useful, record that and continue to Step 3.
 
 3. **Fallback to WebSearch** (only if pattern not found in internal docs OR context7):
    ```
@@ -131,6 +156,16 @@ Collect information for the following categories. **Use AskUserQuestion when inf
 **Note:** Document which internal docs you consulted in your response (add comment in generated Makefile header).
 
 ### Stage 3: Generate Makefile
+
+**Optional helper-script fast path (for standard layouts):**
+```bash
+# Generate template: TYPE NAME OUTPUT
+bash scripts/generate_makefile_template.sh go myservice Makefile
+
+# Add only selected standard targets
+bash scripts/add_standard_targets.sh Makefile install clean help
+```
+Use manual authoring when requirements are complex (Docker release flow, multi-binary matrices, custom toolchains).
 
 #### Header (choose one style)
 
@@ -242,16 +277,32 @@ help:
 
 ### Stage 4: Validate and Format
 
-**CRITICAL: Always validate using devops-skills:makefile-validator skill.**
+Validation is required for every generated Makefile.
+
+#### Validation Tool Preflight (default + fallback)
+
+1. **Preferred path:** run `devops-skills:makefile-validator`.
+2. **If validator skill is unavailable:** run local fallback checks:
+   ```bash
+   # Required fallback check (if make exists)
+   make -f <Makefile> -n --dry-run
+
+   # Structural fallback checks
+   rg -n '^ {1,}\\S' <Makefile>        # suspicious space-indented recipe lines
+   rg -n '^\\.PHONY:' <Makefile>
+   ```
+3. **If `make` is unavailable:** run structural checks only, report "partial validation due to missing make binary", and request user confirmation before claiming production readiness.
+
+#### Required Validation Loop
 
 ```
 1. Generate Makefile following stages above
-2. Invoke devops-skills:makefile-validator skill
-3. Fix any errors identified (MUST have 0 errors)
+2. Run validator skill (or fallback checks if unavailable)
+3. Fix all errors (MUST have 0 errors before completion)
 4. Apply formatting fixes (see "Formatting Step" below)
-5. Fix warnings (SHOULD fix; explain if skipped)
+5. Fix warnings when feasible (SHOULD fix; explain if skipped)
 6. Address info items for large/production projects
-7. Re-validate until checks pass
+7. Re-run validation until checks pass
 8. Output structured validation report (REQUIRED - see format below)
 ```
 
@@ -271,6 +322,9 @@ When mbake reports formatting issues, you MUST either:
    - Manual review recommended for: [specific lines]
    ```
 
+If `mbake` is not installed or not executable, skip formatter execution and record:
+`Formatting skipped: mbake unavailable in current environment.`
+
 **Formatting Decision Guide:**
 
 | mbake Report | Action |
@@ -279,6 +333,7 @@ When mbake reports formatting issues, you MUST either:
 | Specific whitespace/indentation issues | Auto-apply with `mbake format` |
 | Issues in complex heredocs or multi-line strings | Skip formatting, explain in output |
 | Issues in `# bake-format off` sections | Skip (intentionally disabled) |
+| `mbake` command unavailable | Skip formatting, record tool-unavailable reason |
 
 **Validation Pass Criteria:**
 
@@ -478,9 +533,10 @@ These scripts are **optional convenience tools** for quick template generation.
 ### generate_makefile_template.sh
 
 Generates a complete Makefile template for a specific project type.
+Script path: `scripts/generate_makefile_template.sh`
 
 ```bash
-bash scripts/generate_makefile_template.sh [TYPE] [NAME]
+bash scripts/generate_makefile_template.sh [TYPE] [NAME] [OUTPUT_FILE]
 
 Types: c, c-lib, cpp, go, python, java, generic
 ```
@@ -489,25 +545,54 @@ Types: c, c-lib, cpp, go, python, java, generic
 ```bash
 bash scripts/generate_makefile_template.sh go myservice
 # Creates Makefile with Go patterns, version embedding, standard targets
+
+bash scripts/generate_makefile_template.sh go myservice build/Makefile
+# Writes template to build/Makefile (TYPE NAME OUTPUT)
 ```
 
 ### add_standard_targets.sh
 
 Adds missing standard GNU targets to an existing Makefile.
+Script path: `scripts/add_standard_targets.sh`
 
 ```bash
 bash scripts/add_standard_targets.sh [MAKEFILE] [TARGETS...]
+bash scripts/add_standard_targets.sh [TARGETS...]  # uses ./Makefile
 
-Targets: all, install, uninstall, clean, distclean, test, check, help
+Targets: all, install, uninstall, clean, distclean, test, check, help, dist
 ```
 
 **Example:**
 ```bash
 bash scripts/add_standard_targets.sh Makefile install uninstall help
 # Adds install, uninstall, help targets if they don't exist
+
+bash scripts/add_standard_targets.sh clean test
+# Explicit-target mode: modifies ./Makefile
+
+bash scripts/add_standard_targets.sh -n Makefile dist
+# Dry-run mode: shows planned changes without editing files
 ```
 
 **Note:** Manual generation following the Stage 3 patterns produces equivalent results but allows for more customization.
+
+### Helper Script Regression Smoke Tests
+
+Run after modifying helper scripts or templates:
+```bash
+bash test/test_helper_scripts.sh
+```
+
+## Done Criteria
+
+Consider the task complete only when all checks below are satisfied:
+- Trigger matched and missing requirements were clarified (or documented defaults were applied).
+- Relevant internal docs were opened via explicit file paths before generation.
+- Generated Makefile has complete `.PHONY` coverage for non-file targets.
+- Go templates include optional `go.sum` handling and configurable `GO_MAIN` entrypoint.
+- Validation ran with `makefile-validator` (preferred) or documented fallback checks.
+- Formatting was applied with `mbake`, or skipped with an explicit tool-unavailable/compatibility reason.
+- Final response includes the required structured validation report.
 
 ## Documentation
 

@@ -76,24 +76,26 @@ Before generating configurations, identify if custom or third-party providers/mo
 
 3. If Context7 MCP is available and the provider/module is supported, use it as an alternative:
    ```
-   mcp__context7__resolve-library-id → mcp__context7__get-library-docs
+   mcp__context7__resolve-library-id → mcp__context7__query-docs
    ```
 
 ### Step 2.5: Consult Reference Files (REQUIRED)
 
-Before generating configuration, you MUST read the relevant reference files:
+Before generating configuration, you MUST consult reference files using this matrix:
+
+| Reference | Requirement | Read When |
+|-----------|-------------|-----------|
+| `terraform_best_practices.md` | REQUIRED | Always - contains baseline required patterns |
+| `provider_examples.md` | REQUIRED | Any AWS, Azure, GCP, or Kubernetes resource generation |
+| `common_patterns.md` | OPTIONAL by default, REQUIRED for complex requests | Multi-environment, workspace, composition, DR, or conditional patterns |
+
+Open references by path:
 
 ```
-Read(file_path: ".claude/skills/terraform-generator/references/terraform_best_practices.md")
-Read(file_path: ".claude/skills/terraform-generator/references/provider_examples.md")
+devops-skills-plugin/skills/terraform-generator/references/terraform_best_practices.md
+devops-skills-plugin/skills/terraform-generator/references/provider_examples.md
+devops-skills-plugin/skills/terraform-generator/references/common_patterns.md
 ```
-
-**When to consult each reference:**
-| Reference | Read When |
-|-----------|-----------|
-| `terraform_best_practices.md` | Always - contains required patterns |
-| `common_patterns.md` | Multi-environment, workspace, or complex setups |
-| `provider_examples.md` | Generating AWS, Azure, GCP, or K8s resources |
 
 ### Step 3: Generate Terraform Configuration
 
@@ -120,7 +122,7 @@ terraform-project/
      required_providers {
        aws = {
          source  = "hashicorp/aws"
-         version = "~> 6.0"  # Latest: v6.23.0 (Dec 2025)
+         version = "~> 6.0"  # Major pin; verify exact current version when needed
        }
      }
    }
@@ -243,72 +245,59 @@ terraform-project/
 - Enable encryption by default
 - Use secure backend configurations
 
-### Required: Data Sources for Dynamic Values
+### Required: Data Sources for Dynamic Values (Provider-Aware)
 
-You MUST include data sources for dynamic infrastructure values. Do NOT hardcode these:
+You MUST include provider-appropriate data lookups for dynamic infrastructure values. Do NOT hardcode cloud/account/region/image IDs.
+
+| Provider | Required Dynamic Context | Typical Data Sources |
+|----------|--------------------------|----------------------|
+| AWS | Region/account/AZ/image IDs | `aws_region`, `aws_caller_identity`, `aws_availability_zones`, `aws_ami` |
+| Azure | Tenant/subscription/client context | `azurerm_client_config`, `azurerm_subscription` |
+| GCP | Project/client context/zone discovery | `google_client_config`, `google_compute_zones`, `google_compute_image` |
+| Kubernetes | Cluster endpoint/auth from trusted source | Use module outputs or cloud data sources; avoid hardcoded tokens/endpoints |
 
 ```hcl
-# REQUIRED: Current AWS region and account info
+# AWS dynamic context
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
-# Use in resources
-locals {
-  account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
-}
+# Azure dynamic context
+data "azurerm_client_config" "current" {}
+data "azurerm_subscription" "current" {}
+
+# GCP dynamic context
+data "google_client_config" "current" {}
 ```
 
-**Common required data sources:**
-| Use Case | Data Source |
-|----------|-------------|
-| Current region | `data "aws_region" "current" {}` |
-| Current account | `data "aws_caller_identity" "current" {}` |
-| Available AZs | `data "aws_availability_zones" "available" {}` |
-| Latest AMI | `data "aws_ami" "..."` with filters |
-| Existing VPC | `data "aws_vpc" "..."` |
+### Required: Lifecycle and Deletion Safeguards (Provider-Aware)
 
-### Required: Lifecycle Rules on Critical Resources
+You MUST protect stateful and critical resources from accidental destruction/deletion using both Terraform lifecycle and provider-native safeguards.
 
-You MUST add lifecycle rules on resources that could cause data loss or service disruption if accidentally destroyed:
+| Provider | Critical Resource Classes | Required Protection Mechanism |
+|----------|---------------------------|-------------------------------|
+| AWS | KMS, RDS, S3 data buckets, DynamoDB, ElastiCache, secrets | `lifecycle { prevent_destroy = true }` and service-specific deletion protection where supported |
+| Azure | Key Vaults, SQL, Storage, stateful compute | `prevent_destroy` where appropriate plus provider feature flags/resource deletion protection |
+| GCP | Cloud SQL, GKE, storage, stateful compute | `prevent_destroy` and resource-level `deletion_protection = true` where supported |
+| Kubernetes | Stateful workloads and persistent data | Avoid destructive replacement patterns and protect backing cloud resources |
 
 ```hcl
-# KMS Keys - ALWAYS protect from deletion
-resource "aws_kms_key" "encryption" {
-  # ...
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-# Databases - ALWAYS protect from deletion
 resource "aws_db_instance" "main" {
   # ...
+  deletion_protection = true
   lifecycle {
     prevent_destroy = true
   }
 }
 
-# S3 Buckets with data - protect from deletion
-resource "aws_s3_bucket" "data" {
+resource "google_sql_database_instance" "main" {
   # ...
-  lifecycle {
-    prevent_destroy = true
-  }
+  deletion_protection = true
 }
 ```
 
-**Resources that MUST have `prevent_destroy = true`:**
-- KMS keys (`aws_kms_key`)
-- RDS databases (`aws_db_instance`, `aws_rds_cluster`)
-- S3 buckets containing data
-- DynamoDB tables with data
-- ElastiCache clusters
-- Secrets Manager secrets
+### Required: Object Storage Lifecycle Safeguards
 
-### Required: S3 Lifecycle Best Practices
-
-When creating S3 buckets with lifecycle configurations, ALWAYS include a rule to abort incomplete multipart uploads:
+When using AWS S3 lifecycle configuration, ALWAYS include a rule to abort incomplete multipart uploads:
 
 ```hcl
 resource "aws_s3_bucket_lifecycle_configuration" "main" {
@@ -353,7 +342,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
 }
 ```
 
-> **Why?** Incomplete multipart uploads consume storage and incur costs. Checkov check `CKV_AWS_300` enforces this. Always include this rule.
+> **Why?** Incomplete multipart uploads consume storage and incur costs. Checkov check `CKV_AWS_300` enforces this for AWS.
+>
+> For Azure/GCP object storage, add equivalent lifecycle/retention rules for stale objects and old versions.
 
 ### Step 4: Validate Generated Configuration (REQUIRED)
 
@@ -416,10 +407,9 @@ After successful generation and validation with ALL checks passing, you MUST pro
 
 | File | Description |
 |------|-------------|
-| `path/to/main.tf` | Main resource definitions |
-| `path/to/variables.tf` | Input variables |
-| `path/to/outputs.tf` | Output values |
-| `path/to/versions.tf` | Provider version constraints |
+| `<actual-file-path>` | What was generated in that file |
+
+Only list files that were actually generated for this request. Do not include placeholder paths or files that do not exist.
 
 ## Next Steps
 
@@ -532,12 +522,15 @@ Always consider version compatibility:
    - Use `>= 1.14, < 2.0` for latest features (actions, query command)
    - Document any version-specific features used (see below)
 
-2. **Provider Versions (as of December 2025):**
-   - AWS: `~> 6.0` (latest: v6.23.0)
-   - Azure: `~> 4.0` (latest: v4.54.0)
-   - GCP: `~> 7.0` (latest: v7.12.0) - 7.0 includes ephemeral resources & write-only attributes
-   - Kubernetes: `~> 2.23`
-   - Use `~>` for minor version flexibility, pin major versions
+2. **Provider Version Policy (canonical):**
+   - Pin provider major versions with `~>` constraints (for example `~> 6.0`, `~> 4.0`, `~> 7.0`).
+   - Do not claim "latest" version unless verified online during the current run.
+   - Keep cross-provider guidance consistent:
+     - AWS family: major-pin policy (for example `~> 6.0`)
+     - AzureRM: major-pin policy (for example `~> 4.0`)
+     - Google: major-pin policy (for example `~> 7.0`)
+     - Kubernetes: major/minor pin based on target cluster/provider compatibility
+   - Use the same provider/version language in `SKILL.md`, `references/terraform_best_practices.md`, and template `assets/minimal-project/versions.tf`.
 
 3. **Module Versions:**
    - Always pin module versions
@@ -974,9 +967,9 @@ The `references/` directory contains detailed documentation for reference:
 - `common_patterns.md` - Common Terraform patterns and examples
 - `provider_examples.md` - Example configurations for popular providers
 
-To load a reference, use the Read tool:
+Open a reference directly by relative path:
 ```
-Read(file_path: ".claude/skills/terraform-generator/references/[filename].md")
+devops-skills-plugin/skills/terraform-generator/references/[filename].md
 ```
 
 ### assets/
@@ -984,8 +977,6 @@ Read(file_path: ".claude/skills/terraform-generator/references/[filename].md")
 The `assets/` directory contains template files:
 
 - `minimal-project/` - Minimal Terraform project template
-- `aws-web-app/` - AWS web application infrastructure template
-- `multi-env/` - Multi-environment configuration template
 
 Templates can be copied and customized for the user's specific needs.
 

@@ -45,7 +45,12 @@ log() {
 log_info() { log "INFO" "$@"; }
 log_warn() { log "WARN" "$@"; }
 log_error() { log "ERROR" "$@"; }
-log_debug() { [[ "${LOG_LEVEL}" == "DEBUG" ]] && log "DEBUG" "$@"; }
+log_debug() {
+    if [[ "${LOG_LEVEL}" == "DEBUG" ]]; then
+        log "DEBUG" "$@"
+    fi
+    return 0
+}
 
 die() {
     log_error "$@"

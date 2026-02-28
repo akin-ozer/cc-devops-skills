@@ -50,7 +50,7 @@ app.o:
 
 # Hardcoded paths (not portable)
 backup:
-	cp app /home/user/backups/
+	cp app $(HOME)/backups/
 
 # No validation of dangerous operations
 dangerous-clean:

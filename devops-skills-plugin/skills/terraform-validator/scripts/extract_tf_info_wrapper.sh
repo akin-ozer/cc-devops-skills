@@ -1,48 +1,60 @@
 #!/bin/bash
-# Wrapper script for extract_tf_info.py that handles python-hcl2 dependency
-# Creates a temporary venv if python-hcl2 is not available, auto-cleans on exit
+# Wrapper script for extract_tf_info.py that handles python-hcl2 dependency.
+# Reuses a cached virtual environment for repeat runs to avoid reinstall overhead.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_SCRIPT="$SCRIPT_DIR/extract_tf_info.py"
 
-# Check if we have arguments
-if [ $# -lt 1 ]; then
+DEFAULT_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/terraform-validator"
+HCL2_VENV="${TF_VALIDATOR_HCL2_VENV:-$DEFAULT_CACHE_ROOT/hcl2-venv}"
+
+usage() {
     echo "Usage: extract_tf_info_wrapper.sh <terraform-file-or-directory>" >&2
     echo "" >&2
     echo "Extracts provider, module, and resource information from Terraform files." >&2
     echo "Outputs JSON structure for validation and documentation lookup." >&2
+}
+
+if [ $# -lt 1 ]; then
+    usage
     exit 1
 fi
 
 TARGET_PATH="$1"
-
-# Validate target exists
 if [ ! -e "$TARGET_PATH" ]; then
     echo "Error: Path does not exist: $TARGET_PATH" >&2
     exit 1
 fi
 
-# Try to run with system Python first
-if python3 -c "import hcl2" 2>/dev/null; then
-    # python-hcl2 is available, run directly
-    python3 "$PYTHON_SCRIPT" "$TARGET_PATH"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 is required but not installed." >&2
+    exit 1
+fi
+
+run_parser() {
+    local py_bin="$1"
+    "$py_bin" "$PYTHON_SCRIPT" "$TARGET_PATH"
+}
+
+# Fast path: system python already has python-hcl2.
+if python3 -c "import hcl2" >/dev/null 2>&1; then
+    run_parser python3
     exit $?
 fi
 
-# python-hcl2 not available, create temporary venv
-TEMP_VENV=$(mktemp -d -t terraform-validator.XXXXXX)
-trap "rm -rf $TEMP_VENV" EXIT
+mkdir -p "$(dirname "$HCL2_VENV")"
 
-echo "python-hcl2 not found in system Python. Creating temporary environment..." >&2
+# Build or repair cached virtualenv if needed.
+if [ ! -x "$HCL2_VENV/bin/python3" ]; then
+    echo "python-hcl2 not found. Creating cached environment at: $HCL2_VENV" >&2
+    python3 -m venv "$HCL2_VENV" >&2
+fi
 
-# Create venv and install python-hcl2
-python3 -m venv "$TEMP_VENV" >&2
-source "$TEMP_VENV/bin/activate" >&2
-pip install --quiet python-hcl2 >&2
+if ! "$HCL2_VENV/bin/python3" -c "import hcl2" >/dev/null 2>&1; then
+    echo "Installing python-hcl2 into cached environment..." >&2
+    "$HCL2_VENV/bin/pip" install --quiet --disable-pip-version-check python-hcl2 >&2
+fi
 
-# Run the script
-python3 "$PYTHON_SCRIPT" "$TARGET_PATH"
-
-# Cleanup happens automatically via trap
+run_parser "$HCL2_VENV/bin/python3"

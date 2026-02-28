@@ -36,16 +36,22 @@ from typing import Any
 # Check for python-hcl2 and provide helpful error message if missing
 try:
     import hcl2
+    from lark.exceptions import UnexpectedCharacters, UnexpectedToken
     HCL2_AVAILABLE = True
 except ImportError:
     HCL2_AVAILABLE = False
+    UnexpectedCharacters = Exception
+    UnexpectedToken = Exception
 
 
 class TerraformParser:
     """Parse Terraform HCL files to extract configuration metadata."""
 
     def __init__(self):
+        # Keep `providers` as required_providers for backward compatibility.
         self.providers: list[dict[str, Any]] = []
+        self.required_providers: list[dict[str, Any]] = []
+        self.provider_configs: list[dict[str, Any]] = []
         self.modules: list[dict[str, Any]] = []
         self.resources: list[dict[str, Any]] = []
         self.data_sources: list[dict[str, Any]] = []
@@ -53,7 +59,11 @@ class TerraformParser:
         self.outputs: list[dict[str, Any]] = []
         self.locals: list[dict[str, Any]] = []
         self.terraform_settings: dict[str, Any] = {}
-        self._seen_providers: set[tuple] = set()
+        self.implicit_providers: list[dict[str, Any]] = []
+        self.all_providers_for_docs: list[dict[str, Any]] = []
+        self.parse_errors: list[dict[str, str]] = []
+        self._seen_required_providers: set[tuple] = set()
+        self._seen_provider_configs: set[tuple] = set()
 
     def parse_file(self, filepath: str) -> None:
         """Parse a single Terraform file using python-hcl2."""
@@ -75,9 +85,21 @@ class TerraformParser:
             self._extract_outputs(parsed, filepath)
             self._extract_locals(parsed, filepath)
 
-        except hcl2.lark_parser.UnexpectedToken as e:
-            print(f"HCL syntax error in {filepath}: {e}", file=sys.stderr)
+        except (UnexpectedToken, UnexpectedCharacters) as e:
+            error = {
+                'file': filepath,
+                'error': 'hcl_syntax_error',
+                'message': str(e)
+            }
+            self.parse_errors.append(error)
+            print(f"HCL syntax error in {filepath}", file=sys.stderr)
         except Exception as e:
+            error = {
+                'file': filepath,
+                'error': 'parse_error',
+                'message': str(e)
+            }
+            self.parse_errors.append(error)
             print(f"Error parsing {filepath}: {e}", file=sys.stderr)
 
     def parse_directory(self, dirpath: str) -> None:
@@ -89,7 +111,7 @@ class TerraformParser:
             return
 
         # Find all .tf files
-        tf_files = list(path.rglob("*.tf"))
+        tf_files = sorted(path.rglob("*.tf"))
 
         if not tf_files:
             print(f"Warning: No .tf files found in {dirpath}", file=sys.stderr)
@@ -97,7 +119,7 @@ class TerraformParser:
 
         for tf_file in tf_files:
             # Skip .terraform directory
-            if '.terraform' in str(tf_file):
+            if '.terraform' in tf_file.parts:
                 continue
             self.parse_file(str(tf_file))
 
@@ -123,15 +145,17 @@ class TerraformParser:
                             version = config if isinstance(config, str) else None
 
                         provider_key = (name, source)
-                        if provider_key not in self._seen_providers:
-                            self._seen_providers.add(provider_key)
-                            self.providers.append({
+                        if provider_key not in self._seen_required_providers:
+                            self._seen_required_providers.add(provider_key)
+                            provider_entry = {
                                 'name': name,
                                 'source': source,
                                 'version': version,
                                 'file': filepath,
                                 'type': 'required_provider'
-                            })
+                            }
+                            self.required_providers.append(provider_entry)
+                            self.providers.append(provider_entry)
 
             # Extract backend configuration
             backend = block.get('backend', [])
@@ -155,7 +179,12 @@ class TerraformParser:
                         alias = config.get('alias')
                         region = config.get('region')
 
-                        self.providers.append({
+                        provider_key = (name, alias, filepath)
+                        if provider_key in self._seen_provider_configs:
+                            continue
+                        self._seen_provider_configs.add(provider_key)
+
+                        self.provider_configs.append({
                             'name': name,
                             'alias': alias,
                             'region': region,
@@ -320,25 +349,121 @@ class TerraformParser:
                         'file': filepath
                     })
 
+    def _infer_provider_from_type(self, block_type: str, tf_type: str) -> str | None:
+        """Infer provider name from Terraform resource/data type."""
+        if not tf_type:
+            return None
+
+        # Built-in terraform data source is not a provider plugin.
+        if block_type == 'data_source' and tf_type == 'terraform_remote_state':
+            return None
+
+        if '_' in tf_type:
+            provider_name = tf_type.split('_', 1)[0]
+        else:
+            provider_name = tf_type
+
+        if provider_name == 'terraform':
+            return None
+
+        return provider_name
+
+    def _collect_provider_analysis(self) -> None:
+        """Collect explicit, implicit, and combined provider sets for docs lookup."""
+        explicit_provider_names = {
+            p['name'] for p in self.required_providers
+            if p.get('name')
+        }
+        explicit_provider_names.update(
+            p['name'] for p in self.provider_configs
+            if p.get('name')
+        )
+
+        seen_implicit_names: set[str] = set()
+        implicit: list[dict[str, str]] = []
+
+        for resource in self.resources:
+            resource_type = resource.get('type', '')
+            name = self._infer_provider_from_type('resource', resource_type)
+            if not name or name in explicit_provider_names or name in seen_implicit_names:
+                continue
+            seen_implicit_names.add(name)
+            implicit.append({
+                'name': name,
+                'detected_from': 'resource',
+                'type': resource_type,
+                'file': str(resource.get('file', ''))
+            })
+
+        for data_source in self.data_sources:
+            data_type = data_source.get('type', '')
+            name = self._infer_provider_from_type('data_source', data_type)
+            if not name or name in explicit_provider_names or name in seen_implicit_names:
+                continue
+            seen_implicit_names.add(name)
+            implicit.append({
+                'name': name,
+                'detected_from': 'data_source',
+                'type': data_type,
+                'file': str(data_source.get('file', ''))
+            })
+
+        self.implicit_providers = implicit
+
+        all_provider_names = sorted(explicit_provider_names | seen_implicit_names)
+        self.all_providers_for_docs = [
+            {
+                'name': provider_name,
+                'source': 'explicit' if provider_name in explicit_provider_names else 'implicit'
+            }
+            for provider_name in all_provider_names
+        ]
+
     def to_dict(self) -> dict[str, Any]:
         """Convert parsed data to dictionary."""
+        self._collect_provider_analysis()
+
+        explicit_provider_names = sorted({
+            p['name'] for p in self.required_providers + self.provider_configs
+            if p.get('name')
+        })
+        implicit_provider_names = sorted({
+            p['name'] for p in self.implicit_providers
+            if p.get('name')
+        })
+
         return {
             'terraform_settings': self.terraform_settings,
+            'parse_errors': self.parse_errors,
             'providers': self.providers,
+            'required_providers': self.required_providers,
+            'provider_configs': self.provider_configs,
+            'implicit_providers': self.implicit_providers,
+            'all_providers_for_docs': self.all_providers_for_docs,
             'modules': self.modules,
             'resources': self.resources,
             'data_sources': self.data_sources,
             'variables': self.variables,
             'outputs': self.outputs,
             'locals': self.locals,
+            'provider_analysis': {
+                'explicit_provider_names': explicit_provider_names,
+                'implicit_provider_names': implicit_provider_names,
+                'all_provider_names_for_docs': [p['name'] for p in self.all_providers_for_docs]
+            },
             'summary': {
                 'provider_count': len(self.providers),
+                'required_provider_count': len(self.required_providers),
+                'provider_config_count': len(self.provider_configs),
+                'implicit_provider_count': len(self.implicit_providers),
+                'providers_for_docs_count': len(self.all_providers_for_docs),
                 'module_count': len(self.modules),
                 'resource_count': len(self.resources),
                 'data_source_count': len(self.data_sources),
                 'variable_count': len(self.variables),
                 'output_count': len(self.outputs),
-                'local_count': len(self.locals)
+                'local_count': len(self.locals),
+                'parse_error_count': len(self.parse_errors)
             }
         }
 
@@ -396,6 +521,9 @@ def main():
 
     # Output JSON
     print(parser.to_json())
+
+    if parser.parse_errors:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

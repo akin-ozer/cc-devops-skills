@@ -158,6 +158,43 @@ pattern_ingester:
     time_sharding_enabled: true
 """
 
+    def _build_ring_kvstore_config(
+        self,
+        ring_store: str = "memberlist",
+        consul_host: str = "consul:8500",
+        include_instance_addr: bool = False,
+    ) -> str:
+        """Build common.ring configuration by store type."""
+        if ring_store == "memberlist":
+            return """  ring:
+    kvstore:
+      store: memberlist
+"""
+        if ring_store == "consul":
+            return f"""  ring:
+    kvstore:
+      store: consul
+      consul:
+        host: {consul_host}
+"""
+        if ring_store == "inmemory":
+            instance_addr = "    instance_addr: 127.0.0.1\n" if include_instance_addr else ""
+            return f"""  ring:
+{instance_addr}    kvstore:
+      store: inmemory
+"""
+        raise ValueError(f"Unsupported ring store: {ring_store}")
+
+    def _build_memberlist_config(self, ring_store: str = "memberlist", member: str = "loki-memberlist") -> str:
+        """Build memberlist join block when memberlist ring is used."""
+        if ring_store != "memberlist":
+            return ""
+        return f"""
+memberlist:
+  join_members:
+    - {member}
+"""
+
     def _generate_thanos_s3_storage(
         self,
         bucket: str = "loki-bucket",
@@ -166,7 +203,12 @@ pattern_ingester:
         **kwargs
     ) -> str:
         """Generate Thanos-based S3 storage configuration (Loki 3.4+)."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 # Thanos Object Storage Client (Loki 3.4+)
 storage_config:
   use_thanos_objstore: true
@@ -183,15 +225,16 @@ storage_config:
 
 common:
   path_prefix: /loki
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_thanos_gcs_storage(
         self,
@@ -200,7 +243,12 @@ memberlist:
         **kwargs
     ) -> str:
         """Generate Thanos-based GCS storage configuration (Loki 3.4+)."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 # Thanos Object Storage Client (Loki 3.4+)
 storage_config:
   use_thanos_objstore: true
@@ -211,15 +259,16 @@ storage_config:
 
 common:
   path_prefix: /loki
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_thanos_azure_storage(
         self,
@@ -228,7 +277,12 @@ memberlist:
         **kwargs
     ) -> str:
         """Generate Thanos-based Azure storage configuration (Loki 3.4+)."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 # Thanos Object Storage Client (Loki 3.4+)
 storage_config:
   use_thanos_objstore: true
@@ -242,15 +296,16 @@ storage_config:
 
 common:
   path_prefix: /loki
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_frontend_config(self, encoding: str = "protobuf") -> str:
         """Generate query frontend configuration."""
@@ -290,8 +345,6 @@ ingester:
 #     valueFrom:
 #       fieldRef:
 #         fieldPath: metadata.labels['topology.kubernetes.io/zone']
-common:
-  instance_availability_zone: ${AVAILABILITY_ZONE}
 """
         else:
             config += "\n"
@@ -354,7 +407,29 @@ compactor:
         **kwargs
     ) -> str:
         """Generate ruler configuration for alerting and recording rules."""
-        config = f"""
+        thanos_storage = kwargs.get("thanos_storage", False)
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+
+        if thanos_storage:
+            config = f"""
+# Ruler Storage (required separately with Thanos object storage)
+ruler_storage:
+  backend: {storage_type}
+  {storage_type}:
+    bucket_name: {bucket}"""
+
+            if storage_type == "s3":
+                config += f"""
+    region: {kwargs.get('region', 'us-east-1')}"""
+
+            config += """
+
+# Ruler Configuration (Alerting & Recording Rules)
+ruler:
+"""
+        else:
+            config = f"""
 # Ruler Configuration (Alerting & Recording Rules)
 ruler:
   storage:
@@ -362,20 +437,27 @@ ruler:
     {storage_type}:
       bucket_name: {bucket}"""
 
-        if storage_type == "s3":
-            config += f"""
+            if storage_type == "s3":
+                config += f"""
       region: {kwargs.get('region', 'us-east-1')}"""
+            config += """
+"""
 
-        config += f"""
-
-  rule_path: /loki/rules-temp
+        config += f"""  rule_path: /loki/rules-temp
   alertmanager_url: {alertmanager_url}
   enable_alertmanager_v2: true  # Default since Loki 3.2.0
   enable_api: true
   enable_sharding: true
   ring:
     kvstore:
-      store: memberlist
+      store: {ring_store}"""
+
+        if ring_store == "consul":
+            config += f"""
+      consul:
+        host: {consul_host}"""
+
+        config += """
 
   # Rule evaluation settings
   evaluation_interval: 1m
@@ -413,19 +495,36 @@ querier:
 
     def _generate_filesystem_storage(self, **kwargs) -> str:
         """Generate filesystem storage configuration."""
-        return """
+        ring_store = kwargs.get("ring_store", "inmemory")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+        replication = kwargs.get("replication", 1)
+
+        if ring_store == "inmemory":
+            replication = 1
+
+        config = f"""
 common:
   path_prefix: /loki
   storage:
     filesystem:
       chunks_directory: /loki/chunks
       rules_directory: /loki/rules
-  replication_factor: 1
-  ring:
-    instance_addr: 127.0.0.1
-    kvstore:
-      store: inmemory
-"""
+  replication_factor: {replication}"""
+
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(
+            ring_store=ring_store,
+            consul_host=consul_host,
+            include_instance_addr=True,
+        )
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_s3_storage(
         self,
@@ -435,7 +534,12 @@ common:
         **kwargs
     ) -> str:
         """Generate S3 storage configuration."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 common:
   path_prefix: /loki
   storage:
@@ -444,15 +548,16 @@ common:
       s3forcepathstyle: false
       # Authentication via IAM role (recommended)
       # Or use environment variables: S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_gcs_storage(
         self,
@@ -461,22 +566,28 @@ memberlist:
         **kwargs
     ) -> str:
         """Generate GCS storage configuration."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 common:
   path_prefix: /loki
   storage:
     gcs:
       bucket_name: {bucket}
       # Authentication via service account (mounted as file)
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_azure_storage(
         self,
@@ -485,7 +596,12 @@ memberlist:
         **kwargs
     ) -> str:
         """Generate Azure storage configuration."""
-        return f"""
+        ring_store = kwargs.get("ring_store", "memberlist")
+        consul_host = kwargs.get("consul_host", "consul:8500")
+        memberlist_join_member = kwargs.get("memberlist_join_member", "loki-memberlist")
+        zone_awareness = kwargs.get("zone_awareness", False)
+
+        config = f"""
 common:
   path_prefix: /loki
   storage:
@@ -493,15 +609,16 @@ common:
       container_name: {container}
       account_name: ${{AZURE_ACCOUNT_NAME}}
       account_key: ${{AZURE_ACCOUNT_KEY}}
-  replication_factor: {replication}
-  ring:
-    kvstore:
-      store: memberlist
+  replication_factor: {replication}"""
 
-memberlist:
-  join_members:
-    - loki-memberlist
-"""
+        if zone_awareness:
+            config += """
+  instance_availability_zone: ${AVAILABILITY_ZONE}"""
+
+        config += "\n"
+        config += self._build_ring_kvstore_config(ring_store=ring_store, consul_host=consul_host)
+        config += self._build_memberlist_config(ring_store=ring_store, member=memberlist_join_member)
+        return config
 
     def _generate_monolithic(self, storage: str, **kwargs) -> str:
         """Generate monolithic (single binary) configuration."""
@@ -515,7 +632,13 @@ memberlist:
         storage_type = "filesystem" if storage == "filesystem" else "s3" if storage == "s3" else "gcs" if storage == "gcs" else "azure"
 
         config = self._generate_common_config(auth_enabled, log_level)
-        config += self.storage_backends[storage](**kwargs)
+        storage_kwargs = dict(kwargs)
+        if storage == "filesystem":
+            storage_kwargs["ring_store"] = "inmemory"
+            storage_kwargs["replication"] = 1
+        else:
+            storage_kwargs.setdefault("ring_store", "memberlist")
+        config += self.storage_backends[storage](**storage_kwargs)
         config += self._generate_schema_config(storage_type)
         config += self._generate_limits_config(ingestion_rate, max_streams, retention_days)
         if pattern_ingester:
@@ -543,17 +666,20 @@ memberlist:
         storage_type = "filesystem" if storage == "filesystem" else "s3" if storage == "s3" else "gcs" if storage == "gcs" else "azure"
 
         config = self._generate_common_config(auth_enabled, log_level)
+        storage_kwargs = dict(kwargs)
+        storage_kwargs["ring_store"] = "memberlist"
+        storage_kwargs["zone_awareness"] = zone_awareness
 
         # Use Thanos storage if requested (Loki 3.4+)
         if thanos_storage and storage != "filesystem":
             if storage == "s3":
-                config += self._generate_thanos_s3_storage(**kwargs)
+                config += self._generate_thanos_s3_storage(**storage_kwargs)
             elif storage == "gcs":
-                config += self._generate_thanos_gcs_storage(**kwargs)
+                config += self._generate_thanos_gcs_storage(**storage_kwargs)
             elif storage == "azure":
-                config += self._generate_thanos_azure_storage(**kwargs)
+                config += self._generate_thanos_azure_storage(**storage_kwargs)
         else:
-            config += self.storage_backends[storage](**kwargs)
+            config += self.storage_backends[storage](**storage_kwargs)
 
         config += self._generate_schema_config(storage_type)
         limits_config = self._generate_limits_config(ingestion_rate, max_streams, retention_days)
@@ -597,30 +723,29 @@ query_range:
         max_streams = kwargs.get("max_streams") or 500000
         retention_days = kwargs.get("retention_days") or 180
         max_concurrent = kwargs.get("max_concurrent") or 16
+        thanos_storage = kwargs.get("thanos_storage", False)
+        limits_dry_run = kwargs.get("limits_dry_run", False)
+        zone_awareness = kwargs.get("zone_awareness", False)
 
         storage_type = "filesystem" if storage == "filesystem" else "s3" if storage == "s3" else "gcs" if storage == "gcs" else "azure"
 
         config = self._generate_common_config(auth_enabled, log_level)
+        storage_kwargs = dict(kwargs)
+        storage_kwargs["ring_store"] = "consul"
+        storage_kwargs["zone_awareness"] = zone_awareness
+        storage_kwargs.setdefault("replication", 3)
 
-        # For microservices, use consul for coordination
-        if storage == "s3":
-            config += f"""
-common:
-  path_prefix: /loki
-  storage:
-    s3:
-      s3: s3://{kwargs.get('region', 'us-east-1')}/{kwargs.get('bucket', 'loki-bucket')}
-      s3forcepathstyle: false
-  replication_factor: 3
-  ring:
-    kvstore:
-      store: consul
-      consul:
-        host: consul:8500
-"""
+        # For microservices, use consul for coordination.
+        # Thanos storage is supported for cloud backends in Loki 3.4+.
+        if thanos_storage and storage != "filesystem":
+            if storage == "s3":
+                config += self._generate_thanos_s3_storage(**storage_kwargs)
+            elif storage == "gcs":
+                config += self._generate_thanos_gcs_storage(**storage_kwargs)
+            elif storage == "azure":
+                config += self._generate_thanos_azure_storage(**storage_kwargs)
         else:
-            config += self.storage_backends[storage](**kwargs)
-            config = config.replace("memberlist", "consul\n      consul:\n        host: consul:8500")
+            config += self.storage_backends[storage](**storage_kwargs)
 
         config += self._generate_schema_config(storage_type)
 
@@ -643,15 +768,26 @@ limits_config:
 """
 
         config += self._generate_compactor_config()
-        config += self._generate_ingester_config()
+        config += self._generate_ingester_config(zone_awareness=zone_awareness)
 
         # Add distributor config
-        config += """
+        distributor_config = f"""
 distributor:
   ring:
     kvstore:
       store: consul
-"""
+      consul:
+        host: {kwargs.get('consul_host', 'consul:8500')}"""
+
+        if limits_dry_run:
+            distributor_config += """
+  # Dry-run mode for limits (Loki 3.5+)
+  # Logs would-be rejections without rejecting - useful for testing limits
+  ingest_limits_enabled: true
+  ingest_limits_dry_run_enabled: true"""
+
+        distributor_config += "\n"
+        config += distributor_config
 
         config += self._generate_querier_config(max_concurrent)
 
@@ -699,11 +835,19 @@ def main():
     )
 
     # Common options
-    parser.add_argument(
+    auth_group = parser.add_mutually_exclusive_group()
+    auth_group.add_argument(
         "--auth-enabled",
         action="store_true",
         default=None,
+        dest="auth_enabled",
         help="Enable multi-tenancy (default: false for monolithic, true for others)",
+    )
+    auth_group.add_argument(
+        "--no-auth-enabled",
+        action="store_false",
+        dest="auth_enabled",
+        help="Disable multi-tenancy",
     )
     parser.add_argument("--log-level", default="info", choices=["error", "warn", "info", "debug"], help="Log level")
     parser.add_argument("--ingestion-rate-mb", type=int, help="Ingestion rate limit (MB/s)")
@@ -818,6 +962,9 @@ def main():
 
     args = parser.parse_args()
 
+    if args.ruler and args.mode == "monolithic":
+        parser.error("--ruler is not supported with --mode monolithic in this generator")
+
     # Set defaults based on mode
     if args.auth_enabled is None:
         args.auth_enabled = args.mode != "monolithic"
@@ -857,6 +1004,7 @@ def main():
         # Add ruler configuration if enabled
         if args.ruler and args.mode != "monolithic":
             storage_type = args.storage if args.storage in ["s3", "gcs", "azure"] else "s3"
+            ring_store = "consul" if args.mode == "microservices" else "memberlist"
             config += generator._generate_ruler_config(
                 storage_type=storage_type,
                 bucket=args.ruler_bucket or "loki-ruler-bucket",
@@ -864,10 +1012,12 @@ def main():
                 enable_remote_write=args.ruler_remote_write,
                 remote_write_url=args.ruler_remote_write_url,
                 region=args.region,
+                thanos_storage=args.thanos_storage,
+                ring_store=ring_store,
             )
 
         # Add dry-run mode for limits if enabled (Loki 3.5+)
-        if args.limits_dry_run:
+        if args.limits_dry_run and args.mode != "microservices":
             config += generator._generate_distributor_dry_run_config()
 
         # Write to file

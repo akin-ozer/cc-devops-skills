@@ -7,465 +7,223 @@ description: Comprehensive toolkit for validating, linting, and optimizing bash 
 
 ## Overview
 
-This skill provides comprehensive validation for bash and shell scripts, checking for syntax errors, best practices, security vulnerabilities, and performance optimizations. It automatically detects whether a script is bash or POSIX sh based on the shebang and applies appropriate validation rules.
+This skill validates Bash and POSIX shell scripts with layered checks:
 
-## When to Use This Skill
+1. Syntax validation (`bash -n` or `sh -n`)
+2. ShellCheck static analysis (system binary or wrapper fallback)
+3. Custom security, portability, and optimization checks
 
-Use this skill when:
-- Validating bash or shell scripts (.sh, .bash files)
-- Checking scripts for syntax errors before deployment
-- Identifying bashisms in POSIX sh scripts
-- Finding security vulnerabilities (unsafe eval, command injection)
-- Optimizing script performance
-- Ensuring POSIX compliance
-- Debugging shell script issues
-- Learning shell scripting best practices
-- Code review of shell scripts
+Use the default flow below, then branch to fallbacks only when the environment is constrained.
 
-## Validation Capabilities
+## Trigger Guidance
 
-### 1. Syntax Validation
-- **Bash scripts**: Validates using `bash -n`
-- **POSIX sh scripts**: Validates using `sh -n`
-- Catches syntax errors before runtime
-- Reports line numbers for syntax issues
+Use this skill when the request includes script quality, linting, syntax checking, or shell portability work.
 
-### 2. ShellCheck Integration
-- Comprehensive static analysis
-- Hundreds of built-in checks
-- Severity levels: error, warning, info, style
-- Shell-specific validation (bash, sh, zsh, ksh)
-- Links to detailed documentation for each issue
+### Trigger Phrases
 
-### 3. Security Checks
-- Unsafe use of `eval` with variables
-- Command injection vulnerabilities
-- Dangerous `rm -rf` usage
-- Unquoted variables in dangerous contexts
-- Missing input validation
+- "Validate this bash script"
+- "Lint this `.sh` file"
+- "Find security issues in this shell script"
+- "Why does this script fail ShellCheck?"
+- "Make this script POSIX compliant"
+- "Review this shell script before CI"
 
-### 4. Performance Optimizations
-- Useless use of cat (UUOC)
-- Inefficient loops
-- Unnecessary subshells
-- Multiple pipelines that could be combined
-- Suggesting built-ins over external commands
+### Non-Trigger Examples
 
-### 5. Portability Checks (for sh scripts)
-- Bashisms detection (arrays, [[ ]], etc.)
-- Non-POSIX constructs
-- Shell-specific features in sh scripts
-- Recommends POSIX alternatives
+- General Linux command questions with no script file
+- Kubernetes, Terraform, or pipeline validation tasks that do not involve shell scripts
+- Pure prose editing tasks
 
-### 6. Best Practices
-- Missing error handling
-- Unquoted variables
-- Deprecated syntax (backticks)
-- Proper use of `set -e`, `set -u`, `set -o pipefail`
-- Function definition order
+## Deterministic Execution Model
 
-## Quick Start
-
-### Basic Validation
+Run commands from this skill directory:
 
 ```bash
-# Validate a script
-bash scripts/validate.sh path/to/script.sh
-
-# The validator will:
-# 1. Detect shell type from shebang
-# 2. Run syntax validation
-# 3. Run ShellCheck (if installed)
-# 4. Run custom security/optimization checks
-# 5. Generate detailed report
+cd devops-skills-plugin/skills/bash-script-validator
 ```
 
-### Example Output
+### Step 1: Preflight
 
-```
-========================================
-BASH/SHELL SCRIPT VALIDATOR
-========================================
-File: myscript.sh
-Detected Shell: bash
+1. Confirm target path exists and is readable.
+2. Confirm `bash` is available.
+3. Determine whether fixes can be applied directly (write access) or only suggested (read-only).
 
-[SYNTAX CHECK]
-✓ No syntax errors found (bash -n)
+### Step 2: Run Baseline Validation (Default Path)
 
-[SHELLCHECK]
-myscript.sh:15:5: warning: Quote to prevent word splitting [SC2086]
-myscript.sh:23:9: error: Use || exit to handle cd failure [SC2164]
-
-[CUSTOM CHECKS]
-⚠ Potential command injection: eval with variable found
-  Line 42: eval $user_input
-
-ℹ Useless use of cat detected
-  Line 18: cat file.txt | grep pattern
-
-========================================
-VALIDATION SUMMARY
-========================================
-Errors:   2
-Warnings: 3
-Info:     1
+```bash
+bash scripts/validate.sh <script-path>
 ```
 
-## Usage in Claude Code
+Record:
 
-When validating shell scripts, Claude MUST follow these steps:
+- Detected shell type
+- Exit code (`0` clean, `1` warnings, `2` errors)
+- All reported issue lines and ShellCheck codes (`SC####`) when present
 
-1. **Invoke the validator** on shell script files:
-   ```bash
-   bash scripts/validate.sh <script-path>
-   ```
+### Step 3: Load Only Needed References
 
-2. **Analyze results** to identify issues:
-   - Review errors, warnings, and info messages from the validator output
-   - Note ShellCheck error codes (SC####) for lookup
+Progressive disclosure by issue type:
 
-3. **Reference documentation** for detailed explanations:
-   - For ShellCheck codes: Read `docs/shellcheck-reference.md`
-   - For common mistakes: Read `docs/common-mistakes.md`
-   - For bash-specific issues: Read `docs/bash-reference.md`
-   - For POSIX sh issues: Read `docs/shell-reference.md`
+- ShellCheck code explanations: `docs/shellcheck-reference.md`
+- General fix patterns and security mistakes: `docs/common-mistakes.md`
+- Bash-only behavior: `docs/bash-reference.md`
+- POSIX portability or bashism fixes: `docs/shell-reference.md`
+- Text-processing optimization issues: `docs/grep-reference.md`, `docs/awk-reference.md`, `docs/sed-reference.md`, `docs/regex-reference.md` (only when directly relevant)
 
-4. **Suggest fixes** with code examples:
-   - For each issue found, provide the corrected code
-   - Show before/after comparisons when helpful
-   - Reference the specific line numbers from the validation output
+### Step 4: Provide or Apply Fixes
 
-5. **Explain best practices** from the included guides:
-   - Explain WHY each fix improves the script
-   - Reference specific sections from the documentation files
+For each issue, include:
 
-### Required Workflow
+1. Exact location from validator output (line number and snippet)
+2. Root cause
+3. Corrected code
+4. Why the change is safer or more portable
+5. Subsection-level citation (format below)
 
-```
-User: "Check this bash script for issues"
+If the request includes patching files and write access is available, apply fixes in small batches grouped by issue type.
 
-Claude MUST:
-1. Run: bash scripts/validate.sh <script-path>
-2. Read the validation output and identify all issues
-3. Read docs/common-mistakes.md for fix patterns
-4. Read docs/shellcheck-reference.md for SC error explanations (if needed)
-5. For EACH issue found:
-   a. Show the problematic code
-   b. Explain the issue (referencing documentation)
-   c. Provide the corrected code
-   d. Explain why the fix improves the script
+### Step 5: Rerun Policy (Mandatory After Changes)
+
+After each batch of edits, rerun the validator:
+
+```bash
+bash scripts/validate.sh <script-path>
 ```
 
-### Example Response Format
+Rerun loop rules:
 
-After running the validator, Claude should respond with:
+1. Continue until no new errors are introduced.
+2. If warnings remain by design, document why they are intentionally accepted.
+3. If constraints prevent full resolution, report unresolved items with a clear next action.
+4. Always report the latest rerun exit code and remaining issue count.
 
-```markdown
-## Validation Results
+## Fallback Behavior
 
-Found X errors, Y warnings, Z info issues.
+Use these branches only when the default flow cannot run as-is.
 
-### Issue 1: Unquoted Variable (Line 25)
+| Constraint | Fallback action | Reporting requirement |
+| --- | --- | --- |
+| `shellcheck` missing, wrapper available | Let `scripts/validate.sh` use `scripts/shellcheck_wrapper.sh --cache` automatically | State that wrapper mode was used |
+| `shellcheck` and wrapper unavailable | Run syntax + custom checks only (validator does this) | Explicitly call out reduced coverage and missing ShellCheck analysis |
+| Python unavailable for wrapper | Skip wrapper path, keep syntax + custom checks | State why ShellCheck could not run |
+| Target file is read-only | Provide precise patch suggestions without editing | Mark response as "advisory only" |
+| Target file missing or unreadable | Stop and request a valid file path | Do not fabricate results |
+| Binary/non-text input | Stop validation | Report unsupported input type |
 
-**Problem:**
-\`\`\`bash
-if [ ! -f $file ]; then  # Word splitting risk
-\`\`\`
+## Citation Guidance for Fixes
 
-**Reference:** See `common-mistakes.md` section "1. Unquoted Variables"
+Use subsection-level citations for every non-trivial fix.
 
-**Fix:**
-\`\`\`bash
-if [ ! -f "$file" ]; then  # Properly quoted
-\`\`\`
+Required citation format:
 
-**Why:** Unquoted variables undergo word splitting and glob expansion,
-causing unexpected behavior with filenames containing spaces or special characters.
-
-### Issue 2: ...
+```text
+Reference: docs/<file>.md -> <Section> -> <Subsection>
 ```
 
-## Comprehensive Documentation
+Examples:
 
-### Core References
+- `Reference: docs/common-mistakes.md -> 1. Unquoted Variables -> Solution`
+- `Reference: docs/shellcheck-reference.md -> SC2164: Use || exit After cd`
+- `Reference: docs/shell-reference.md -> POSIX Best Practices -> 5. Avoid Bashisms`
 
-#### bash-reference.md
-- Bash-specific features vs POSIX sh
-- Parameter expansion
-- Arrays and associative arrays
-- Control structures
-- Functions and scope
-- Best practices
-- Common pitfalls
+Citation rules:
 
-#### shell-reference.md
-- POSIX sh compliance
-- Portable constructs
-- Differences from bash
-- Character classes
-- POSIX utilities
-- Testing for compliance
+1. Cite the most specific section that justifies the fix.
+2. For ShellCheck findings, include both the `SC####` code and the matching section.
+3. If no exact subsection exists, cite the closest section and state that the fix is inferred from that guidance.
 
-#### shellcheck-reference.md
-- ShellCheck error codes explained
-- Severity levels
-- Configuration options
-- Disabling checks
-- CI/CD integration
-- Editor integration
+## Response Template
 
-### Tool References
+Use this structure for deterministic output:
 
-#### grep-reference.md
-- Basic and extended regex (BRE/ERE)
-- Common grep patterns
-- Performance tips
-- Character classes
-- Practical examples for scripts
+- `Validation Results`
+- `Command`: `bash scripts/validate.sh <script-path>`
+- `Detected shell`: `<shell>`
+- `Exit code`: `<code>`
+- `Summary`: `<errors> errors, <warnings> warnings, <info> info`
+- `Issue`: `<short label> (Line <n>)`
+- `Problem`:
+  ```bash
+  <problematic snippet>
+  ```
+- `Fix`:
+  ```bash
+  <corrected snippet>
+  ```
+- `Why`: `<short explanation>`
+- `Reference`: `docs/<file>.md -> <Section> -> <Subsection>`
+- `Rerun command`: `bash scripts/validate.sh <script-path>`
+- `Exit code after fixes`: `<code>`
+- `Remaining issues`: `<count or none>`
 
-#### awk-reference.md
-- Field processing
-- Built-in variables
-- Pattern matching
-- Arrays and functions
-- Log analysis examples
-- CSV/text processing
+## Example Flows
 
-#### sed-reference.md
-- Stream editing basics
-- Substitution patterns
-- Address ranges
-- In-place editing
-- Backreferences
-- Common one-liners
+### Fully Automated Environment
 
-#### regex-reference.md
-- BRE vs ERE comparison
-- POSIX character classes
-- Metacharacters and escaping
-- Backreferences
-- Common patterns (IP, email, phone, etc.)
-- Shell script regex examples
+```bash
+# 1) Baseline validation
+bash scripts/validate.sh examples/bad-bash.sh
 
-#### common-mistakes.md
-- 25+ common shell scripting mistakes
-- Real-world examples
-- Consequences of each mistake
-- Correct solutions
-- Quick checklist
+# 2) Apply fixes to target script
+# 3) Rerun validation
+bash scripts/validate.sh examples/bad-bash.sh
+```
 
-## Example Scripts
+Expected behavior: full syntax + ShellCheck + custom-check coverage, with iterative reruns until stable.
 
-Located in `examples/` directory:
+### Constrained Environment (No ShellCheck Runtime)
 
-- **good-bash.sh**: Well-written bash script demonstrating best practices
-- **bad-bash.sh**: Poorly-written bash script with common mistakes
-- **good-shell.sh**: POSIX-compliant sh script
-- **bad-shell.sh**: sh script with bashisms and errors
+```bash
+# shellcheck unavailable and wrapper cannot run
+bash scripts/validate.sh examples/bad-shell.sh
+```
 
-Use these for reference when learning or teaching shell scripting.
+Expected behavior: syntax + custom checks still run. Report reduced coverage and list what must be revalidated once ShellCheck is available.
 
-## Validation Script Features
+## Validator Script Details
 
-### Automatic Shell Detection
+### Scripts
 
-The validator detects shell type from shebang:
-- `#!/bin/bash`, `#!/usr/bin/env bash` → bash
-- `#!/bin/sh`, `#!/usr/bin/sh` → POSIX sh
-- `#!/bin/zsh` → zsh
-- `#!/bin/ksh` → ksh
-- `#!/bin/dash` → dash
+- `scripts/validate.sh`: primary validator entrypoint
+- `scripts/shellcheck_wrapper.sh`: optional ShellCheck fallback using a cached Python virtual environment
 
-### Multi-Layer Validation
+### Detection and Ordering
 
-1. **Syntax Check**: Fast basic validation
-2. **ShellCheck**: Comprehensive static analysis (if installed)
-3. **Custom Checks**: Security and optimization patterns
-4. **Report Generation**: Color-coded, detailed output
+Validation order in `scripts/validate.sh`:
+
+1. File checks (exists/readable/text)
+2. Shebang-based shell detection
+3. Syntax check
+4. ShellCheck (or fallback/skip behavior)
+5. Custom checks
+6. Summary with exit code
 
 ### Exit Codes
 
-- **0**: No issues found
-- **1**: Warnings found
-- **2**: Errors found
+- `0`: no issues found
+- `1`: warnings found
+- `2`: errors found
 
-## Installation Requirements
+## References
 
-### Required
-- bash or sh (for running scripts)
+Load only what is needed:
 
-### ShellCheck Installation Options
+- `docs/bash-reference.md`
+- `docs/shell-reference.md`
+- `docs/shellcheck-reference.md`
+- `docs/common-mistakes.md`
+- `docs/grep-reference.md`
+- `docs/awk-reference.md`
+- `docs/sed-reference.md`
+- `docs/regex-reference.md`
 
-The validator automatically detects and uses the best available ShellCheck installation:
+## Done Criteria
 
-**Option 1: System-wide (Recommended - fastest)**
-```bash
-# macOS
-brew install shellcheck
+This skill update is complete when all are true:
 
-# Ubuntu/Debian
-apt-get install shellcheck
-
-# Fedora
-dnf install shellcheck
-```
-
-**Option 2: Automatic via Wrapper (Python required)**
-```bash
-# The wrapper automatically installs shellcheck-py in a venv
-# Requires: python3 and pip3
-./scripts/shellcheck_wrapper.sh --cache script.sh
-
-# Cache location: ~/.cache/bash-script-validator/shellcheck-venv
-# Clear cache: ./scripts/shellcheck_wrapper.sh --clear-cache
-```
-
-**Option 3: Manual Python install**
-```bash
-pip3 install shellcheck-py
-```
-
-The validator works without ShellCheck but provides enhanced validation when it's available. The wrapper provides automatic installation with caching for faster subsequent runs.
-
-## Common Validation Scenarios
-
-### Scenario 1: Converting Bash Script to POSIX sh
-
-```bash
-# 1. Validate current bash script
-bash scripts/validate.sh myscript.sh
-
-# 2. Change shebang to #!/bin/sh
-# 3. Re-validate - catches bashisms
-bash scripts/validate.sh myscript.sh
-
-# 4. Reference shell-reference.md for POSIX alternatives
-# 5. Fix bashisms (arrays → set --, [[ ]] → [ ], etc.)
-# 6. Re-validate until clean
-```
-
-### Scenario 2: Security Audit
-
-The validator automatically checks for:
-- Unsafe `eval` usage
-- Command injection risks
-- Dangerous `rm -rf` patterns
-- Unquoted variables in dangerous contexts
-
-Reference `common-mistakes.md` for detailed explanations.
-
-### Scenario 3: Performance Optimization
-
-Identifies:
-- Useless use of cat (UUOC)
-- Inefficient file reading loops
-- Unnecessary external commands
-- Pipeline inefficiencies
-
-Reference tool-specific docs (grep, awk, sed) for better patterns.
-
-## Integration with Development Workflow
-
-### Pre-commit Hook
-```bash
-#!/bin/bash
-for file in $(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$'); do
-    if ! bash .claude/skills/bash-script-validator/scripts/validate.sh "$file"; then
-        echo "Validation failed for $file"
-        exit 1
-    fi
-done
-```
-
-### CI/CD Integration
-```yaml
-# Example for GitHub Actions
-- name: Validate Shell Scripts
-  run: |
-    find . -name "*.sh" -exec bash .claude/skills/bash-script-validator/scripts/validate.sh {} \;
-```
-
-## Learning Resources
-
-Use the included documentation to:
-
-1. **Learn bash scripting**: Start with `bash-reference.md`
-2. **Write portable scripts**: Read `shell-reference.md`
-3. **Master text processing**: Study `grep`, `awk`, and `sed` references
-4. **Understand regex**: Reference `regex-reference.md`
-5. **Avoid mistakes**: Review `common-mistakes.md`
-6. **Fix issues**: Look up error codes in `shellcheck-reference.md`
-
-## Best Practices
-
-### For Script Authors
-
-1. Always include a shebang
-2. Use `set -euo pipefail` for strict mode
-3. Quote all variable expansions
-4. Check return codes for critical commands
-5. Use meaningful variable names
-6. Add comments for complex logic
-7. Validate scripts before committing
-
-### For Reviewers
-
-1. Run the validator on all scripts
-2. Check for security issues first
-3. Verify POSIX compliance if required
-4. Look for performance optimizations
-5. Ensure proper error handling
-6. Validate documentation/comments
-
-## Technical Details
-
-### Directory Structure
-```
-bash-script-validator/
-├── SKILL.md                    # This file
-├── scripts/
-│   └── validate.sh             # Main validation script
-├── docs/
-│   ├── bash-reference.md       # Bash features and syntax
-│   ├── shell-reference.md      # POSIX sh reference
-│   ├── shellcheck-reference.md # ShellCheck error codes
-│   ├── grep-reference.md       # grep patterns and usage
-│   ├── awk-reference.md        # AWK text processing
-│   ├── sed-reference.md        # sed stream editing
-│   ├── regex-reference.md      # Regular expressions
-│   └── common-mistakes.md      # Common pitfalls
-└── examples/
-    ├── good-bash.sh            # Best practices example
-    ├── bad-bash.sh             # Anti-patterns example
-    ├── good-shell.sh           # POSIX sh example
-    └── bad-shell.sh            # Bashisms example
-```
-
-### Validation Logic
-
-The validator performs checks in this order:
-
-1. **File existence and readability check**
-2. **Shebang detection** → determines shell type
-3. **Syntax validation** → shell-specific (`bash -n` or `sh -n`)
-4. **ShellCheck validation** → if installed, with appropriate shell dialect
-5. **Custom security checks** → pattern matching for vulnerabilities
-6. **Custom portability checks** → bashisms in sh scripts
-7. **Summary generation** → color-coded report with counts
-
-## Resources
-
-### Official Documentation
-- [GNU Bash Manual](https://www.gnu.org/software/bash/manual/)
-- [POSIX Shell Specification](https://pubs.opengroup.org/onlinepubs/9699919799/)
-- [ShellCheck](https://www.shellcheck.net/)
-- [GNU grep](https://www.gnu.org/software/grep/manual/)
-- [GNU awk](https://www.gnu.org/software/gawk/manual/)
-- [GNU sed](https://www.gnu.org/software/sed/manual/)
-
-### Internal References
-All documentation is included in the `docs/` directory for offline reference and context loading.
-
----
-
-**Note**: This skill automatically loads relevant documentation based on the validation results, providing Claude with the necessary context to explain issues and suggest fixes effectively.
+1. Trigger guidance is explicit (positive and non-trigger examples).
+2. Default workflow is deterministic and ordered.
+3. Fallback behavior is explicit for missing tooling and constrained environments.
+4. Fix explanations include subsection-level citations.
+5. Post-fix rerun policy is mandatory and reported with exit codes.
+6. Documentation supports both fully automated and constrained execution paths.

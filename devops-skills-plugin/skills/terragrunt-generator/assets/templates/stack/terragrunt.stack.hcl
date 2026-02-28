@@ -32,6 +32,10 @@ locals {
     aws_region  = local.aws_region
     stack_name  = local.stack_name
   }
+
+  # Keep this mode consistent across all dependent units.
+  # Mixing true/false values across units breaks relative dependency paths.
+  use_direct_paths = true
 }
 
 # Unit: VPC (Networking Foundation)
@@ -43,44 +47,37 @@ unit "vpc" {
   source = "${local.units_path}/vpc"
 
   # Path where the unit configuration will be generated
-  # Default: Creates .terragrunt-stack/vpc/terragrunt.hcl
-  # With no_dot_terragrunt_stack = true: Creates vpc/terragrunt.hcl directly
+  # If local.use_direct_paths = false: .terragrunt-stack/vpc/terragrunt.hcl
+  # If local.use_direct_paths = true:  vpc/terragrunt.hcl
   path = "vpc"
 
   # Values passed to the unit (accessible via `values` object in the unit's terragrunt.hcl)
   # These are written to terragrunt.values.hcl alongside the generated terragrunt.hcl
   values = merge(local.common_values, {
     vpc_name = "${local.stack_name}-vpc"
-    cidr     = "[VPC_CIDR]"  # e.g., "10.0.0.0/16"
+    cidr     = "[VPC_CIDR]" # e.g., "10.0.0.0/16"
   })
 
   # Generate directly in path/ instead of .terragrunt-stack/path/
-  # RECOMMENDED for migration from traditional terragrunt.hcl to stacks
-  # This maintains backward compatibility with:
-  #   - Existing path_relative_to_include() usage in child modules
-  #   - CI/CD pipelines that reference specific paths
-  #   - State file key patterns based on directory structure
-  # no_dot_terragrunt_stack = true
+  no_dot_terragrunt_stack = local.use_direct_paths
 }
 
 # Unit: Database (Data Layer)
 # This unit creates the database infrastructure
-# Example with no_dot_terragrunt_stack enabled for backward compatibility
 unit "database" {
   source = "${local.units_path}/database"
   path   = "database"
 
-  # Enable direct path generation (no .terragrunt-stack prefix)
-  # Output: database/terragrunt.hcl + database/terragrunt.values.hcl
-  no_dot_terragrunt_stack = true
+  # Keep generation mode aligned with other units.
+  no_dot_terragrunt_stack = local.use_direct_paths
 
   values = merge(local.common_values, {
-    db_name  = "${local.stack_name}-db"
-    engine   = "[DB_ENGINE]"   # e.g., "postgres", "mysql"
-    version  = "[DB_VERSION]"  # e.g., "15", "8.0"
+    db_name = "${local.stack_name}-db"
+    engine  = "[DB_ENGINE]"  # e.g., "postgres", "mysql"
+    version = "[DB_VERSION]" # e.g., "15", "8.0"
 
-    # Reference to VPC unit for dependency resolution
-    # The unit's terragrunt.hcl will use this to configure the dependency block
+    # Reference to VPC unit for dependency resolution.
+    # Keep all units on the same no_dot_terragrunt_stack mode so ../vpc resolves.
     vpc_path = "../vpc"
   })
 }
@@ -88,13 +85,14 @@ unit "database" {
 # Unit: Application (Compute Layer)
 # This unit creates the application infrastructure
 unit "app" {
-  source = "${local.units_path}/app"
-  path   = "app"
+  source                  = "${local.units_path}/app"
+  path                    = "app"
+  no_dot_terragrunt_stack = local.use_direct_paths
 
   values = merge(local.common_values, {
-    app_name       = "${local.stack_name}-app"
-    instance_type  = "[INSTANCE_TYPE]"  # e.g., "t3.medium"
-    desired_count  = [DESIRED_COUNT]    # e.g., 2
+    app_name      = "${local.stack_name}-app"
+    instance_type = "[INSTANCE_TYPE]" # e.g., "t3.medium"
+    desired_count = [DESIRED_COUNT]   # e.g., 2
 
     # Dependencies on other units
     vpc_path      = "../vpc"

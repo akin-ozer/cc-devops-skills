@@ -8,7 +8,8 @@ Supports multiple input sources, filters, and output destinations.
 
 import argparse
 import sys
-from typing import Dict, List, Optional, Callable
+from typing import Dict, Optional, Callable, Any
+from urllib.parse import urlparse
 
 
 class FluentBitConfigGenerator:
@@ -53,6 +54,27 @@ class FluentBitConfigGenerator:
                 f"Available use cases: {available}"
             )
         return self.use_cases[use_case](**kwargs)
+
+    @staticmethod
+    def _parse_otlp_endpoint(endpoint: str) -> tuple[str, int, str]:
+        """
+        Parse OTLP endpoint into host/port/base path.
+
+        Supports host:port, URL formats, and IPv6 bracket notation.
+        """
+        normalized = endpoint.strip()
+        parsed = urlparse(normalized if "://" in normalized else f"//{normalized}")
+
+        host = parsed.hostname
+        if not host:
+            raise ValueError(
+                f"Invalid OTLP endpoint: {endpoint}. Expected host:port or URL."
+            )
+
+        port = parsed.port if parsed.port is not None else 4318
+        base_path = parsed.path.rstrip("/")
+        logs_uri = f"{base_path}/v1/logs" if base_path else "/v1/logs"
+        return host, port, logs_uri
 
     def _generate_service_section(
         self,
@@ -103,6 +125,38 @@ class FluentBitConfigGenerator:
 
         return config
 
+    def _tls_block(
+        self,
+        tls_verify: bool = True,
+        tls_ca_file: Optional[str] = None,
+        indent: int = 4,
+    ) -> str:
+        """Generate TLS configuration lines for an OUTPUT block.
+
+        Args:
+            tls_verify: Verify server TLS certificates (default: True).
+                        Set to False only for self-signed certs when a
+                        custom CA file cannot be provided.
+            tls_ca_file: Path to a custom CA certificate file.  When
+                         provided, verification is always enabled using
+                         this path as the trust anchor — the recommended
+                         approach for self-signed certificates.
+            indent: Leading spaces for each generated line.
+
+        Returns:
+            TLS configuration lines as a string (no trailing newline).
+        """
+        pad = " " * indent
+        lines = [f"{pad}tls               On"]
+        if tls_ca_file:
+            lines.append(f"{pad}tls.verify        On")
+            lines.append(f"{pad}tls.ca_file       {tls_ca_file}")
+        elif tls_verify:
+            lines.append(f"{pad}tls.verify        On")
+        else:
+            lines.append(f"{pad}tls.verify        Off")
+        return "\n".join(lines)
+
     def _generate_k8s_elasticsearch(
         self,
         es_host: str = "elasticsearch.logging.svc",
@@ -110,6 +164,8 @@ class FluentBitConfigGenerator:
         es_index_prefix: str = "k8s",
         cluster_name: str = "my-cluster",
         environment: str = "production",
+        tls_verify: bool = True,
+        tls_ca_file: Optional[str] = None,
         **kwargs
     ) -> str:
         """
@@ -121,10 +177,20 @@ class FluentBitConfigGenerator:
             es_index_prefix: Index prefix for Logstash format
             cluster_name: Kubernetes cluster name
             environment: Environment identifier
+            tls_verify: Verify TLS certificates (default: True).
+                        Set to False only when self-signed certs are in use
+                        and no CA file can be provided.
+            tls_ca_file: Path to custom CA file for self-signed certificates.
+                         When set, tls_verify is implicitly enabled.
 
         Returns:
             Complete Fluent Bit configuration string
         """
+        es_host = es_host or "elasticsearch.logging.svc"
+        es_port = es_port or 9200
+        es_index_prefix = es_index_prefix or "k8s"
+        cluster_name = cluster_name or "my-cluster"
+        environment = environment or "production"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -177,10 +243,9 @@ class FluentBitConfigGenerator:
     Logstash_Prefix   {es_index_prefix}
     Retry_Limit       3
     storage.total_limit_size 5M
-    tls               On
-    tls.verify        Off
     Buffer_Size       False
     Type              _doc
+{self._tls_block(tls_verify, tls_ca_file)}
 """
 
         return config
@@ -203,7 +268,10 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        config = self._generate_service_section()
+        loki_host = loki_host or "loki.logging.svc"
+        loki_port = loki_port or 3100
+        cluster_name = cluster_name or "my-cluster"
+        config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
 [INPUT]
@@ -267,7 +335,10 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        config = self._generate_service_section()
+        aws_region = aws_region or "us-east-1"
+        log_group_name = log_group_name or "/aws/kubernetes/logs"
+        cluster_name = cluster_name or "my-cluster"
+        config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
 [INPUT]
@@ -313,6 +384,8 @@ class FluentBitConfigGenerator:
         otlp_endpoint: str = "opentelemetry-collector.observability.svc:4318",
         cluster_name: str = "my-cluster",
         environment: str = "production",
+        tls_verify: bool = True,
+        tls_ca_file: Optional[str] = None,
         **kwargs
     ) -> str:
         """
@@ -322,11 +395,20 @@ class FluentBitConfigGenerator:
             otlp_endpoint: OpenTelemetry Collector endpoint (HTTP)
             cluster_name: Kubernetes cluster name
             environment: Environment identifier
+            tls_verify: Verify TLS certificates (default: True).
+                        Set to False only when self-signed certs are in use
+                        and no CA file can be provided.
+            tls_ca_file: Path to custom CA file for self-signed certificates.
+                         When set, tls_verify is implicitly enabled.
 
         Returns:
             Complete Fluent Bit configuration string
         """
-        config = self._generate_service_section()
+        otlp_endpoint = otlp_endpoint or "opentelemetry-collector.observability.svc:4318"
+        cluster_name = cluster_name or "my-cluster"
+        environment = environment or "production"
+        host, port, logs_uri = self._parse_otlp_endpoint(otlp_endpoint)
+        config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
 [INPUT]
@@ -363,16 +445,15 @@ class FluentBitConfigGenerator:
 [OUTPUT]
     Name                 opentelemetry
     Match                *
-    Host                 {otlp_endpoint.split(':')[0]}
-    Port                 {otlp_endpoint.split(':')[1] if ':' in otlp_endpoint else '4318'}
+    Host                 {host}
+    Port                 {port}
     # Use HTTP protocol for OTLP
-    logs_uri             /v1/logs
+    logs_uri             {logs_uri}
     # Add resource attributes
     add_label            cluster {cluster_name}
     add_label            environment {environment}
     # TLS configuration
-    tls                  On
-    tls.verify           Off
+{self._tls_block(tls_verify, tls_ca_file, indent=4)}
     # Retry configuration
     Retry_Limit          3
 """
@@ -401,6 +482,11 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
+        log_path = log_path or "/var/log/app/*.log"
+        language = language or "java"
+        app_name = app_name or "myapp"
+        environment = environment or "production"
+        es_host = es_host or "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -443,8 +529,8 @@ class FluentBitConfigGenerator:
     def _generate_syslog_forward(
         self,
         listen_port: int = 5140,
-        forward_host: str = "syslog-server.example.com",
-        forward_port: int = 514,
+        syslog_host: str = "syslog-server.example.com",
+        syslog_port: int = 514,
         **kwargs
     ) -> str:
         """
@@ -452,13 +538,16 @@ class FluentBitConfigGenerator:
 
         Args:
             listen_port: Port to listen for syslog messages
-            forward_host: Destination syslog server hostname
-            forward_port: Destination syslog server port
+            syslog_host: Destination syslog server hostname
+            syslog_port: Destination syslog server port
 
         Returns:
             Complete Fluent Bit configuration string
         """
-        config = self._generate_service_section(flush=5)
+        listen_port = listen_port or 5140
+        syslog_host = syslog_host or "syslog-server.example.com"
+        syslog_port = syslog_port or 514
+        config = self._generate_service_section(flush=5, parsers_file="parsers.conf")
 
         config += f"""
 [INPUT]
@@ -476,10 +565,12 @@ class FluentBitConfigGenerator:
     Add           source fluent-bit
 
 [OUTPUT]
-    Name          forward
+    Name          syslog
     Match         *
-    Host          {forward_host}
-    Port          {forward_port}
+    Host          {syslog_host}
+    Port          {syslog_port}
+    Mode          tcp
+    Syslog_Format rfc5424
     Retry_Limit   5
 
 [OUTPUT]
@@ -492,7 +583,7 @@ class FluentBitConfigGenerator:
 
     def _generate_file_s3(
         self,
-        file_path: str = "/var/log/app/*.log",
+        log_path: str = "/var/log/app/*.log",
         s3_bucket: str = "my-logs-bucket",
         s3_region: str = "us-east-1",
         **kwargs
@@ -501,20 +592,23 @@ class FluentBitConfigGenerator:
         Generate file tailing to S3 configuration.
 
         Args:
-            file_path: Path to log files to tail
+            log_path: Path to log files to tail
             s3_bucket: S3 bucket name
             s3_region: AWS region for S3
 
         Returns:
             Complete Fluent Bit configuration string
         """
+        log_path = log_path or "/var/log/app/*.log"
+        s3_bucket = s3_bucket or "my-logs-bucket"
+        s3_region = s3_region or "us-east-1"
         config = self._generate_service_section(flush=5)
 
         config += f"""
 [INPUT]
     Name              tail
     Tag               files.*
-    Path              {file_path}
+    Path              {log_path}
     DB                /var/log/flb_files.db
     Mem_Buf_Limit     100MB
     Skip_Long_Lines   On
@@ -557,6 +651,9 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
+        http_port = http_port or 9880
+        kafka_brokers = kafka_brokers or "kafka:9092"
+        kafka_topic = kafka_topic or "logs"
         config = self._generate_service_section()
 
         config += f"""
@@ -602,6 +699,8 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
+        es_host = es_host or "elasticsearch"
+        s3_bucket = s3_bucket or "logs-archive"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -650,6 +749,8 @@ class FluentBitConfigGenerator:
         prometheus_port: int = 9090,
         scrape_interval: int = 15,
         cluster_name: str = "my-cluster",
+        tls_verify: bool = True,
+        tls_ca_file: Optional[str] = None,
         **kwargs
     ) -> str:
         """
@@ -660,10 +761,19 @@ class FluentBitConfigGenerator:
             prometheus_port: Prometheus remote write endpoint port
             scrape_interval: Metrics scrape interval in seconds
             cluster_name: Kubernetes cluster name
+            tls_verify: Verify TLS certificates (default: True).
+                        Set to False only when self-signed certs are in use
+                        and no CA file can be provided.
+            tls_ca_file: Path to custom CA file for self-signed certificates.
+                         When set, tls_verify is implicitly enabled.
 
         Returns:
             Complete Fluent Bit configuration string
         """
+        prometheus_host = prometheus_host or "prometheus.monitoring.svc"
+        prometheus_port = prometheus_port or 9090
+        scrape_interval = scrape_interval or 15
+        cluster_name = cluster_name or "my-cluster"
         config = self._generate_service_section(flush=scrape_interval)
 
         config += f"""
@@ -693,8 +803,7 @@ class FluentBitConfigGenerator:
     # Add labels to all metrics
     add_label         cluster {cluster_name}
     # TLS configuration
-    tls               On
-    tls.verify        Off
+{self._tls_block(tls_verify, tls_ca_file)}
     # Retry configuration
     Retry_Limit       3
     # Compression
@@ -721,6 +830,9 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
+        log_path = log_path or "/var/log/app/*.log"
+        lua_script_path = lua_script_path or "/fluent-bit/scripts/filter.lua"
+        es_host = es_host or "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -798,6 +910,8 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
+        log_path = log_path or "/var/log/app/*.log"
+        es_host = es_host or "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -898,6 +1012,49 @@ class FluentBitConfigGenerator:
 
 def main() -> None:
     """Main entry point for the configuration generator."""
+    use_case_arg_map: Dict[str, list[str]] = {
+        "kubernetes-elasticsearch": [
+            "cluster_name",
+            "environment",
+            "es_host",
+            "es_port",
+            "es_index_prefix",
+            "tls_verify",
+            "tls_ca_file",
+        ],
+        "kubernetes-loki": ["cluster_name", "loki_host", "loki_port"],
+        "kubernetes-cloudwatch": ["cluster_name", "aws_region", "log_group_name"],
+        "kubernetes-opentelemetry": [
+            "cluster_name",
+            "environment",
+            "otlp_endpoint",
+            "tls_verify",
+            "tls_ca_file",
+        ],
+        "application-multiline": [
+            "environment",
+            "es_host",
+            "log_path",
+            "app_name",
+            "language",
+        ],
+        "syslog-forward": ["listen_port", "syslog_host", "syslog_port"],
+        "file-tail-s3": ["log_path", "s3_bucket", "s3_region"],
+        "http-kafka": ["http_port", "kafka_brokers", "kafka_topic"],
+        "multi-destination": ["es_host", "s3_bucket"],
+        "prometheus-metrics": [
+            "cluster_name",
+            "prometheus_host",
+            "prometheus_port",
+            "scrape_interval",
+            "tls_verify",
+            "tls_ca_file",
+        ],
+        "lua-filtering": ["es_host", "log_path", "lua_script_path"],
+        "stream-processor": ["es_host", "log_path"],
+        "custom": [],
+    }
+
     parser = argparse.ArgumentParser(
         description="Generate Fluent Bit configurations",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -931,99 +1088,122 @@ def main() -> None:
     )
 
     # Common options
-    parser.add_argument("--cluster-name", default="my-cluster", help="Kubernetes cluster name")
-    parser.add_argument("--environment", default="production", help="Environment name")
+    parser.add_argument("--cluster-name", default=None, help="Kubernetes cluster name")
+    parser.add_argument("--environment", default=None, help="Environment name")
 
     # Elasticsearch options
-    parser.add_argument("--es-host", default="elasticsearch", help="Elasticsearch host")
-    parser.add_argument("--es-port", type=int, default=9200, help="Elasticsearch port")
-    parser.add_argument("--es-index-prefix", default="k8s", help="Elasticsearch index prefix")
+    parser.add_argument("--es-host", default=None, help="Elasticsearch host")
+    parser.add_argument("--es-port", type=int, default=None, help="Elasticsearch port")
+    parser.add_argument("--es-index-prefix", default=None, help="Elasticsearch index prefix")
 
     # Loki options
-    parser.add_argument("--loki-host", default="loki", help="Loki host")
-    parser.add_argument("--loki-port", type=int, default=3100, help="Loki port")
+    parser.add_argument("--loki-host", default=None, help="Loki host")
+    parser.add_argument("--loki-port", type=int, default=None, help="Loki port")
 
     # CloudWatch options
-    parser.add_argument("--aws-region", default="us-east-1", help="AWS region")
-    parser.add_argument("--log-group-name", default="/aws/kubernetes/logs", help="CloudWatch log group")
+    parser.add_argument("--aws-region", default=None, help="AWS region")
+    parser.add_argument("--log-group-name", default=None, help="CloudWatch log group")
 
     # OpenTelemetry options
     parser.add_argument(
         "--otlp-endpoint",
-        default="opentelemetry-collector.observability.svc:4318",
+        default=None,
         help="OpenTelemetry Collector OTLP endpoint (HTTP)",
     )
 
     # Application options
-    parser.add_argument("--log-path", default="/var/log/app/*.log", help="Log file path")
-    parser.add_argument("--app-name", default="myapp", help="Application name")
-    parser.add_argument("--language", default="java", choices=["java", "python", "go"], help="Language for multiline parsing")
+    parser.add_argument("--log-path", default=None, help="Log file path")
+    parser.add_argument("--app-name", default=None, help="Application name")
+    parser.add_argument(
+        "--language",
+        default=None,
+        choices=["java", "python", "go"],
+        help="Language for multiline parsing",
+    )
 
     # S3 options
-    parser.add_argument("--s3-bucket", default="my-logs-bucket", help="S3 bucket name")
-    parser.add_argument("--s3-region", default="us-east-1", help="S3 region")
+    parser.add_argument("--s3-bucket", default=None, help="S3 bucket name")
+    parser.add_argument("--s3-region", default=None, help="S3 region")
 
     # Syslog options
-    parser.add_argument("--listen-port", type=int, default=5140, help="Syslog listen port")
-    parser.add_argument("--forward-host", default="syslog-server", help="Syslog forward host")
-    parser.add_argument("--forward-port", type=int, default=514, help="Syslog forward port")
+    parser.add_argument("--listen-port", type=int, default=None, help="Syslog listen port")
+    parser.add_argument("--syslog-host", default=None, help="Destination syslog host")
+    parser.add_argument("--syslog-port", type=int, default=None, help="Destination syslog port")
+    parser.add_argument("--forward-host", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--forward-port", type=int, default=None, help=argparse.SUPPRESS)
 
     # Kafka options
-    parser.add_argument("--http-port", type=int, default=9880, help="HTTP listen port")
-    parser.add_argument("--kafka-brokers", default="kafka:9092", help="Kafka brokers")
-    parser.add_argument("--kafka-topic", default="logs", help="Kafka topic")
+    parser.add_argument("--http-port", type=int, default=None, help="HTTP listen port")
+    parser.add_argument("--kafka-brokers", default=None, help="Kafka brokers")
+    parser.add_argument("--kafka-topic", default=None, help="Kafka topic")
 
     # Prometheus options
-    parser.add_argument("--prometheus-host", default="prometheus.monitoring.svc", help="Prometheus host")
-    parser.add_argument("--prometheus-port", type=int, default=9090, help="Prometheus port")
-    parser.add_argument("--scrape-interval", type=int, default=15, help="Metrics scrape interval in seconds")
+    parser.add_argument("--prometheus-host", default=None, help="Prometheus host")
+    parser.add_argument("--prometheus-port", type=int, default=None, help="Prometheus port")
+    parser.add_argument(
+        "--scrape-interval",
+        type=int,
+        default=None,
+        help="Metrics scrape interval in seconds",
+    )
 
     # Lua options
-    parser.add_argument("--lua-script-path", default="/fluent-bit/scripts/filter.lua", help="Path to Lua script")
+    parser.add_argument("--lua-script-path", default=None, help="Path to Lua script")
+
+    # TLS options (applies to elasticsearch, opentelemetry, prometheus-metrics)
+    tls_group = parser.add_mutually_exclusive_group()
+    tls_group.add_argument(
+        "--tls-verify",
+        dest="tls_verify",
+        action="store_true",
+        default=True,
+        help="Verify TLS certificates (default: enabled)",
+    )
+    tls_group.add_argument(
+        "--no-tls-verify",
+        dest="tls_verify",
+        action="store_false",
+        help=(
+            "Disable TLS certificate verification. "
+            "Prefer --tls-ca-file for self-signed certificates instead."
+        ),
+    )
+    parser.add_argument(
+        "--tls-ca-file",
+        default=None,
+        help=(
+            "Path to custom CA certificate file for self-signed certificates. "
+            "When provided, TLS verification is always enabled."
+        ),
+    )
 
     args = parser.parse_args()
 
     # Generate configuration
     generator = FluentBitConfigGenerator()
     try:
-        config = generator.generate(
-            args.use_case,
-            cluster_name=args.cluster_name,
-            environment=args.environment,
-            es_host=args.es_host,
-            es_port=args.es_port,
-            es_index_prefix=args.es_index_prefix,
-            loki_host=args.loki_host,
-            loki_port=args.loki_port,
-            aws_region=args.aws_region,
-            log_group_name=args.log_group_name,
-            otlp_endpoint=args.otlp_endpoint,
-            log_path=args.log_path,
-            app_name=args.app_name,
-            language=args.language,
-            s3_bucket=args.s3_bucket,
-            s3_region=args.s3_region,
-            listen_port=args.listen_port,
-            forward_host=args.forward_host,
-            forward_port=args.forward_port,
-            http_port=args.http_port,
-            kafka_brokers=args.kafka_brokers,
-            kafka_topic=args.kafka_topic,
-            prometheus_host=args.prometheus_host,
-            prometheus_port=args.prometheus_port,
-            scrape_interval=args.scrape_interval,
-            lua_script_path=args.lua_script_path,
-        )
+        effective_args: Dict[str, Any] = vars(args).copy()
+        if effective_args.get("syslog_host") is None and effective_args.get("forward_host"):
+            effective_args["syslog_host"] = effective_args["forward_host"]
+        if effective_args.get("syslog_port") is None and effective_args.get("forward_port") is not None:
+            effective_args["syslog_port"] = effective_args["forward_port"]
+
+        selected_kwargs = {
+            key: effective_args[key]
+            for key in use_case_arg_map[args.use_case]
+            if effective_args.get(key) is not None
+        }
+        config = generator.generate(args.use_case, **selected_kwargs)
 
         # Write to file with error handling
         try:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(config)
-        except IOError as e:
-            print(f"Error: Failed to write configuration file: {e}", file=sys.stderr)
-            sys.exit(1)
         except PermissionError as e:
             print(f"Error: Permission denied writing to {args.output}: {e}", file=sys.stderr)
+            sys.exit(1)
+        except IOError as e:
+            print(f"Error: Failed to write configuration file: {e}", file=sys.stderr)
             sys.exit(1)
 
         print(f"✓ Configuration generated successfully: {args.output}")

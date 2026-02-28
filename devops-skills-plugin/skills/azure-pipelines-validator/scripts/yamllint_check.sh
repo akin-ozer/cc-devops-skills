@@ -5,7 +5,7 @@
 # This script handles yamllint with transparent venv management:
 # 1. Tries to use system yamllint if available
 # 2. Falls back to venv yamllint if exists
-# 3. Returns gracefully if yamllint is not available
+# 3. Returns a dedicated skip code if yamllint is not available
 
 set -e
 
@@ -57,7 +57,7 @@ if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/activate" ]; then
     fi
 fi
 
-# yamllint not available - skip gracefully
+# yamllint not available - skip with dedicated exit code
 echo "ℹ  yamllint not available (skipping YAML linting)" >&2
 echo "   To enable: pip install yamllint" >&2
-exit 0
+exit 3

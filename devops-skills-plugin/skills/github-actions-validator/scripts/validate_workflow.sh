@@ -38,6 +38,12 @@ log_reference() {
     echo -e "${CYAN}[REF]${NC} $1"
 }
 
+# Check if a tool is available either in scripts/.tools or on PATH
+tool_exists() {
+    local tool_name=$1
+    [ -x "${TOOLS_DIR}/${tool_name}" ] || command -v "${tool_name}" &> /dev/null
+}
+
 # Check if Docker is running
 check_docker() {
     if ! docker info &> /dev/null 2>&1; then
@@ -255,28 +261,46 @@ show_reference_hints() {
     fi
 
     if [ $showed_hint -eq 0 ]; then
-        log_reference "General troubleshooting - see references/common_errors.md"
+        log_reference "No direct mapping found for this error output"
+        log_reference "Fallback: check references/common_errors.md, then search the exact error text in official docs"
+        log_reference "Include exact tool output, workflow file, and line number in your report"
     fi
 }
 
-# Check if tools are installed
+# Validate required tools for selected execution mode
 check_tools() {
+    local run_actionlint=$1
+    local run_act=$2
+    local allow_fallback=$3
     local missing_tools=0
 
-    if [ ! -f "${TOOLS_DIR}/actionlint" ] && ! command -v actionlint &> /dev/null; then
-        log_error "actionlint not found. Please run install_tools.sh first."
-        missing_tools=1
+    if [ "$run_actionlint" = true ] && ! tool_exists "actionlint"; then
+        if [ "$allow_fallback" = true ] && [ "$run_act" = true ] && tool_exists "act"; then
+            log_warn "actionlint not found. Falling back to act-only validation."
+            run_actionlint=false
+        else
+            log_error "actionlint not found. Please run install_tools.sh first."
+            missing_tools=1
+        fi
     fi
 
-    if [ ! -f "${TOOLS_DIR}/act" ] && ! command -v act &> /dev/null; then
-        log_error "act not found. Please run install_tools.sh first."
-        missing_tools=1
+    if [ "$run_act" = true ] && ! tool_exists "act"; then
+        if [ "$allow_fallback" = true ] && [ "$run_actionlint" = true ] && tool_exists "actionlint"; then
+            log_warn "act not found. Falling back to actionlint-only validation."
+            run_act=false
+        else
+            log_error "act not found. Please run install_tools.sh first."
+            missing_tools=1
+        fi
     fi
 
     if [ $missing_tools -eq 1 ]; then
         log_info "Run: bash ${SCRIPT_DIR}/install_tools.sh"
         exit 1
     fi
+
+    CHECK_TOOLS_RUN_ACTIONLINT=$run_actionlint
+    CHECK_TOOLS_RUN_ACT=$run_act
 }
 
 # Get the appropriate tool path
@@ -568,7 +592,13 @@ main() {
     local lint_only=false
     local test_only=false
     local check_versions=false
+    local version_only=false
+    local run_actionlint=true
+    local run_act=true
+    local allow_tool_fallback=false
     local docker_available=true
+    CHECK_TOOLS_RUN_ACTIONLINT=true
+    CHECK_TOOLS_RUN_ACT=true
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -601,16 +631,53 @@ main() {
         usage
     fi
 
+    if [ "$lint_only" = true ] && [ "$test_only" = true ]; then
+        log_error "Cannot combine --lint-only and --test-only"
+        exit 1
+    fi
+
+    # Determine mode-specific execution
+    if [ "$test_only" = true ]; then
+        run_actionlint=false
+        run_act=true
+    elif [ "$lint_only" = true ]; then
+        run_actionlint=true
+        run_act=false
+    else
+        run_actionlint=true
+        run_act=true
+        allow_tool_fallback=true
+    fi
+
+    if [ "$check_versions" = true ] && [ "$lint_only" = false ] && [ "$test_only" = false ]; then
+        version_only=true
+        run_actionlint=false
+        run_act=false
+        allow_tool_fallback=false
+    fi
+
     log_section "GitHub Actions Validator"
     log_info "Target: $workflow_path"
 
-    check_tools
+    check_tools "$run_actionlint" "$run_act" "$allow_tool_fallback"
+    run_actionlint=$CHECK_TOOLS_RUN_ACTIONLINT
+    run_act=$CHECK_TOOLS_RUN_ACT
 
-    # Pre-check Docker status (early warning)
-    if [ "$lint_only" = false ] && [ "$check_versions" = false ]; then
+    # Pre-check Docker status if act testing is enabled
+    if [ "$run_act" = true ]; then
         if ! precheck_docker; then
-            docker_available=false
-            lint_only=true  # Force lint-only mode if Docker unavailable
+            if [ "$test_only" = true ]; then
+                log_error "Docker is required for --test-only mode"
+                exit 1
+            fi
+            if [ "$run_actionlint" = true ]; then
+                docker_available=false
+                run_act=false
+                log_warn "Proceeding without act because Docker is unavailable"
+            else
+                log_error "Docker is required for act validation in the selected mode"
+                exit 1
+            fi
         fi
     fi
 
@@ -623,14 +690,14 @@ main() {
             exit_code=1
         fi
         # If only checking versions, exit here
-        if [ "$lint_only" = false ] && [ "$test_only" = false ]; then
+        if [ "$version_only" = true ]; then
             log_section "Version Check Complete"
             exit $exit_code
         fi
     fi
 
     # Run actionlint
-    if [ "$test_only" = false ]; then
+    if [ "$run_actionlint" = true ]; then
         # Capture output for reference hints (use local actionlint first, then fallback to PATH)
         local actionlint_cmd="${TOOLS_DIR}/actionlint"
         if [ ! -f "$actionlint_cmd" ]; then
@@ -643,8 +710,8 @@ main() {
         fi
     fi
 
-    # Run act (if Docker available and not lint-only)
-    if [ "$lint_only" = false ] && [ "$docker_available" = true ]; then
+    # Run act if enabled and Docker is available
+    if [ "$run_act" = true ] && [ "$docker_available" = true ]; then
         if ! test_with_act "$workflow_path"; then
             exit_code=1
         fi

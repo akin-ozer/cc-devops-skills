@@ -16,79 +16,54 @@ except ImportError:
     sys.exit(1)
 
 
+STANDARD_API_GROUPS = {
+    # Core APIs are represented by apiVersion "v1" (handled separately)
+    "admissionregistration.k8s.io",
+    "apiextensions.k8s.io",
+    "apiregistration.k8s.io",
+    "apps",
+    "authentication.k8s.io",
+    "authorization.k8s.io",
+    "autoscaling",
+    "batch",
+    "certificates.k8s.io",
+    "coordination.k8s.io",
+    "discovery.k8s.io",
+    "events.k8s.io",
+    "extensions",
+    "flowcontrol.apiserver.k8s.io",
+    "internal.apiserver.k8s.io",
+    "networking.k8s.io",
+    "node.k8s.io",
+    "policy",
+    "rbac.authorization.k8s.io",
+    "resource.k8s.io",
+    "scheduling.k8s.io",
+    "storage.k8s.io",
+}
+
+
 def parse_yaml_file(file_path):
     """Parse a YAML file that may contain multiple documents."""
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return list(yaml.safe_load_all(f))
     except Exception as e:
-        print(f"Error parsing YAML file: {e}", file=sys.stderr)
-        return []
+        print(f"Error parsing YAML file {file_path}: {e}", file=sys.stderr)
+        return None
 
 
-def is_standard_k8s_resource(api_version, kind):
+def is_standard_k8s_resource(api_version):
     """Check if a resource is a standard Kubernetes resource."""
-    standard_groups = {
-        # Core API group
-        'v1': True,
-        # Apps
-        'apps/v1': True,
-        # Batch
-        'batch/v1': True,
-        'batch/v1beta1': True,
-        # Networking
-        'networking.k8s.io/v1': True,
-        'networking.k8s.io/v1beta1': True,
-        # Policy
-        'policy/v1': True,
-        'policy/v1beta1': True,
-        # RBAC
-        'rbac.authorization.k8s.io/v1': True,
-        'rbac.authorization.k8s.io/v1beta1': True,
-        # Storage
-        'storage.k8s.io/v1': True,
-        'storage.k8s.io/v1beta1': True,
-        # Autoscaling
-        'autoscaling/v1': True,
-        'autoscaling/v2': True,
-        'autoscaling/v2beta1': True,
-        'autoscaling/v2beta2': True,
-        # API Extensions (CRD definitions themselves)
-        'apiextensions.k8s.io/v1': True,
-        'apiextensions.k8s.io/v1beta1': True,
-        # Admission Registration
-        'admissionregistration.k8s.io/v1': True,
-        'admissionregistration.k8s.io/v1beta1': True,
-        # Certificates
-        'certificates.k8s.io/v1': True,
-        'certificates.k8s.io/v1beta1': True,
-        # Coordination
-        'coordination.k8s.io/v1': True,
-        # Discovery
-        'discovery.k8s.io/v1': True,
-        'discovery.k8s.io/v1beta1': True,
-        # Events
-        'events.k8s.io/v1': True,
-        'events.k8s.io/v1beta1': True,
-        # Flow Control
-        'flowcontrol.apiserver.k8s.io/v1': True,
-        'flowcontrol.apiserver.k8s.io/v1beta1': True,
-        'flowcontrol.apiserver.k8s.io/v1beta2': True,
-        'flowcontrol.apiserver.k8s.io/v1beta3': True,
-        # Node
-        'node.k8s.io/v1': True,
-        'node.k8s.io/v1beta1': True,
-        # Scheduling
-        'scheduling.k8s.io/v1': True,
-        'scheduling.k8s.io/v1beta1': True,
-        # Resource (for resource quotas/claims)
-        'resource.k8s.io/v1alpha2': True,
-        # Internal (apiserver)
-        'internal.apiserver.k8s.io/v1alpha1': True,
-    }
+    # Core API group has no slash (e.g. "v1")
+    if api_version == "v1":
+        return True
 
-    # Check if it's a standard group
-    return api_version in standard_groups
+    if "/" not in api_version:
+        return False
+
+    group = api_version.split("/", 1)[0]
+    return group in STANDARD_API_GROUPS
 
 
 def extract_resource_info(doc):
@@ -96,50 +71,59 @@ def extract_resource_info(doc):
     if not doc or not isinstance(doc, dict):
         return None
 
-    kind = doc.get('kind')
-    api_version = doc.get('apiVersion')
+    kind = doc.get("kind")
+    api_version = doc.get("apiVersion")
 
     if not kind or not api_version:
         return None
 
     # Extract group from apiVersion (e.g., "cert-manager.io/v1" -> "cert-manager.io")
-    group = api_version.split('/')[0] if '/' in api_version else 'core'
-    version = api_version.split('/')[-1]
+    group = api_version.split("/")[0] if "/" in api_version else "core"
+    version = api_version.split("/")[-1]
 
-    is_crd = not is_standard_k8s_resource(api_version, kind)
+    is_crd = not is_standard_k8s_resource(api_version)
 
     return {
-        'kind': kind,
-        'apiVersion': api_version,
-        'group': group,
-        'version': version,
-        'isCRD': is_crd,
-        'name': doc.get('metadata', {}).get('name', 'unnamed')
+        "kind": kind,
+        "apiVersion": api_version,
+        "group": group,
+        "version": version,
+        "isCRD": is_crd,
+        "name": doc.get("metadata", {}).get("name", "unnamed"),
     }
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: detect_crd.py <yaml-file>", file=sys.stderr)
+        print("Usage: detect_crd.py <yaml-file> [yaml-file ...]", file=sys.stderr)
         sys.exit(1)
 
-    file_path = sys.argv[1]
-
-    if not Path(file_path).exists():
-        print(f"File not found: {file_path}", file=sys.stderr)
-        sys.exit(1)
-
-    documents = parse_yaml_file(file_path)
+    file_paths = sys.argv[1:]
     resources = []
+    has_errors = False
 
-    for doc in documents:
-        resource_info = extract_resource_info(doc)
-        if resource_info:
-            resources.append(resource_info)
+    for file_path in file_paths:
+        path = Path(file_path)
+        if not path.exists():
+            print(f"File not found: {file_path}", file=sys.stderr)
+            has_errors = True
+            continue
+
+        documents = parse_yaml_file(path)
+        if documents is None:
+            has_errors = True
+            continue
+
+        for doc in documents:
+            resource_info = extract_resource_info(doc)
+            if resource_info:
+                resources.append(resource_info)
 
     # Output as JSON for easy parsing
     print(json.dumps(resources, indent=2))
+    if has_errors:
+        sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

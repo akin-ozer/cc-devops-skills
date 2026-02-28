@@ -1,25 +1,32 @@
 #!/bin/bash
 # Check for required Helm validation tools and provide installation instructions
 
-set -e
+set -euo pipefail
 
 echo "Checking for Helm chart validation tools..."
 echo
 
 MISSING_TOOLS=()
 OPTIONAL_TOOLS=()
+HELM_AVAILABLE=false
 
 # Check for helm (required)
 if ! command -v helm &> /dev/null; then
     echo "❌ helm not found (REQUIRED)"
     MISSING_TOOLS+=("helm")
 else
+    HELM_AVAILABLE=true
     HELM_VERSION=$(helm version --short 2>/dev/null || helm version)
     echo "✅ helm found: $HELM_VERSION"
 
     # Check if Helm 3+
-    if [[ ! "$HELM_VERSION" =~ v3\. ]]; then
-        echo "⚠️  Warning: Helm 3+ is required. Found: $HELM_VERSION"
+    if [[ "$HELM_VERSION" =~ v([0-9]+)\. ]]; then
+        HELM_MAJOR="${BASH_REMATCH[1]}"
+        if [ "$HELM_MAJOR" -lt 3 ]; then
+            echo "⚠️  Warning: Helm 3+ is required. Found: $HELM_VERSION"
+        fi
+    else
+        echo "⚠️  Warning: Unable to determine Helm major version from: $HELM_VERSION"
     fi
 fi
 
@@ -56,11 +63,13 @@ else
 fi
 
 # Check for helm-diff plugin (optional but helpful for upgrades)
-if helm plugin list 2>/dev/null | grep -q "diff"; then
+if [ "$HELM_AVAILABLE" = true ] && helm plugin list 2>/dev/null | grep -q "diff"; then
     echo "✅ helm-diff plugin found"
 else
-    echo "⚠️  helm-diff plugin not found (OPTIONAL - helpful for upgrade validation)"
-    OPTIONAL_TOOLS+=("helm-diff")
+    if [ "$HELM_AVAILABLE" = true ]; then
+        echo "⚠️  helm-diff plugin not found (OPTIONAL - helpful for upgrade validation)"
+        OPTIONAL_TOOLS+=("helm-diff")
+    fi
 fi
 
 echo

@@ -15,9 +15,9 @@ This skill provides a comprehensive workflow for generating production-ready Doc
 - Layer caching optimization for faster builds
 - Language-specific templates (Node.js, Python, Go, Java)
 - Automatic .dockerignore generation
-- Integration with devops-skills:dockerfile-validator for validation
+- Integration with `dockerfile-validator` for validation
 - Iterative validation and error fixing (minimum 1 iteration if errors found)
-- WebSearch and context7 integration for framework-specific patterns
+- Local references plus docs lookup fallback chain for framework-specific patterns
 
 ## When to Use This Skill
 
@@ -32,12 +32,44 @@ Invoke this skill when:
 - Implementing containerization for microservices
 - Setting up CI/CD pipeline container builds
 
+### Trigger Phrases
+
+Use this skill immediately when the request contains phrasing like:
+- "Generate a production Dockerfile for my app"
+- "Create a multi-stage Dockerfile for <language/framework>"
+- "Containerize this service with security best practices"
+- "Optimize this Dockerfile for size and build speed"
+- "Write Dockerfile and .dockerignore for deployment"
+
 ## Do NOT Use This Skill For
 
-- Validating existing Dockerfiles (use devops-skills:dockerfile-validator instead)
+- Validating existing Dockerfiles (use `dockerfile-validator` instead)
 - Building or running containers (use docker build/run commands)
 - Debugging running containers (use docker logs, docker exec)
 - Managing Docker images or registries
+
+## Deterministic Execution Model
+
+Run these stages in order, and do not skip a stage unless the skip reason is reported in the final output.
+
+1. Gather requirements (language, runtime version, entrypoint, exposed port, package manager, health endpoint).
+2. Load references (local reference files first; external docs only when local references are insufficient).
+3. Generate Dockerfile and `.dockerignore`.
+4. Validate with `dockerfile-validator` or fallback local tools.
+5. Iterate fixes until stop condition is met.
+6. Publish final artifacts plus validation/audit report.
+
+Stop conditions for stage 5:
+- Stop when there are zero validation errors and no unapproved warnings.
+- Stop after 3 iterations maximum, then emit an intentional-deviation report for unresolved findings.
+
+## Reference Path Map
+
+Consult these files directly by path as needed:
+- `references/security_best_practices.md` for non-root users, secret handling, base image hardening, vulnerability scanning.
+- `references/optimization_patterns.md` for multi-stage strategy, cache optimization, layer reduction, BuildKit cache mounts.
+- `references/language_specific_guides.md` for language/framework runtime and package-manager patterns.
+- `references/multistage_builds.md` for advanced stage-splitting and artifact-copy patterns.
 
 ## Dockerfile Generation Workflow
 
@@ -99,41 +131,36 @@ Follow this workflow when generating Dockerfiles. Adapt based on user needs:
 - Application has complex build requirements
 - Need guidance on framework-specific optimization
 
-**Research Process:**
+**Research Process (strict fallback chain):**
 
-1. **Try context7 MCP first (preferred):**
+1. **Read local references first (required):**
+   - `references/security_best_practices.md`
+   - `references/optimization_patterns.md`
+   - `references/language_specific_guides.md`
+
+2. **Use Context7 docs lookup when local references are insufficient (preferred external source):**
    ```
    Use mcp__context7__resolve-library-id with the framework name
-   Examples:
-   - "next.js" for Next.js applications
-   - "django" for Django applications
-   - "fastapi" for FastAPI applications
-   - "spring-boot" for Spring Boot applications
-   - "express" for Express.js applications
-
-   Then use mcp__context7__get-library-docs with:
-   - context7CompatibleLibraryID from resolve step
-   - topic: "docker deployment production build"
-   - page: 1 (fetch additional pages if needed)
+   Then use mcp__context7__query-docs with query:
+   "docker deployment production build"
    ```
 
-2. **Fallback to WebSearch if context7 fails:**
+3. **Use web search only if Context7 is unavailable or missing needed details:**
    ```
-   Search query pattern:
-   "<framework>" "<version>" dockerfile best practices production 2025
-
-   Examples:
-   - "Next.js 14 dockerfile best practices production 2025"
-   - "FastAPI dockerfile best practices production 2025"
-   - "Spring Boot 3 dockerfile best practices production 2025"
+   "<framework>" "<version>" dockerfile production deployment best practices
    ```
 
-3. **Extract key information:**
-   - Recommended base images
+4. **If external lookup is unavailable (offline/tooling limits):**
+   - Continue with local references and language templates in this file.
+   - State assumptions explicitly in the output.
+   - Mark the lookup limitation in the final report.
+
+5. **Extract only actionable data:**
+   - Recommended base image + version policy
    - Build optimization techniques
-   - Framework-specific environment variables
-   - Production vs development configurations
-   - Security considerations
+   - Required runtime environment variables
+   - Production vs development differences
+   - Security requirements specific to the framework
 
 ### Stage 3: Generate Dockerfile
 
@@ -332,8 +359,10 @@ RUN ./mvnw clean package -DskipTests && \
 FROM eclipse-temurin:21-jre-jammy AS production
 WORKDIR /app
 
-# Create non-root user
-RUN useradd -m -u 1001 appuser
+# Install healthcheck dependency and create non-root user
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -u 1001 appuser
 
 # Copy JAR from builder
 COPY --from=builder --chown=appuser:appuser /app/target/app.jar ./app.jar
@@ -454,138 +483,129 @@ build/
 - Go: Add `vendor/`, `*.exe`, `*.test`
 - Java: Add `target/`, `*.class`, `*.jar` (except final artifact)
 
-### Stage 5: Validate with devops-skills:dockerfile-validator
+### Stage 5: Validate with `dockerfile-validator`
 
-**Objective:** Ensure generated Dockerfile follows best practices and has no issues.
+**Objective:** Ensure generated Dockerfile follows best practices and has no unresolved critical findings.
 
-**REQUIRED: Always validate after generation.**
+**REQUIRED: Always run validation after generation.**
 
-**Validation Process:**
+**Primary path (preferred):**
+1. Invoke `dockerfile-validator`.
+2. Capture findings by severity (`error`, `warning`, `info`).
+3. Prioritize security and reproducibility findings first.
 
-1. **Invoke devops-skills:dockerfile-validator skill:**
-   ```
-   Use the Skill tool to invoke devops-skills:dockerfile-validator
-   This will run:
-   - hadolint (syntax and best practices)
-   - Checkov (security scanning)
-   - Custom validation (layer optimization, etc.)
-   ```
-
-2. **Parse validation results:**
-   - Categorize issues by severity (error, warning, info)
-   - Identify actionable fixes
-   - Prioritize security issues
-
-3. **Expected validation output:**
-   ```
-   [1/4] Syntax Validation (hadolint)
-   [2/4] Security Scan (Checkov)
-   [3/4] Best Practices Validation
-   [4/4] Optimization Analysis
-   ```
-
-### Stage 6: Iterate on Validation Errors
-
-**Objective:** Fix any validation errors and re-validate.
-
-**REQUIRED: Iterate at least ONCE if validation finds errors.**
-
-**Iteration Process:**
-
-1. **If validation finds errors:**
-   - Analyze each error
-   - Apply fixes to Dockerfile
-   - Re-run validation
-   - Repeat until clean OR maximum 3 iterations
-
-2. **If validation finds warnings:**
-   - Assess if warnings are acceptable
-   - Apply fixes for critical warnings
-   - Document suppressed warnings with justification
-
-3. **Common fixes:**
-   - Add version tags to base images
-   - Add USER directive before CMD
-   - Add HEALTHCHECK for services
-   - Combine RUN commands
-   - Clean up package caches
-   - Use COPY instead of ADD
-
-**Example iteration:**
-```
-Iteration 1:
-- Error: DL3006 - Missing version tag
-- Fix: Change FROM node:alpine to FROM node:20-alpine
-- Re-validate
-
-Iteration 2:
-- Warning: DL3059 - Multiple consecutive RUN commands
-- Fix: Combine RUN commands with &&
-- Re-validate
-
-Iteration 3:
-- All checks passed ✓
-```
-
-### Stage 7: Final Review and Recommendations
-
-**Objective:** Provide comprehensive summary and next steps.
-
-**Deliverables:**
-
-1. **Generated Files:**
-   - Dockerfile (validated and optimized)
-   - .dockerignore (comprehensive)
-
-2. **Validation Summary:**
-   - All validation results
-   - Any remaining warnings (with justification)
-   - Security scan results
-
-3. **Usage Instructions:**
+**Fallback path (if skill invocation is unavailable):**
+1. Try local validator script directly:
    ```bash
-   # Build the image
-   docker build -t myapp:1.0 .
-
-   # Run the container
-   docker run -p 3000:3000 myapp:1.0
-
-   # Test health check (if applicable)
-   curl http://localhost:3000/health
+   bash ../dockerfile-validator/scripts/dockerfile-validate.sh Dockerfile
    ```
-
-4. **Optimization Metrics (REQUIRED - provide explicit estimates):**
-
-   Always include a summary like this:
+2. If that path is unavailable, run available tools directly:
+   ```bash
+   hadolint Dockerfile
+   checkov -f Dockerfile --framework dockerfile
    ```
-   ## Optimization Metrics
+3. If one or more tools are unavailable, continue generation and report each skipped check in the final report.
 
-   | Metric | Estimate |
-   |--------|----------|
-   | Image Size | ~150MB (vs ~500MB without multi-stage, 70% reduction) |
-   | Build Cache | Layer caching enabled for dependencies |
-   | Security | Non-root user, minimal base image, no secrets |
-   ```
+**Expected validator stages:**
+```
+[1/4] Syntax Validation (hadolint)
+[2/4] Security Scan (Checkov)
+[3/4] Best Practices Validation
+[4/4] Optimization Analysis
+```
 
-   **Language-specific size estimates:**
-   - **Node.js**: ~50-150MB with Alpine (vs ~1GB with full node image)
-   - **Python**: ~150-250MB with slim (vs ~900MB with full python image)
-   - **Go**: ~5-20MB with distroless/scratch (vs ~800MB with full golang image)
-   - **Java**: ~200-350MB with JRE (vs ~500MB+ with JDK)
+### Stage 6: Validate-Iterate Loop (Explicit Requirements)
 
-5. **Next Steps (REQUIRED - always include as bulleted list):**
+**Objective:** Apply deterministic fix loops with auditable iteration records.
 
-   Always provide explicit next steps:
-   ```
-   ## Next Steps
+**Loop rules (required):**
+1. Run at least one validation pass.
+2. If any `error` exists, apply fixes and re-run validation.
+3. Continue until:
+   - no `error` remains, or
+   - iteration count reaches 3.
+4. For `warning`, either fix it or mark it as intentional deviation with justification.
+5. Never silently suppress a finding.
 
-   - [ ] Test the build locally: `docker build -t myapp:1.0 .`
-   - [ ] Run and verify the container works as expected
-   - [ ] Update CI/CD pipeline to use the new Dockerfile
-   - [ ] Consider BuildKit cache mounts for faster builds (see Modern Docker Features)
-   - [ ] Set up automated vulnerability scanning with `docker scout` or `trivy`
-   - [ ] Add to container registry and deploy
-   ```
+**Iteration log format (required):**
+
+| Iteration | Command/Path Used | Errors | Warnings | Fixes Applied | Result |
+|-----------|-------------------|--------|----------|---------------|--------|
+| 1 | `dockerfile-validator` or fallback command | N | N | short summary | pass/fail |
+| 2 | ... | N | N | short summary | pass/fail |
+| 3 | ... | N | N | short summary | pass/fail |
+
+**Common fixes:**
+- Add version tags to base images
+- Add USER directive before CMD/ENTRYPOINT
+- Add HEALTHCHECK for services
+- Combine RUN commands where safe
+- Clean package caches in same layer
+- Replace `ADD` with `COPY` where archive/url behavior is not needed
+
+### Stage 7: Final Review and Audit Report
+
+**Objective:** Deliver runnable artifacts plus an auditable report.
+
+**Deliverables (required):**
+1. Generated files:
+   - Dockerfile (validated and optimized)
+   - `.dockerignore` (comprehensive)
+2. Validation summary:
+   - tool path used (primary vs fallback)
+   - findings by severity
+   - final status after loop
+3. Iteration log table from Stage 6.
+4. Intentional deviation report (only when applicable).
+5. Usage instructions.
+6. Optimization metrics and next steps.
+
+**Intentional deviation report (required when any finding is not fixed):**
+
+| ID | Rule/Check | Severity | Decision | Justification | Risk | Mitigation | Expiry/Review Date |
+|----|------------|----------|----------|---------------|------|------------|--------------------|
+| DEV-001 | e.g., DL3059 | warning | accepted | build step readability requirement | minor layer overhead | revisit after refactor | YYYY-MM-DD |
+
+**Usage instructions template:**
+```bash
+# Build image
+docker build -t myapp:1.0 .
+
+# Run container
+docker run -p 3000:3000 myapp:1.0
+
+# Probe health endpoint (if exposed)
+curl http://localhost:3000/health
+```
+
+**Optimization metrics (required):**
+```
+## Optimization Metrics
+
+| Metric | Estimate |
+|--------|----------|
+| Image Size | ~150MB (vs ~500MB without multi-stage, 70% reduction) |
+| Build Cache | Layer caching enabled for dependencies |
+| Security | Non-root user, minimal base image, no secrets |
+```
+
+**Language-specific size estimates:**
+- **Node.js**: ~50-150MB with Alpine (vs ~1GB with full node image)
+- **Python**: ~150-250MB with slim (vs ~900MB with full python image)
+- **Go**: ~5-20MB with distroless/scratch (vs ~800MB with full golang image)
+- **Java**: ~200-350MB with JRE (vs ~500MB+ with JDK)
+
+**Next steps (required):**
+```
+## Next Steps
+
+- [ ] Test the build locally: `docker build -t myapp:1.0 .`
+- [ ] Run and verify the container works as expected
+- [ ] Update CI/CD pipeline to use the new Dockerfile
+- [ ] Consider BuildKit cache mounts for faster builds (see references/optimization_patterns.md)
+- [ ] Set up automated vulnerability scanning with `docker scout` or `trivy`
+- [ ] Push to registry and deploy
+```
 
 ## Generation Scripts (Optional Reference)
 
@@ -597,14 +617,14 @@ The `scripts/` directory contains standalone bash scripts for manual Dockerfile 
 - `generate_java.sh` - CLI tool for Java Dockerfiles
 - `generate_dockerignore.sh` - CLI tool for .dockerignore generation
 
-**Purpose:** These scripts are reference implementations and manual tools for users who want to generate Dockerfiles via command line without using Claude Code. They demonstrate the same best practices embedded in this skill.
+**Purpose:** These scripts are reference implementations and manual tools for users who want to generate Dockerfiles via command line without using skill invocation. They demonstrate the same best practices embedded in this skill.
 
-**When using this skill:** Claude generates Dockerfiles directly using the templates and patterns documented in this skill.md, rather than invoking these scripts. The templates in this document are the authoritative source.
+**When using this skill:** Codex generates Dockerfiles directly using the templates and patterns documented in this SKILL.md, rather than invoking these scripts. The templates in this document are the authoritative source.
 
 **Script usage example:**
 ```bash
 # Manual Dockerfile generation
-cd .claude/skills/dockerfile-generator/scripts
+cd devops-skills-plugin/skills/dockerfile-generator/scripts
 ./generate_nodejs.sh --version 20 --port 3000 --output Dockerfile
 ```
 
@@ -879,7 +899,7 @@ docker scout sbom myapp:latest
 
 **Use Case:** Dramatically faster builds by persisting package manager caches across builds.
 
-**Already covered in detail in `references/optimization_patterns.md` (lines 98-125).**
+**Already covered in detail in `references/optimization_patterns.md`.**
 
 **Quick reference:**
 ```dockerfile
@@ -907,9 +927,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
    - Ask user to provide or generate template
 
 2. **Unknown framework:**
-   - Use WebSearch or context7 to research
+   - Use local references first, then Context7, then web search
    - Fall back to generic template
-   - Ask user for specific requirements
+   - Ask user for specific runtime/build requirements
 
 3. **Validation failures:**
    - Apply fixes automatically
@@ -919,8 +939,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ## Integration with Other Skills
 
 This skill works well in combination with:
-- **devops-skills:dockerfile-validator** - Validates generated Dockerfiles (REQUIRED)
-- **k8s-generator** - Generate Kubernetes deployments for the container
+- **dockerfile-validator** - Validates generated Dockerfiles (REQUIRED)
+- **k8s-yaml-generator** - Generate Kubernetes deployments for the container
 - **helm-generator** - Create Helm charts with the container image
 
 ## Notes
@@ -928,7 +948,7 @@ This skill works well in combination with:
 - **Always use multi-stage builds** for compiled languages
 - **Always create non-root user** for security
 - **Always generate .dockerignore** to prevent secret leaks
-- **Always validate** with devops-skills:dockerfile-validator
+- **Always validate** with `dockerfile-validator` (or explicit fallback checks)
 - **Iterate at least once** if validation finds errors
 - Use alpine or distroless base images when possible
 - Pin all version tags (never use :latest)
@@ -938,6 +958,16 @@ This skill works well in combination with:
 - Test builds locally before committing
 - Keep Dockerfiles simple and maintainable
 - Document any non-obvious patterns with comments
+
+## Done Criteria
+
+Mark the task done only when all items below are true:
+- Dockerfile and `.dockerignore` are generated.
+- Validation has been executed via `dockerfile-validator` or documented fallback commands.
+- Validate-iterate loop evidence is present (iteration log with command path, counts, and fixes).
+- No remaining validation `error` findings.
+- Every remaining `warning` has either a fix or an intentional-deviation report row.
+- Output includes optimization metrics and actionable next steps.
 
 ## Sources
 

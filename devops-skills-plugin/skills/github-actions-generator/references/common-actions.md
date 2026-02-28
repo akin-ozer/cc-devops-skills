@@ -1,15 +1,15 @@
 # Common GitHub Actions Reference
 
-**Last Updated:** November 2025
+**Last Updated:** February 2026
 **Source:** Official GitHub Actions repositories and Context7 verified documentation
 
 This document catalogs frequently used GitHub Actions with current versions, inputs, outputs, and usage examples.
 
-**Important Notes for 2025:**
+**Important Notes for 2026:**
 - All actions should be pinned to full 40-character SHA for security
 - Node 24 runtime is now supported (Node 20 EOL: April 2026, default switch: March 4, 2026)
-- actions/cache v4.3.0 recommended (v4.2.0+ required as of February 2025, legacy service sunset)
-- Cache size limits: 10 GB free per repository, additional storage available (as of November 2025)
+- actions/cache v5.0.3 recommended (Node 24 runtime, runner v2.327.1+)
+- Cache size limits: 10 GB free per repository, additional storage available (as of February 2026)
 
 ## Table of Contents
 1. [Repository and Checkout](#repository-and-checkout)
@@ -27,11 +27,11 @@ This document catalogs frequently used GitHub Actions with current versions, inp
 
 ### actions/checkout
 
-**Latest Version:** v5 (v5.0.0)
-**SHA:** `08c6903cd8c0fde910a37f88322edcfb5dd907a8`
+**Latest Version:** v6 (v6.0.2)
+**SHA:** `de0fac2e4500dabe0009e67214ff5f5447ce83dd`
 **Minimum Runner:** v2.327.1+
 
-**Description:** Checkout repository code with improved performance and security
+**Description:** Checkout repository code with improved performance, tag handling, and security
 
 **Common Inputs:**
 - `fetch-depth`: Number of commits to fetch (default: 1, use 0 for full history)
@@ -39,7 +39,7 @@ This document catalogs frequently used GitHub Actions with current versions, inp
 - `token`: PAT for private repos (default: `${{ github.token }}`)
 - `submodules`: Whether to checkout submodules (`false`, `true`, `recursive`)
 - `lfs`: Whether to download Git LFS files (default: `false`)
-- `sparse-checkout`: Paths to checkout (cone mode or individual files) - **New in v5**
+- `sparse-checkout`: Paths to checkout (cone mode or individual files) - **Available in v5+**
 - `sparse-checkout-cone-mode`: Use cone mode for sparse checkout (default: `true`)
 
 **Required Permissions:**
@@ -53,21 +53,21 @@ permissions:
 **Basic checkout:**
 ```yaml
 - name: Checkout code
-  uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+  uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     fetch-depth: 1
 ```
 
 **Full history (for changelog/tags):**
 ```yaml
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     fetch-depth: 0
 ```
 
 **Sparse checkout (specific directories):**
 ```yaml
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     sparse-checkout: |
       .github
@@ -77,14 +77,14 @@ permissions:
 
 **Checkout PR HEAD commit:**
 ```yaml
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     ref: ${{ github.event.pull_request.head.sha }}
 ```
 
 **Checkout private repository:**
 ```yaml
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     repository: my-org/my-private-repo
     token: ${{ secrets.GH_PAT }}
@@ -95,8 +95,8 @@ permissions:
 
 ### actions/setup-node
 
-**Latest Version:** v6 (v6.0.0)
-**SHA:** `2028fbc5c25fe9cf00d9f06a71cc4710d4507903`
+**Latest Version:** v6 (v6.2.0)
+**SHA:** `6044e13b5dc448c55e2357c09f80417699197238`
 **Minimum Runner:** v2.328.0+ (for Node 24 support)
 
 **Description:** Setup Node.js environment with Node 24 support
@@ -115,7 +115,7 @@ permissions:
 **Basic setup with caching:**
 ```yaml
 - name: Setup Node.js 24
-  uses: actions/setup-node@v6
+  uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
   with:
     node-version: '24'
     cache: 'npm'
@@ -123,7 +123,7 @@ permissions:
 
 **Multi-lock-file caching:**
 ```yaml
-- uses: actions/setup-node@v6
+- uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
   with:
     node-version: '24'
     cache: 'npm'
@@ -134,7 +134,7 @@ permissions:
 
 **Setup for package publishing:**
 ```yaml
-- uses: actions/setup-node@v6
+- uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
   with:
     node-version: '20'
     registry-url: 'https://registry.npmjs.org'
@@ -146,8 +146,8 @@ permissions:
 
 ### actions/setup-python
 
-**Latest Version:** v5 (v5.0.0)
-**SHA:** `0a5c61591373683505ea898e09a3ea4f39ef2b9c`
+**Latest Version:** v6 (v6.2.0)
+**SHA:** `a309ff8b426b58ec0e2a45f0f869d46889d02405`
 
 **Description:** Setup Python environment
 
@@ -159,7 +159,7 @@ permissions:
 **Example:**
 ```yaml
 - name: Setup Python
-  uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+  uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
   with:
     python-version: '3.11'
     cache: 'pip'
@@ -213,12 +213,12 @@ permissions:
 
 ### actions/cache
 
-**Latest Version:** v4 (v4.3.0)
-**SHA:** `0057852bfaa89a56745cba8c7296529d2fc39830`
+**Latest Version:** v5 (v5.0.3)
+**SHA:** `cdf6c1fa76f9f475f3d7449005a359c84ca0f306`
 
-**Description:** Cache dependencies and build outputs (v4.2.0+ required as of Feb 2025)
+**Description:** Cache dependencies and build outputs with Node 24 runtime support
 
-**Important:** Legacy cache service sunset February 1, 2025. Repositories get 10 GB free cache storage, with additional storage available.
+**Important:** actions/cache v5 requires GitHub Actions runner v2.327.1 or later. Repositories get 10 GB free cache storage, with additional storage available.
 
 **Required Inputs:**
 - `path`: Directories to cache
@@ -230,7 +230,7 @@ permissions:
 **Example:**
 ```yaml
 - name: Cache dependencies
-  uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+  uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   with:
     path: |
       ~/.npm

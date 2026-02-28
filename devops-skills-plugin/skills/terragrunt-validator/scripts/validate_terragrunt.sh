@@ -12,7 +12,7 @@
 #
 # Designed for Terragrunt 0.93+ with the new CLI redesign
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -22,20 +22,28 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-TARGET_DIR="${1:-.}"
-# Convert to absolute path
-TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
+TARGET_DIR_INPUT="${1:-.}"
+# Convert to absolute path when target exists, keep input value otherwise
+# so main() can print a friendly, consistent error message.
+if [[ -d "$TARGET_DIR_INPUT" ]]; then
+    TARGET_DIR=$(cd "$TARGET_DIR_INPUT" && pwd)
+else
+    TARGET_DIR="$TARGET_DIR_INPUT"
+fi
 SKIP_PLAN="${SKIP_PLAN:-false}"
 SKIP_SECURITY="${SKIP_SECURITY:-false}"
 SKIP_LINT="${SKIP_LINT:-false}"
 SKIP_INPUT_VALIDATION="${SKIP_INPUT_VALIDATION:-false}"
+SKIP_INIT="${SKIP_INIT:-false}"
+SKIP_BACKEND_INIT="${SKIP_BACKEND_INIT:-false}"
+SOFT_FAIL_SECURITY="${SOFT_FAIL_SECURITY:-false}"
 
 # Security scanner preference (trivy, tfsec, checkov, or auto)
 SECURITY_SCANNER="${SECURITY_SCANNER:-auto}"
 
 # Build strict mode flag
 STRICT_FLAG=""
-if [[ "$TG_STRICT_MODE" == "true" ]]; then
+if [[ "${TG_STRICT_MODE:-false}" == "true" ]]; then
     STRICT_FLAG="--strict-mode"
 fi
 
@@ -59,6 +67,37 @@ print_warning() {
 
 print_info() {
     echo -e "${BLUE}ℹ $1${NC}"
+}
+
+# Detect execution mode from Terragrunt files in target directory.
+# Modes:
+# - multi: nested terragrunt units exist
+# - single: current dir is a single Terragrunt unit
+# - root-only: root.hcl exists but no unit in current directory
+# - none: no recognizable Terragrunt config found
+detect_target_mode() {
+    local has_direct_terragrunt=false
+    local has_nested_terragrunt=false
+
+    if [[ -f "$TARGET_DIR/terragrunt.hcl" || -f "$TARGET_DIR/terragrunt.stack.hcl" ]]; then
+        has_direct_terragrunt=true
+    fi
+
+    if find "$TARGET_DIR" -mindepth 2 -type f \
+        \( -name "terragrunt.hcl" -o -name "terragrunt.stack.hcl" \) \
+        ! -path "*/.terragrunt-cache/*" | grep -q .; then
+        has_nested_terragrunt=true
+    fi
+
+    if [[ "$has_nested_terragrunt" == "true" ]]; then
+        echo "multi"
+    elif [[ "$has_direct_terragrunt" == "true" ]]; then
+        echo "single"
+    elif [[ -f "$TARGET_DIR/root.hcl" ]]; then
+        echo "root-only"
+    else
+        echo "none"
+    fi
 }
 
 # Check if required tools are installed
@@ -179,28 +218,20 @@ validate_inputs() {
 
     cd "$TARGET_DIR"
 
-    # Check if we're in a single unit directory or a multi-unit directory
-    # Single unit: has terragrunt.hcl directly
-    # Multi-unit: has subdirectories with terragrunt.hcl files
-    local has_direct_terragrunt=false
-    local has_nested_terragrunt=false
+    local mode
+    mode=$(detect_target_mode)
+    local -a validate_cmd=()
 
-    if [[ -f "terragrunt.hcl" ]]; then
-        has_direct_terragrunt=true
-    fi
-
-    if find . -mindepth 2 -name "terragrunt.hcl" -type f | grep -q .; then
-        has_nested_terragrunt=true
-    fi
-
-    # Use --all flag for multi-unit directories, or run directly for single unit
-    local validate_cmd=""
-    if [[ "$has_nested_terragrunt" == "true" ]]; then
-        validate_cmd="terragrunt hcl validate --inputs --all"
+    if [[ "$mode" == "multi" ]]; then
+        validate_cmd=(terragrunt hcl validate --inputs --all)
         print_info "Running input validation across all units..."
-    elif [[ "$has_direct_terragrunt" == "true" ]]; then
-        validate_cmd="terragrunt hcl validate --inputs"
+    elif [[ "$mode" == "single" ]]; then
+        validate_cmd=(terragrunt hcl validate --inputs)
         print_info "Running input validation on single unit..."
+    elif [[ "$mode" == "root-only" ]]; then
+        print_warning "No terragrunt.hcl in current directory for input validation"
+        print_info "Root-only directory detected (root.hcl). Run this script in a unit directory or keep multi-unit layout."
+        return 0
     else
         print_warning "No terragrunt.hcl files found for input validation"
         return 0
@@ -208,7 +239,7 @@ validate_inputs() {
 
     # Run the validation command
     local output
-    if output=$($validate_cmd 2>&1); then
+    if output=$("${validate_cmd[@]}" 2>&1); then
         print_success "All inputs validated successfully"
     else
         local exit_code=$?
@@ -255,50 +286,89 @@ validate_terraform() {
 
     cd "$TARGET_DIR"
 
-    # Check if we're in a single unit directory or a multi-unit directory
-    local has_direct_terragrunt=false
-    local has_nested_terragrunt=false
+    local mode
+    mode=$(detect_target_mode)
 
-    if [[ -f "terragrunt.hcl" ]]; then
-        has_direct_terragrunt=true
-    fi
-
-    if find . -mindepth 2 -name "terragrunt.hcl" -type f | grep -q .; then
-        has_nested_terragrunt=true
-    fi
-
-    # For multi-unit directories without direct terragrunt.hcl, use run --all
-    if [[ "$has_nested_terragrunt" == "true" ]] && [[ "$has_direct_terragrunt" == "false" ]]; then
+    # For multi-unit directories, run init+validate across all units.
+    if [[ "$mode" == "multi" ]]; then
         print_info "Multi-unit directory detected, using 'run --all validate'"
-        if terragrunt $STRICT_FLAG run --all validate 2>&1; then
+
+        if [[ "$SKIP_INIT" != "true" ]]; then
+            local -a multi_init_cmd=(terragrunt)
+            if [[ -n "$STRICT_FLAG" ]]; then
+                multi_init_cmd+=("$STRICT_FLAG")
+            fi
+            multi_init_cmd+=(run --all init)
+
+            if [[ "$SKIP_BACKEND_INIT" == "true" ]]; then
+                multi_init_cmd+=("-backend=false")
+                print_info "Backend initialization disabled for multi-unit init"
+            fi
+
+            if ! "${multi_init_cmd[@]}" 2>&1; then
+                print_error "Terraform initialization failed across one or more units"
+                return 1
+            fi
+        else
+            print_info "Skipping terraform init step (SKIP_INIT=true)"
+        fi
+
+        local -a multi_validate_cmd=(terragrunt)
+        if [[ -n "$STRICT_FLAG" ]]; then
+            multi_validate_cmd+=("$STRICT_FLAG")
+        fi
+        multi_validate_cmd+=(run --all validate)
+
+        if "${multi_validate_cmd[@]}" 2>&1; then
             print_success "Terraform configuration is valid across all units"
         else
-            print_warning "Some Terraform validation issues found - review output above"
-            # Don't fail for validation issues in multi-unit mode
+            print_error "Terraform validation failed across one or more units"
+            return 1
         fi
         return 0
     fi
 
     # For single unit directories
-    if [[ "$has_direct_terragrunt" == "true" ]]; then
-        # Initialize if needed
-        if [ ! -d ".terraform" ] && [ ! -d ".terragrunt-cache" ]; then
+    if [[ "$mode" == "single" ]]; then
+        # Initialize if needed unless explicitly skipped.
+        if [[ "$SKIP_INIT" != "true" ]] && [ ! -d ".terraform" ] && [ ! -d ".terragrunt-cache" ]; then
             echo "Initializing Terraform..."
-            if ! terragrunt $STRICT_FLAG init 2>&1; then
+            local -a single_init_cmd=(terragrunt)
+            if [[ -n "$STRICT_FLAG" ]]; then
+                single_init_cmd+=("$STRICT_FLAG")
+            fi
+            single_init_cmd+=(init)
+            if [[ "$SKIP_BACKEND_INIT" == "true" ]]; then
+                single_init_cmd+=("-backend=false")
+                print_info "Backend initialization disabled for single-unit init"
+            fi
+
+            if ! "${single_init_cmd[@]}" 2>&1; then
                 print_error "Terraform initialization failed"
                 return 1
             fi
+        elif [[ "$SKIP_INIT" == "true" ]]; then
+            print_info "Skipping terraform init step (SKIP_INIT=true)"
         fi
 
-        if terragrunt $STRICT_FLAG validate 2>&1; then
+        local -a single_validate_cmd=(terragrunt)
+        if [[ -n "$STRICT_FLAG" ]]; then
+            single_validate_cmd+=("$STRICT_FLAG")
+        fi
+        single_validate_cmd+=(validate)
+
+        if "${single_validate_cmd[@]}" 2>&1; then
             print_success "Terraform configuration is valid"
         else
             print_error "Terraform validation failed"
             return 1
         fi
-    else
+    elif [[ "$mode" == "root-only" ]]; then
         print_warning "No terragrunt.hcl found for Terraform validation"
-        print_info "This directory may be a root configuration directory (root.hcl only)"
+        print_info "Root-only directory detected (root.hcl). Run this script from a unit directory or a multi-unit parent."
+    else
+        print_error "No Terragrunt configuration files found in $TARGET_DIR"
+        return 1
     fi
 }
 
@@ -330,30 +400,42 @@ run_security_scan() {
     case "$SECURITY_SCANNER" in
         trivy)
             print_info "Using Trivy (recommended) for security scanning"
-            if trivy config . --severity HIGH,CRITICAL --exit-code 0 2>&1; then
+            if trivy config . --severity HIGH,CRITICAL --exit-code 1 2>&1; then
                 print_success "No critical security issues found"
             else
-                print_warning "Security issues detected - review above output"
-                return 1
+                if [[ "$SOFT_FAIL_SECURITY" == "true" ]]; then
+                    print_warning "Security issues detected but not failing build (SOFT_FAIL_SECURITY=true)"
+                else
+                    print_error "Security issues detected"
+                    return 1
+                fi
             fi
             ;;
         checkov)
             print_info "Using Checkov for security scanning"
-            if checkov -d . --framework terraform --soft-fail 2>&1; then
+            if checkov -d . --framework terraform 2>&1; then
                 print_success "No critical security issues found"
             else
-                print_warning "Security issues detected - review above output"
-                return 1
+                if [[ "$SOFT_FAIL_SECURITY" == "true" ]]; then
+                    print_warning "Security issues detected but not failing build (SOFT_FAIL_SECURITY=true)"
+                else
+                    print_error "Security issues detected"
+                    return 1
+                fi
             fi
             ;;
         tfsec)
             print_warning "Using tfsec (deprecated) - consider migrating to Trivy"
             print_info "Migration guide: https://github.com/aquasecurity/tfsec/blob/master/tfsec-to-trivy-migration-guide.md"
-            if tfsec . --soft-fail 2>&1; then
+            if tfsec . 2>&1; then
                 print_success "No critical security issues found"
             else
-                print_warning "Security issues detected - review above output"
-                return 1
+                if [[ "$SOFT_FAIL_SECURITY" == "true" ]]; then
+                    print_warning "Security issues detected but not failing build (SOFT_FAIL_SECURITY=true)"
+                else
+                    print_error "Security issues detected"
+                    return 1
+                fi
             fi
             ;;
         *)
@@ -370,7 +452,7 @@ validate_dependencies() {
     cd "$TARGET_DIR"
 
     # Check if dependencies are properly configured
-    if find . -name "*.hcl" -type f -exec grep -l "dependency" {} \; | grep -q .; then
+    if find . -name "*.hcl" -type f ! -path "*/.terragrunt-cache/*" -exec grep -l "dependency" {} \; | grep -q .; then
         print_success "Dependency blocks found in configuration"
 
         # Try to generate DAG graph (new in 0.93+)
@@ -395,14 +477,42 @@ run_plan() {
         print_info "Running with strict mode enabled"
     fi
 
-    echo "Running terragrunt plan..."
-    if terragrunt $STRICT_FLAG plan -out=tfplan 2>&1; then
-        print_success "Plan generated successfully"
-        echo -e "\nTo review the plan, run:"
-        echo "  terragrunt show tfplan"
+    local mode
+    mode=$(detect_target_mode)
+
+    if [[ "$mode" == "multi" ]]; then
+        echo "Running terragrunt run --all plan..."
+        local -a plan_cmd=(terragrunt)
+        if [[ -n "$STRICT_FLAG" ]]; then
+            plan_cmd+=("$STRICT_FLAG")
+        fi
+        plan_cmd+=(run --all plan)
+
+        if "${plan_cmd[@]}" 2>&1; then
+            print_success "Plan generated successfully across all units"
+        else
+            print_error "Plan generation failed across one or more units"
+            return 1
+        fi
+    elif [[ "$mode" == "single" ]]; then
+        echo "Running terragrunt plan..."
+        local -a plan_cmd=(terragrunt)
+        if [[ -n "$STRICT_FLAG" ]]; then
+            plan_cmd+=("$STRICT_FLAG")
+        fi
+        plan_cmd+=(plan -out=tfplan)
+
+        if "${plan_cmd[@]}" 2>&1; then
+            print_success "Plan generated successfully"
+            echo -e "\nTo review the plan, run:"
+            echo "  terragrunt show tfplan"
+        else
+            print_error "Plan generation failed"
+            return 1
+        fi
     else
-        print_error "Plan generation failed"
-        return 1
+        print_warning "No unit terragrunt.hcl found for plan step"
+        print_info "Skipping plan in non-unit directory"
     fi
 }
 
@@ -415,6 +525,11 @@ main() {
 
     if [[ -n "$STRICT_FLAG" ]]; then
         print_info "Strict mode enabled - deprecated features will cause errors"
+    fi
+
+    if [[ ! -d "$TARGET_DIR" ]]; then
+        print_error "Target directory does not exist: $TARGET_DIR"
+        exit 1
     fi
 
     check_dependencies
@@ -457,7 +572,7 @@ main() {
 }
 
 # Show usage if --help is passed
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: $0 [TARGET_DIR]"
     echo ""
     echo "Validates Terragrunt configurations with comprehensive checks."
@@ -471,6 +586,9 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "  SKIP_SECURITY=true      Skip security scanning"
     echo "  SKIP_LINT=true          Skip linting with tflint"
     echo "  SKIP_INPUT_VALIDATION=true  Skip HCL input validation"
+    echo "  SKIP_INIT=true          Skip terraform init step before validate"
+    echo "  SKIP_BACKEND_INIT=true  Run terraform init with -backend=false"
+    echo "  SOFT_FAIL_SECURITY=true Do not fail on scanner findings"
     echo "  SECURITY_SCANNER=X      Force specific scanner: trivy, checkov, tfsec, or auto (default)"
     echo "  TG_STRICT_MODE=true     Enable Terragrunt strict mode (errors on deprecated features)"
     echo ""
@@ -484,6 +602,7 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "  $0 ./infrastructure                   # Validate specific directory"
     echo "  SKIP_PLAN=true $0                     # Skip plan generation"
     echo "  SECURITY_SCANNER=trivy $0             # Force Trivy for security"
+    echo "  SKIP_BACKEND_INIT=true $0             # Avoid remote backend auth during init"
     echo "  TG_STRICT_MODE=true $0                # Enable strict mode"
     exit 0
 fi

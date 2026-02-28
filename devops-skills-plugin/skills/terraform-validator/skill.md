@@ -24,6 +24,8 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 | 9 | Run `bash scripts/run_checkov.sh <path>` | ✅ REQUIRED |
 | 10 | Cross-reference findings with `security_checklist.md` sections | ✅ REQUIRED |
 | 11 | Generate report citing reference files | ✅ REQUIRED |
+| 12 | Run regression tests (`bash tests/test_regression.sh`) | ✅ REQUIRED |
+| 13 | Run lightweight CI checks (`bash -n`, `py_compile`, smoke) | ✅ REQUIRED |
 
 > **IMPORTANT:** Steps 3-4 (reading reference files) must be completed BEFORE running security scans. The reference files contain remediation patterns that MUST be cited in your report.
 
@@ -64,7 +66,7 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 3. Lookup Provider Documentation (REQUIRED)
    ├─> For EACH provider detected:
    │   ├─> mcp__context7__resolve-library-id with "terraform-provider-{name}"
-   │   ├─> mcp__context7__get-library-docs for version-specific guidance
+   │   ├─> mcp__context7__query-docs for version-specific guidance
    │   └─> If NOT found in Context7: WebSearch fallback (see below)
    └─> Note any custom/private providers for WebSearch
 
@@ -75,6 +77,7 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 
 5. Format and Lint (REQUIRED)
    ├─> MUST run: terraform fmt -recursive (auto-fix formatting)
+   ├─> MUST run: terraform fmt -check -recursive (verify no drift)
    ├─> RUN: tflint (or note as skipped if unavailable)
    └─> Report formatting issues
 
@@ -93,7 +96,20 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
    ├─> Analyze planned changes
    └─> Report potential issues
 
-9. Generate Comprehensive Report
+9. Regression and Wrapper Determinism Checks (REQUIRED)
+   ├─> MUST run: bash tests/test_regression.sh
+   ├─> Confirms parser error handling returns non-zero
+   ├─> Confirms implicit provider detection for docs lookup
+   ├─> Confirms wrapper argument handling is deterministic
+   └─> Confirms checkov wrapper preserves scanner exit code
+
+10. Lightweight CI Checks (REQUIRED)
+   ├─> MUST run: bash -n scripts/*.sh
+   ├─> MUST run: python3 -m py_compile scripts/*.py
+   ├─> MUST run: smoke check for extract wrapper on sample fixture
+   └─> Record command outputs and exit codes
+
+11. Generate Comprehensive Report
    ├─> Include all findings with severity
    ├─> Reference best_practices.md for recommendations
    └─> Offer to fix issues if appropriate
@@ -120,7 +136,15 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 | **Run security scan** | `run_checkov.sh` | `bash scripts/run_checkov.sh <path>` |
 | **Install checkov (if missing)** | `install_checkov.sh` | `bash scripts/install_checkov.sh install` |
 
-> **Note:** `extract_tf_info_wrapper.sh` automatically handles the python-hcl2 dependency by creating a temporary virtual environment if needed. The venv is automatically cleaned up on exit.
+> **Note:** `extract_tf_info_wrapper.sh` automatically handles the python-hcl2 dependency. If system Python lacks `python-hcl2`, it creates/reuses a cached virtual environment under `~/.cache/terraform-validator/` by default.
+
+### Script Run Context (REQUIRED)
+
+- Default working directory: `devops-skills-plugin/skills/terraform-validator`
+- If running from elsewhere, use absolute script paths:
+  - `bash /absolute/path/to/terraform-validator/scripts/extract_tf_info_wrapper.sh <path>`
+  - `bash /absolute/path/to/terraform-validator/scripts/run_checkov.sh <path>`
+  - `bash /absolute/path/to/terraform-validator/scripts/install_checkov.sh install`
 
 ## Context7 Provider Documentation Lookup (REQUIRED)
 
@@ -130,7 +154,7 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 1. Run extract_tf_info_wrapper.sh to get provider list
 2. For each provider (e.g., "aws", "google", "azurerm"):
    a. Call: mcp__context7__resolve-library-id with "terraform-provider-{name}"
-   b. Call: mcp__context7__get-library-docs with the resolved ID
+   b. Call: mcp__context7__query-docs with the resolved ID
    c. Note version-specific features and constraints
 3. Include relevant provider guidance in validation report
 ```
@@ -138,7 +162,7 @@ Comprehensive toolkit for validating, linting, and testing Terraform configurati
 **Example for AWS provider:**
 ```
 mcp__context7__resolve-library-id("terraform-provider-aws")
-mcp__context7__get-library-docs(context7CompatibleLibraryID, topic="best practices")
+mcp__context7__query-docs(context7CompatibleLibraryID, "best practices")
 ```
 
 ### Context7 Fallback to WebSearch (REQUIRED)
@@ -270,18 +294,18 @@ bash scripts/run_checkov.sh --compact ./terraform
 
 ### Cross-Reference Mapping
 
-| Checkov Check Pattern | security_checklist.md Section | Line Reference |
-|-----------------------|------------------------------|----------------|
-| `CKV_AWS_24` (SSH open) | "Overly Permissive Security Groups" | Lines 66-110 |
-| `CKV_AWS_260` (HTTP open) | "Overly Permissive Security Groups" | Lines 66-110 |
-| `CKV_AWS_16` (RDS encryption) | "Encryption at Rest" | Lines 141-175 |
-| `CKV_AWS_17` (RDS public) | "RDS Databases" | Lines 356-366 |
-| `CKV_AWS_130` (public subnet) | "Network Security" | Lines 62-140 |
-| `CKV_AWS_53-56` (S3 public access) | "Public S3 Buckets" | Lines 112-139 |
-| `CKV_AWS_*` (IAM) | "IAM Security" | Lines 217-308 |
-| `CKV_AWS_79` (IMDSv1) | "EC2/EKS Security" | Lines 382-389 |
-| Hardcoded passwords | "Hardcoded Credentials" | Lines 8-45 |
-| Sensitive outputs | "Sensitive Output Exposure" | Lines 47-61 |
+| Checkov Check Pattern | security_checklist.md Section |
+|-----------------------|------------------------------|
+| `CKV_AWS_24` (SSH open) | "Overly Permissive Security Groups" |
+| `CKV_AWS_260` (HTTP open) | "Overly Permissive Security Groups" |
+| `CKV_AWS_16` (RDS encryption) | "Encryption at Rest" |
+| `CKV_AWS_17` (RDS public) | "RDS Databases" |
+| `CKV_AWS_130` (public subnet) | "Network Security" |
+| `CKV_AWS_53-56` (S3 public access) | "Public S3 Buckets" |
+| `CKV_AWS_*` (IAM) | "IAM Security" |
+| `CKV_AWS_79` (IMDSv1) | "ECS/EKS" |
+| Hardcoded passwords | "Hardcoded Credentials" |
+| Sensitive outputs | "Sensitive Output Exposure" |
 
 ### Report Template for Security Findings
 
@@ -292,7 +316,7 @@ bash scripts/run_checkov.sh --compact ./terraform
 **Resource:** [Resource name and file:line]
 **Severity:** [HIGH/MEDIUM/LOW]
 
-**Reference:** security_checklist.md - "[Section Name]" (lines X-Y)
+**Reference:** security_checklist.md - "[Section Name]"
 
 **Remediation Pattern:**
 [Copy relevant code example from security_checklist.md]
@@ -303,14 +327,14 @@ bash scripts/run_checkov.sh --compact ./terraform
 
 ### Example Cross-Referenced Report
 
-```markdown
+````markdown
 ### Security Issue: CKV_AWS_24
 
 **Finding:** Security group allows SSH from 0.0.0.0/0
 **Resource:** aws_security_group.web (main.tf:47-79)
 **Severity:** HIGH
 
-**Reference:** security_checklist.md - "Overly Permissive Security Groups" (lines 66-110)
+**Reference:** security_checklist.md - "Overly Permissive Security Groups"
 
 **Remediation Pattern (from reference):**
 ```hcl
@@ -331,7 +355,7 @@ resource "aws_security_group" "app" {
 ```
 
 **Recommended Fix:** Replace `cidr_blocks = ["0.0.0.0/0"]` with a variable or specific CIDR range.
-```
+````
 
 ### Dry-Run Testing
 
@@ -389,11 +413,12 @@ When validation tools are not installed, follow this recovery workflow:
 **If python-hcl2 is missing:**
 ```
 The extract_tf_info_wrapper.sh script handles this automatically by creating
-a temporary venv. No user action required.
+or reusing a cached venv. No user action required.
 ```
 
-**Required tools:** `terraform fmt`, `terraform validate`
-**Optional but recommended:** `tflint`, `checkov`
+**Required tools:** `terraform fmt`, `terraform init`, `terraform validate`
+**Required for full security validation:** `checkov`
+**Optional but recommended:** `tflint`
 
 ## Scripts
 
@@ -426,7 +451,7 @@ a temporary venv. No user action required.
 4. MUST: Read references/best_practices.md
 5. RUN: terraform fmt -check main.tf
 6. RUN: terraform init (if needed) && terraform validate
-7. MUST: bash scripts/run_checkov.sh -f main.tf
+7. MUST: bash scripts/run_checkov.sh -f json main.tf
 8. Report issues with remediation from references
 9. If custom providers: WebSearch for documentation
 ```
@@ -480,6 +505,8 @@ Terraform 1.10+ introduces ephemeral values for secure secrets management. Terra
 
 - Always run validation in order: extract info → lookup docs → read refs → format → lint → validate → security → plan
 - MUST use wrapper scripts for extract_tf_info and checkov
+- MUST run `bash tests/test_regression.sh` after script changes
+- MUST run lightweight CI checks: `bash -n scripts/*.sh` and `python3 -m py_compile scripts/*.py`
 - MUST read reference files before relevant validation steps
 - MUST lookup provider docs via Context7 for ALL providers
 - MUST offer recovery/rerun when tools are missing
@@ -488,3 +515,10 @@ Terraform 1.10+ introduces ephemeral values for secure secrets management. Terra
 - Use version constraints for all providers and modules
 - Use remote state for team collaboration
 - Enable state locking to prevent concurrent modifications
+
+## Done Criteria
+
+- Validation instructions are executable end-to-end with one deterministic command path.
+- Wrapper scripts behave predictably in both success and failure paths (including propagated non-zero exits).
+- Regression tests cover parser error handling, implicit provider detection, wrapper argument handling, and checkov exit-code behavior.
+- Lightweight CI checks (`bash -n`, `py_compile`, smoke checks) pass before final reporting.

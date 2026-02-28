@@ -6,15 +6,50 @@ This script generates a Declarative Jenkinsfile with specified configuration.
 """
 
 import argparse
+import re
 import sys
-import os
 from pathlib import Path
 
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from common_patterns import PipelinePatterns, StageTemplates, PostConditions, EnvironmentTemplates
-from syntax_helpers import DeclarativeSyntax, FormattingHelpers, ValidationHelpers
+from syntax_helpers import DeclarativeSyntax, FormattingHelpers, GroovySyntax, ValidationHelpers
+
+STAGE_KEY_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
+
+
+def parse_stage_list(stages_value):
+    """Parse comma-separated stage values into normalized keys."""
+    stages = []
+    for raw_stage in stages_value.split(','):
+        stage = raw_stage.strip().lower()
+        if not stage:
+            continue
+        if not STAGE_KEY_PATTERN.fullmatch(stage):
+            raise ValueError(
+                f"Invalid stage key '{raw_stage.strip()}'. Use only lowercase letters, numbers, '-' and '_'"
+            )
+        stages.append(stage)
+    if not stages:
+        raise ValueError('At least one stage must be provided via --stages')
+    return stages
+
+
+def resolve_k8s_yaml(k8s_yaml_value):
+    """Resolve --k8s-yaml as either inline YAML or a path to an existing file."""
+    if not k8s_yaml_value:
+        return ''
+
+    candidate_path = Path(k8s_yaml_value).expanduser()
+    if candidate_path.is_file():
+        return candidate_path.read_text()
+
+    looks_like_yaml_path = candidate_path.suffix in {'.yaml', '.yml'} and '\n' not in k8s_yaml_value
+    if looks_like_yaml_path and not candidate_path.exists():
+        raise ValueError(f"--k8s-yaml file does not exist: {k8s_yaml_value}")
+
+    return k8s_yaml_value
 
 
 class DeclarativePipelineGenerator:
@@ -156,7 +191,6 @@ class DeclarativePipelineGenerator:
         """Add stages based on configuration"""
         self.pipeline_parts.append("")
         self.pipeline_parts.append("    stages {")
-        first_stage = True
 
         # Get stage list from config or use default
         stages = self.config.get('stages', ['build', 'test'])
@@ -201,14 +235,22 @@ class DeclarativePipelineGenerator:
                 ))
             elif stage == 'parallel-tests':
                 test_types = self.config.get('test_types', ['unit', 'integration'])
-                self.pipeline_parts.append(StageTemplates.parallel_test_stage(test_types))
+                self.pipeline_parts.append(StageTemplates.parallel_test_stage(
+                    test_types,
+                    fail_fast=self.config.get('parallel_fail_fast', True),
+                ))
             else:
                 # Custom stage
-                custom_cmd = self.config.get(f'{stage}_cmd', f'echo "Running {stage}"')
+                stage_name = ValidationHelpers.normalize_stage_name(
+                    stage.replace('-', ' ').replace('_', ' ').title()
+                )
+                stage_name_literal = GroovySyntax.single_quoted_literal(stage_name)
+                custom_cmd = self.config.get(f'{stage}_cmd', f'echo "Running {stage_name}"')
+                custom_cmd_literal = GroovySyntax.single_quoted_literal(custom_cmd)
                 self.pipeline_parts.append(f"""
-        stage('{stage.capitalize()}') {{
+        stage({stage_name_literal}) {{
             steps {{
-                sh '{custom_cmd}'
+                sh {custom_cmd_literal}
             }}
         }}""")
 
@@ -222,7 +264,12 @@ class DeclarativePipelineGenerator:
         slack = self.config.get('notification_slack')
 
         if email or slack:
-            post_block = PostConditions.notification_post(email, slack)
+            post_block = PostConditions.notification_post(
+                email,
+                slack,
+                archive_artifacts=artifacts,
+                cleanup=cleanup,
+            )
         else:
             post_block = PostConditions.standard_post(artifacts, cleanup)
 
@@ -275,7 +322,7 @@ Examples:
     parser.add_argument('--dockerfile', default='Dockerfile',
                         help='Dockerfile name (for --agent dockerfile)')
     parser.add_argument('--k8s-yaml', default='',
-                        help='Kubernetes YAML content or file path')
+                        help='Kubernetes YAML (inline) or path to an existing .yaml/.yml file')
 
     # Build configuration
     parser.add_argument('--build-tool', default='maven',
@@ -310,8 +357,14 @@ Examples:
                         help='Skip remaining stages if build becomes unstable')
     parser.add_argument('--disable-resume', action='store_true',
                         help='Do not allow pipeline to resume if controller restarts')
-    parser.add_argument('--parallels-fail-fast', action='store_true',
-                        help='Abort all parallel stages when one fails')
+    parallel_fail_fast_group = parser.add_mutually_exclusive_group()
+    parallel_fail_fast_group.add_argument('--parallels-fail-fast', dest='parallels_fail_fast',
+                                          action='store_true',
+                                          help='Abort all parallel stages when one fails (default)')
+    parallel_fail_fast_group.add_argument('--no-parallels-fail-fast', dest='parallels_fail_fast',
+                                          action='store_false',
+                                          help='Allow parallel branches to continue after a failure')
+    parser.set_defaults(parallels_fail_fast=True)
 
     # Deployment
     parser.add_argument('--deploy-env', default='production',
@@ -342,17 +395,23 @@ Examples:
 def main():
     """Main entry point"""
     args = parse_args()
+    try:
+        stages = parse_stage_list(args.stages)
+        k8s_yaml = resolve_k8s_yaml(args.k8s_yaml)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
     # Build configuration from args
     config = {
         'name': args.name,
-        'stages': args.stages.split(','),
+        'stages': stages,
         'agent': args.agent,
         'agent_label': args.agent_label,
         'docker_image': args.docker_image,
         'docker_args': args.docker_args,
         'dockerfile': args.dockerfile,
-        'k8s_yaml': args.k8s_yaml,
+        'k8s_yaml': k8s_yaml,
         'build_tool': args.build_tool,
         'scm_url': args.scm_url,
         'branch': args.branch,
@@ -368,6 +427,7 @@ def main():
         'docker_registry_credentials': args.docker_registry_credentials,
         'archive_artifacts': args.archive_artifacts,
         'cleanup': not args.no_cleanup,
+        'parallel_fail_fast': args.parallels_fail_fast,
     }
 
     # Add custom commands if specified
@@ -396,7 +456,7 @@ def main():
         options['skipStagesAfterUnstable'] = True
     if args.disable_resume:
         options['disableResume'] = True
-    if args.parallels_fail_fast:
+    if args.parallels_fail_fast and 'parallel-tests' in stages:
         options['parallelsAlwaysFailFast'] = True
     if options:
         config['options'] = options
@@ -416,6 +476,7 @@ def main():
     print(f"  Agent: {args.agent}")
     print("\n" + "="*60)
     print("NEXT STEP: Validate using jenkinsfile-validator skill")
+    print(f"  bash devops-skills-plugin/skills/jenkinsfile-validator/scripts/validate_jenkinsfile.sh {args.output}")
     print("="*60)
 
     return 0

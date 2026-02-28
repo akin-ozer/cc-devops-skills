@@ -22,8 +22,10 @@ RUN ./mvnw clean package -DskipTests && \
 FROM eclipse-temurin:21-jre-jammy AS production
 WORKDIR /app
 
-# Create non-root user
-RUN useradd -m -u 1001 appuser
+# Install healthcheck dependency and create non-root user
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -u 1001 appuser
 
 # Copy JAR from builder
 COPY --from=builder --chown=appuser:appuser /app/target/app.jar ./app.jar

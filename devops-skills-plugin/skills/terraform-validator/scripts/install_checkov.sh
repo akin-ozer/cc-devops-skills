@@ -17,30 +17,38 @@ NC='\033[0m' # No Color
 DEFAULT_INSTALL_DIR="${HOME}/.local/checkov-venv"
 INSTALL_DIR="${CHECKOV_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 WRAPPER_LINK="${HOME}/.local/bin/checkov"
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$0")"
+
+AUTO_YES="false"
+FORCE_RECREATE="false"
 
 # Help message
 show_help() {
     cat << EOF
 Checkov Installation Script with Virtual Environment
 
-Usage: $(basename "$0") [OPTIONS]
+Usage: $(basename "$0") <command> [--yes] [--force]
 
 This script installs Checkov in an isolated Python virtual environment,
 creating a wrapper script for easy execution.
 
-OPTIONS:
+COMMANDS:
     install         Install Checkov in a virtual environment
     uninstall       Remove Checkov virtual environment and wrapper
     upgrade         Upgrade Checkov to the latest version
     status          Check installation status
     -h, --help      Show this help message
 
+FLAGS:
+    -y, --yes       Non-interactive mode; accept confirmation prompts
+    --force         Recreate install dir during install if it already exists
+
 ENVIRONMENT VARIABLES:
     CHECKOV_INSTALL_DIR    Custom installation directory (default: ~/.local/checkov-venv)
 
 EXAMPLES:
     # Install Checkov
-    $(basename "$0") install
+    $(basename "$0") install --yes
 
     # Check installation status
     $(basename "$0") status
@@ -49,7 +57,7 @@ EXAMPLES:
     $(basename "$0") upgrade
 
     # Uninstall Checkov
-    $(basename "$0") uninstall
+    $(basename "$0") uninstall --yes
 
 NOTES:
     - Requires Python 3.9 or higher
@@ -87,13 +95,17 @@ create_venv() {
 
     if [ -d "$INSTALL_DIR" ]; then
         echo -e "${YELLOW}Virtual environment already exists${NC}"
-        read -p "Remove and recreate? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [ "$FORCE_RECREATE" = "true" ] || [ "$AUTO_YES" = "true" ]; then
             rm -rf "$INSTALL_DIR"
         else
-            echo "Installation cancelled"
-            exit 0
+            read -p "Remove and recreate? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                rm -rf "$INSTALL_DIR"
+            else
+                echo "Installation cancelled"
+                exit 0
+            fi
         fi
     fi
 
@@ -131,19 +143,24 @@ create_wrapper() {
     mkdir -p "$(dirname "$WRAPPER_LINK")"
 
     # Create wrapper script
-    cat > "$WRAPPER_LINK" << 'WRAPPER_EOF'
+    cat > "$WRAPPER_LINK" << WRAPPER_EOF
 #!/bin/bash
 # Checkov wrapper script - executes checkov from virtual environment
 
-VENV_DIR="${CHECKOV_INSTALL_DIR:-$HOME/.local/checkov-venv}"
+VENV_DIR="\${CHECKOV_INSTALL_DIR:-\$HOME/.local/checkov-venv}"
+INSTALL_SCRIPT_PATH="$SCRIPT_PATH"
 
-if [ ! -d "$VENV_DIR" ]; then
-    echo "ERROR: Checkov virtual environment not found at: $VENV_DIR" >&2
-    echo "Run: bash $(dirname "$0")/../skills/terraform-validator/scripts/install_checkov.sh install" >&2
+if [ ! -d "\$VENV_DIR" ]; then
+    echo "ERROR: Checkov virtual environment not found at: \$VENV_DIR" >&2
+    if [ -f "$INSTALL_SCRIPT_PATH" ]; then
+        echo "Run: bash \"$INSTALL_SCRIPT_PATH\" install" >&2
+    else
+        echo "Run install_checkov.sh install from terraform-validator/scripts" >&2
+    fi
     exit 1
 fi
 
-exec "$VENV_DIR/bin/checkov" "$@"
+exec "\$VENV_DIR/bin/checkov" "\$@"
 WRAPPER_EOF
 
     chmod +x "$WRAPPER_LINK"
@@ -212,12 +229,14 @@ do_uninstall() {
     [ -f "$WRAPPER_LINK" ] && echo "  - Wrapper script: $WRAPPER_LINK"
     echo ""
 
-    read -p "Continue with uninstallation? (y/N): " -n 1 -r
-    echo
+    if [ "$AUTO_YES" != "true" ]; then
+        read -p "Continue with uninstallation? (y/N): " -n 1 -r
+        echo
 
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Uninstallation cancelled"
-        exit 0
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Uninstallation cancelled"
+            exit 0
+        fi
     fi
 
     # Remove virtual environment
@@ -323,7 +342,36 @@ do_status() {
 
 # Main execution
 main() {
-    case "${1:-}" in
+    local command=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            install|uninstall|upgrade|status|-h|--help|help)
+                if [ -n "$command" ]; then
+                    echo "ERROR: Multiple commands specified: $command and $1" >&2
+                    exit 1
+                fi
+                command="$1"
+                shift
+                ;;
+            -y|--yes)
+                AUTO_YES="true"
+                shift
+                ;;
+            --force)
+                FORCE_RECREATE="true"
+                shift
+                ;;
+            *)
+                echo "ERROR: Unknown argument: $1" >&2
+                echo ""
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
+    case "$command" in
         install)
             do_install
             ;;
@@ -341,12 +389,6 @@ main() {
             ;;
         "")
             echo "ERROR: No command specified" >&2
-            echo ""
-            show_help
-            exit 1
-            ;;
-        *)
-            echo "ERROR: Unknown command: $1" >&2
             echo ""
             show_help
             exit 1

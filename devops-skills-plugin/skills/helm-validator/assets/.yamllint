@@ -36,7 +36,7 @@ rules:
   # K8s uses hyphens in resource names
   key-duplicates: {}
 
-  # Allow trailing spaces in comments
+  # Disallow trailing spaces (including comments) to keep manifests clean
   trailing-spaces: {}
 
   # Be strict about new lines at end of file

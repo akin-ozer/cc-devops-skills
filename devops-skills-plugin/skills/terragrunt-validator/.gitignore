@@ -26,6 +26,11 @@ test-output/
 test-results/
 coverage/
 
+# Terragrunt/Terraform generated directories
+**/.terragrunt-cache/
+**/.terraform/
+**/__pycache__/
+
 # Build artifacts (if any)
 build/
 dist/

@@ -56,7 +56,7 @@ groups:
 
       # Service down (no successful scrapes)
       - alert: ServiceDown
-        expr: up == 0
+        expr: up{job="api-server"} == 0
         for: 2m
         labels:
           severity: critical

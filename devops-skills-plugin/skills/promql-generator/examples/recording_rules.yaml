@@ -209,27 +209,43 @@ groups:
       - record: namespace:container_cpu:request_utilization
         expr: |
           (
-            sum by (namespace) (
-              rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
-            )
-            /
+            (
+              sum by (namespace) (
+                rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+              )
+              /
+              sum by (namespace) (
+                kube_pod_container_resource_requests{resource="cpu"}
+              )
+            ) * 100
+          )
+          and on (namespace)
+          (
             sum by (namespace) (
               kube_pod_container_resource_requests{resource="cpu"}
-            )
-          ) * 100
+            ) > 0
+          )
 
       # Memory usage percentage of request by namespace
       - record: namespace:container_memory:request_utilization
         expr: |
           (
-            sum by (namespace) (
-              container_memory_working_set_bytes{container!="", container!="POD"}
-            )
-            /
+            (
+              sum by (namespace) (
+                container_memory_working_set_bytes{container!="", container!="POD"}
+              )
+              /
+              sum by (namespace) (
+                kube_pod_container_resource_requests{resource="memory"}
+              )
+            ) * 100
+          )
+          and on (namespace)
+          (
             sum by (namespace) (
               kube_pod_container_resource_requests{resource="memory"}
-            )
-          ) * 100
+            ) > 0
+          )
 
       # CPU usage by pod
       - record: namespace_pod:container_cpu:usage_rate5m

@@ -43,7 +43,7 @@ terraform {
 }
 
 provider "[PROVIDER_NAME]" {
-  region = "[REGION]"
+  region = "[AWS_REGION]"
 }
 EOF
 }
@@ -65,7 +65,7 @@ inputs = {
 locals {
   # Common configuration
   environment = "[ENVIRONMENT]"
-  region      = "[REGION]"
+  region      = "[AWS_REGION]"
 
   # Computed values
   # name_prefix = "${local.environment}-${local.region}"

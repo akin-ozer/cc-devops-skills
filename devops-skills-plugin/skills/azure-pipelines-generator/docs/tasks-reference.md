@@ -2,6 +2,22 @@
 
 This document provides a reference for commonly used built-in Azure Pipelines tasks.
 
+## How to Use This Reference
+
+Use this deterministic flow:
+
+1. Start from `Task Syntax`.
+2. Jump to only the task family needed for the current pipeline.
+3. Copy a minimal example and adjust inputs.
+4. Keep task major versions pinned (`Task@N`).
+5. Validate with `azure-pipelines-validator` after editing.
+
+Fallback behavior:
+
+- If a required task is not listed here, look up official docs (Microsoft Learn) and note the source.
+- If external lookup is unavailable, keep the nearest known task pattern and mark uncertainty in assumptions.
+- If input compatibility is unclear, prefer the latest documented stable major and avoid undocumented inputs.
+
 ## Task Syntax
 
 ```yaml
@@ -161,7 +177,7 @@ Build, push, or run Docker images.
     dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
     tags: |
       $(Build.BuildId)
-      latest
+      $(Build.SourceVersion)
 
 # Push image
 - task: Docker@2
@@ -171,7 +187,7 @@ Build, push, or run Docker images.
     repository: 'myrepo/myimage'
     tags: |
       $(Build.BuildId)
-      latest
+      $(Build.SourceVersion)
 
 # Build and push (combined)
 - task: Docker@2
@@ -183,7 +199,7 @@ Build, push, or run Docker images.
     containerRegistry: 'myDockerRegistryServiceConnection'
     tags: |
       $(Build.BuildId)
-      latest
+      $(Build.SourceVersion)
 ```
 
 ### DockerCompose@0
@@ -558,7 +574,7 @@ Create a GitHub release.
 
 ## Best Practices
 
-1. **Pin task versions**: Always specify task version (e.g., `@2`, not `@0`)
+1. **Pin task versions**: Always specify the task major version and use the latest supported major for that task (for example, `Docker@2`; `@0` is valid when that task only ships major `0`)
 2. **Use displayName**: Add clear display names for all tasks
 3. **Cache dependencies**: Use Cache@2 for package managers
 4. **Use conditions**: Control task execution with conditions
@@ -571,12 +587,12 @@ Create a GitHub release.
 
 ## Finding Task Documentation
 
-For detailed task documentation:
+For detailed task documentation, use this order:
 
-1. **Official Task Reference**: https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/
-2. **Task Source Code**: https://github.com/microsoft/azure-pipelines-tasks
-3. **Use WebSearch**: Search for "[TaskName] Azure Pipelines task documentation"
-4. **Use Context7**: Query for specific task documentation via MCP
+1. **Context7**: Resolve library ID, then query task-specific docs.
+2. **Official Task Reference**: https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/
+3. **Task Source Code**: https://github.com/microsoft/azure-pipelines-tasks
+4. **Targeted web search**: `"[TaskName] Azure Pipelines task documentation"` (prefer Microsoft Learn URLs)
 
 ## Task Versioning
 
@@ -590,7 +606,7 @@ Tasks follow semantic versioning:
 - task: TaskName@2.3.1
 ```
 
-Always use the latest major version unless you have specific compatibility requirements.
+Pin a known-compatible major version for your environment. Upgrade deliberately after compatibility checks.
 
 ## Custom Tasks
 
@@ -608,3 +624,12 @@ You can also create and use custom tasks from:
   parameters:
     parameter1: value
 ```
+
+## Done Criteria
+
+Use of this reference is complete when:
+
+- The selected task examples match the requested pipeline mode.
+- Task majors are pinned and inputs are explicitly set where required.
+- Any missing-task assumptions or external-source lookups are documented.
+- The resulting pipeline is validated with `azure-pipelines-validator` (or documented manual fallback).

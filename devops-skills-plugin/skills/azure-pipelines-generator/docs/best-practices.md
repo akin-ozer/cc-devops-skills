@@ -2,6 +2,22 @@
 
 This document outlines best practices for creating maintainable, secure, and efficient Azure Pipelines.
 
+## How to Apply This Document
+
+Use this deterministic sequence:
+
+1. Apply `Security` and `Version` rules first.
+2. Add reliability controls (`dependsOn`, `condition`, `timeoutInMinutes`).
+3. Apply performance improvements (`Cache@2`, shallow checkout, scoped artifacts).
+4. Add maintainability improvements (`displayName`, templates, concise comments).
+5. Validate the resulting pipeline with `azure-pipelines-validator`.
+
+Fallback behavior:
+
+- If a recommended task or feature is unavailable in your environment, keep the closest safe alternative and note the tradeoff.
+- If you cannot run automatic validation, use manual checks for secrets, task version pinning, hierarchy, and deployment safety.
+- If constraints force intentional deviations, list each deviation and explain risk and mitigation.
+
 ## Security Best Practices
 
 ### 1. Never Hardcode Secrets
@@ -528,7 +544,7 @@ stages:
 4. **Not publishing test results**
 5. **Long-running jobs without timeouts**
 6. **Mixing stages/jobs/steps at root level**
-7. **Using `@0` for task versions (deprecated)**
+7. **Using unpinned or outdated task major versions**
 8. **Not using displayName**
 9. **Creating monolithic single-stage pipelines for complex workflows**
 10. **Not using templates for repeated logic**
@@ -547,6 +563,15 @@ Before committing your pipeline:
 - [ ] Templates are used for repeated logic
 - [ ] Conditions are used to control deployment to production
 - [ ] Pipeline is validated before committing
+
+## Done Criteria
+
+Best-practice application is complete when:
+
+- All non-negotiable safeguards are present (no hardcoded secrets, pinned versions, immutable deploy tags).
+- Reliability and observability controls are included for each build/deploy path.
+- Any deviations from this guide are explicitly documented with rationale.
+- Validation evidence is included (validator output or manual fallback checks).
 
 ## Further Reading
 

@@ -30,14 +30,16 @@ jobs:
     steps:
       - name: Parse command
         id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          COMMENT="${{ github.event.comment.body }}"
+          COMMENT="$COMMENT_BODY"
 
           # Extract command (first word starting with /)
-          COMMAND=$(echo "$COMMENT" | grep -oP '^/\K\w+' || echo "")
+          COMMAND=$(echo "$COMMENT" | grep -oE '^/[-[:alnum:]_]+' | sed 's|^/||' || echo "")
 
           # Extract arguments (everything after command)
-          ARGS=$(echo "$COMMENT" | sed -E 's|^/\w+\s*||' || echo "")
+          ARGS=$(echo "$COMMENT" | sed -E 's|^/[-[:alnum:]_]+\s*||' || echo "")
 
           echo "command=$COMMAND" >> $GITHUB_OUTPUT
           echo "args=$ARGS" >> $GITHUB_OUTPUT

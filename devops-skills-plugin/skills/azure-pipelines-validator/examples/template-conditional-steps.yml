@@ -1,0 +1,24 @@
+# Regression example: conditional step insertion in a template.
+# This should pass syntax validation.
+
+parameters:
+  - name: runTests
+    type: boolean
+    default: true
+
+steps:
+  - script: npm ci
+    displayName: Install dependencies
+
+  - script: npm run build
+    displayName: Build application
+
+  - ${{ if eq(parameters.runTests, true) }}:
+      - script: npm test -- --coverage --ci
+        displayName: Run tests
+
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: '**/junit.xml'

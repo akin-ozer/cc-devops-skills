@@ -94,6 +94,78 @@ print_section() {
     echo ""
 }
 
+check_prerequisites() {
+    local required_tools=("bash" "grep" "sed" "awk" "head" "wc")
+    local missing_tools=()
+
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
+
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        echo -e "${RED}Error: Missing required tool(s): ${missing_tools[*]}${NC}"
+        echo "Install missing tools and rerun validation."
+        exit 2
+    fi
+
+    # Optional dependency used in recommendations and troubleshooting flows.
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: jq not found (optional).${NC}"
+        echo "  jq is recommended for JSON-heavy pipeline debugging."
+    fi
+}
+
+run_validator_script() {
+    local script_path=$1
+    shift
+
+    if [ ! -r "$script_path" ]; then
+        echo -e "${RED}ERROR [Runner]: Required script is missing or not readable: $(basename "$script_path")${NC}"
+        return 127
+    fi
+
+    if [ ! -x "$script_path" ]; then
+        echo -e "${YELLOW}WARNING [Runner]: $(basename "$script_path") is not executable. Using 'bash' fallback.${NC}"
+    fi
+
+    local output=""
+    local status=0
+    set +e
+    output=$(bash "$script_path" "$@" 2>&1)
+    status=$?
+    set -e
+
+    if [ -n "$output" ]; then
+        echo "$output"
+    fi
+
+    if [ "$status" -gt 1 ]; then
+        echo -e "${RED}ERROR [Runner]: $(basename "$script_path") exited with unexpected code ${status}${NC}"
+    fi
+
+    return "$status"
+}
+
+count_error_warning_lines() {
+    local output=$1
+    local clean_output
+    clean_output=$(printf '%s\n' "$output" | sed 's/\x1b\[[0-9;]*m//g')
+    local errors
+    local warnings
+    errors=$(printf '%s\n' "$clean_output" | grep -E -c '^ERROR \[' || true)
+    warnings=$(printf '%s\n' "$clean_output" | grep -E -c '^WARNING \[' || true)
+    echo "${errors}:${warnings}"
+}
+
+count_info_lines() {
+    local output=$1
+    local clean_output
+    clean_output=$(printf '%s\n' "$output" | sed 's/\x1b\[[0-9;]*m//g')
+    printf '%s\n' "$clean_output" | grep -E -c '^INFO \[' || true
+}
+
 # Detect pipeline type (Declarative or Scripted)
 detect_pipeline_type() {
     local file=$1
@@ -128,56 +200,104 @@ run_syntax_validation() {
         echo -e "Pipeline type: ${GREEN}Declarative${NC}"
         echo ""
 
-        if [ -f "$SCRIPT_DIR/validate_declarative.sh" ]; then
-            # Capture output and exit code
-            local output
-            output=$("$SCRIPT_DIR/validate_declarative.sh" "$file" 2>&1) || true
-            echo "$output"
+        local output=""
+        local script_status=0
+        set +e
+        output=$(run_validator_script "$SCRIPT_DIR/validate_declarative.sh" "$file")
+        script_status=$?
+        set -e
+        echo "$output"
 
-            # Count errors and warnings from output (strip ANSI codes first for accurate counting)
-            local clean_output
-            clean_output=$(echo "$output" | sed 's/\x1b\[[0-9;]*m//g')
-            errors=$(echo "$clean_output" | grep -c "^ERROR\|^ERROR \[" || true)
-            warnings=$(echo "$clean_output" | grep -c "^WARNING\|^WARNING \[" || true)
-        else
-            echo -e "${RED}Error: validate_declarative.sh not found${NC}"
-            errors=1
+        local counts
+        counts=$(count_error_warning_lines "$output")
+        errors=${counts%%:*}
+        warnings=${counts##*:}
+        if [ "$script_status" -gt 1 ]; then
+            errors=$((errors + 1))
         fi
     elif [ "$type" == "scripted" ]; then
         echo -e "Pipeline type: ${GREEN}Scripted${NC}"
         echo ""
 
-        if [ -f "$SCRIPT_DIR/validate_scripted.sh" ]; then
-            local output
-            output=$("$SCRIPT_DIR/validate_scripted.sh" "$file" 2>&1) || true
-            echo "$output"
+        local output=""
+        local script_status=0
+        set +e
+        output=$(run_validator_script "$SCRIPT_DIR/validate_scripted.sh" "$file")
+        script_status=$?
+        set -e
+        echo "$output"
 
-            # Count errors and warnings from output (strip ANSI codes first for accurate counting)
-            local clean_output
-            clean_output=$(echo "$output" | sed 's/\x1b\[[0-9;]*m//g')
-            errors=$(echo "$clean_output" | grep -c "^ERROR\|^ERROR \[" || true)
-            warnings=$(echo "$clean_output" | grep -c "^WARNING\|^WARNING \[" || true)
-        else
-            echo -e "${RED}Error: validate_scripted.sh not found${NC}"
-            errors=1
+        local counts
+        counts=$(count_error_warning_lines "$output")
+        errors=${counts%%:*}
+        warnings=${counts##*:}
+        if [ "$script_status" -gt 1 ]; then
+            errors=$((errors + 1))
         fi
     else
         echo -e "${YELLOW}Warning: Could not determine pipeline type${NC}"
         echo "Attempting both validators..."
         echo ""
 
-        # Try declarative first
-        if [ -f "$SCRIPT_DIR/validate_declarative.sh" ]; then
-            echo -e "${BLUE}Trying Declarative validation:${NC}"
-            local output
-            output=$("$SCRIPT_DIR/validate_declarative.sh" "$file" 2>&1) || true
-            echo "$output"
+        local ran_any=false
+        local declarative_errors=999999
+        local declarative_warnings=999999
+        local scripted_errors=999999
+        local scripted_warnings=999999
 
-            # Count errors and warnings from output (strip ANSI codes first for accurate counting)
-            local clean_output
-            clean_output=$(echo "$output" | sed 's/\x1b\[[0-9;]*m//g')
-            errors=$(echo "$clean_output" | grep -c "^ERROR\|^ERROR \[" || true)
-            warnings=$(echo "$clean_output" | grep -c "^WARNING\|^WARNING \[" || true)
+        echo -e "${BLUE}Trying Declarative validation:${NC}"
+        local declarative_output=""
+        local declarative_status=0
+        set +e
+        declarative_output=$(run_validator_script "$SCRIPT_DIR/validate_declarative.sh" "$file")
+        declarative_status=$?
+        set -e
+        echo "$declarative_output"
+        if [ "$declarative_status" -ne 127 ]; then
+            ran_any=true
+            local decl_counts
+            decl_counts=$(count_error_warning_lines "$declarative_output")
+            declarative_errors=${decl_counts%%:*}
+            declarative_warnings=${decl_counts##*:}
+            if [ "$declarative_status" -gt 1 ]; then
+                declarative_errors=$((declarative_errors + 1))
+            fi
+        fi
+
+        echo ""
+        echo -e "${BLUE}Trying Scripted validation:${NC}"
+        local scripted_output=""
+        local scripted_status=0
+        set +e
+        scripted_output=$(run_validator_script "$SCRIPT_DIR/validate_scripted.sh" "$file")
+        scripted_status=$?
+        set -e
+        echo "$scripted_output"
+        if [ "$scripted_status" -ne 127 ]; then
+            ran_any=true
+            local scr_counts
+            scr_counts=$(count_error_warning_lines "$scripted_output")
+            scripted_errors=${scr_counts%%:*}
+            scripted_warnings=${scr_counts##*:}
+            if [ "$scripted_status" -gt 1 ]; then
+                scripted_errors=$((scripted_errors + 1))
+            fi
+        fi
+
+        if [ "$ran_any" == false ]; then
+            echo -e "${RED}ERROR [Runner]: No syntax validators are available.${NC}"
+            errors=1
+            warnings=0
+        elif [ "$scripted_errors" -lt "$declarative_errors" ] || { [ "$scripted_errors" -eq "$declarative_errors" ] && [ "$scripted_warnings" -lt "$declarative_warnings" ]; }; then
+            errors=$scripted_errors
+            warnings=$scripted_warnings
+            echo ""
+            echo -e "${BLUE}Using scripted result as best match for unknown pipeline type.${NC}"
+        else
+            errors=$declarative_errors
+            warnings=$declarative_warnings
+            echo ""
+            echo -e "${BLUE}Using declarative result as best match for unknown pipeline type.${NC}"
         fi
     fi
 
@@ -204,21 +324,29 @@ run_security_scan() {
 
     print_section "2. Security Scan"
 
-    if [ -f "$SCRIPT_DIR/common_validation.sh" ]; then
+    if [ -r "$SCRIPT_DIR/common_validation.sh" ]; then
         # Run credential check via script (not sourced, to get proper output)
         echo -e "${BLUE}Scanning for hardcoded credentials...${NC}"
         echo ""
 
         local output
-        output=$(bash "$SCRIPT_DIR/common_validation.sh" check_credentials "$file" 2>&1) || true
+        local script_status=0
+        set +e
+        output=$(run_validator_script "$SCRIPT_DIR/common_validation.sh" check_credentials "$file")
+        script_status=$?
+        set -e
         echo "$output"
 
-        # Count issues - look for ERROR in the output (may have ANSI codes)
-        errors=$(echo "$output" | grep -c "ERROR \[" || true)
-        warnings=$(echo "$output" | grep -c "WARNING \[" || true)
-        info=$(echo "$output" | grep -c "INFO \[" || true)
+        local counts
+        counts=$(count_error_warning_lines "$output")
+        errors=${counts%%:*}
+        warnings=${counts##*:}
+        info=$(count_info_lines "$output")
+        if [ "$script_status" -gt 1 ]; then
+            errors=$((errors + 1))
+        fi
     else
-        echo -e "${YELLOW}Warning: common_validation.sh not found, skipping security scan${NC}"
+        echo -e "${YELLOW}Warning: common_validation.sh not found or not readable, skipping security scan${NC}"
     fi
 
     TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
@@ -248,16 +376,24 @@ run_best_practices() {
 
     print_section "3. Best Practices Check"
 
-    if [ -f "$SCRIPT_DIR/best_practices.sh" ]; then
+    if [ -r "$SCRIPT_DIR/best_practices.sh" ]; then
         local output
-        output=$("$SCRIPT_DIR/best_practices.sh" "$file" 2>&1) || true
+        local script_status=0
+        set +e
+        output=$(run_validator_script "$SCRIPT_DIR/best_practices.sh" "$file")
+        script_status=$?
+        set -e
         echo "$output"
 
-        # Count from output
-        errors=$(echo "$output" | grep -c "^ERROR\|CRITICAL ISSUES" || true)
-        warnings=$(echo "$output" | grep -c "^WARNING\|IMPROVEMENTS RECOMMENDED" || true)
+        local counts
+        counts=$(count_error_warning_lines "$output")
+        errors=${counts%%:*}
+        warnings=${counts##*:}
+        if [ "$script_status" -gt 1 ]; then
+            errors=$((errors + 1))
+        fi
     else
-        echo -e "${YELLOW}Warning: best_practices.sh not found, skipping best practices check${NC}"
+        echo -e "${YELLOW}Warning: best_practices.sh not found or not readable, skipping best practices check${NC}"
     fi
 
     # Don't add to totals - best practices has its own scoring
@@ -403,6 +539,7 @@ parse_args() {
 # Main execution
 main() {
     parse_args "$@"
+    check_prerequisites
 
     # Validate input
     if [ -z "${JENKINSFILE:-}" ]; then

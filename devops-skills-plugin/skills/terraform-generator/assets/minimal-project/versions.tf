@@ -4,19 +4,19 @@ terraform {
   required_version = ">= 1.10, < 2.0"
 
   required_providers {
-    # Add your required providers here
-    # Examples (as of December 2025):
+    # Add your required providers here.
+    # Use major-version pinning (~>) and verify exact "latest" versions online when needed.
     # aws = {
     #   source  = "hashicorp/aws"
-    #   version = "~> 6.0"  # Latest: v6.23.0
+    #   version = "~> 6.0"
     # }
     # azurerm = {
     #   source  = "hashicorp/azurerm"
-    #   version = "~> 4.0"  # Latest: v4.54.0
+    #   version = "~> 4.0"
     # }
     # google = {
     #   source  = "hashicorp/google"
-    #   version = "~> 7.0"  # Latest: v7.12.0 - includes ephemeral resources & write-only attributes
+    #   version = "~> 7.0"
     # }
   }
 }

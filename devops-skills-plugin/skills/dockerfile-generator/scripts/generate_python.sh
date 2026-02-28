@@ -20,7 +20,7 @@ OPTIONS:
     -v, --version VERSION     Python version (default: 3.12)
     -p, --port PORT          Port to expose (default: 8000)
     -o, --output FILE        Output file (default: Dockerfile)
-    -e, --entry FILE         Application entry point (default: app.py)
+    -e, --entry COMMAND      Application entry point or full start command (default: app.py)
     -h, --help               Show this help message
 
 EXAMPLES:
@@ -31,7 +31,7 @@ EXAMPLES:
     $0 --version 3.12 --port 8000
 
     # Django app
-    $0 --port 8080 --entry "manage.py runserver 0.0.0.0:8080"
+    $0 --port 8080 --entry "python manage.py runserver 0.0.0.0:8080"
 
 EOF
     exit 0
@@ -65,6 +65,34 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Escape values that are inserted into JSON-form CMD arrays.
+escape_json_string() {
+    local input="$1"
+    input="${input//\\/\\\\}"
+    input="${input//\"/\\\"}"
+    printf '%s' "$input"
+}
+
+# Escape values that are inserted into sed replacement strings.
+escape_sed_replacement() {
+    local input="$1"
+    input="${input//\\/\\\\}"
+    input="${input//&/\\&}"
+    input="${input//|/\\|}"
+    printf '%s' "$input"
+}
+
+# Build CMD instruction based on entry format:
+# - single token: run as Python script
+# - multi-token: treat as full command executed by shell
+APP_ENTRY_ESCAPED="$(escape_json_string "$APP_ENTRY")"
+if [[ "$APP_ENTRY" =~ [[:space:]] ]]; then
+    CMD_INSTRUCTION="CMD [\"sh\", \"-c\", \"$APP_ENTRY_ESCAPED\"]"
+else
+    CMD_INSTRUCTION="CMD [\"python\", \"$APP_ENTRY_ESCAPED\"]"
+fi
+CMD_INSTRUCTION_SED="$(escape_sed_replacement "$CMD_INSTRUCTION")"
 
 # Generate Dockerfile
 cat > "$OUTPUT_FILE" <<'EOF'
@@ -112,13 +140,13 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:PORT_NUMBER/health').read()" || exit 1
 
 # Start application
-CMD ["python", "APP_ENTRY_POINT"]
+CMD_INSTRUCTION_PLACEHOLDER
 EOF
 
 # Replace placeholders
 sed -i.bak "s/PYTHON_VERSION/$PYTHON_VERSION/g" "$OUTPUT_FILE"
 sed -i.bak "s/PORT_NUMBER/$PORT/g" "$OUTPUT_FILE"
-sed -i.bak "s/APP_ENTRY_POINT/$APP_ENTRY/g" "$OUTPUT_FILE"
+sed -i.bak "s|CMD_INSTRUCTION_PLACEHOLDER|$CMD_INSTRUCTION_SED|g" "$OUTPUT_FILE"
 
 # Clean up backup files
 rm -f "${OUTPUT_FILE}.bak"

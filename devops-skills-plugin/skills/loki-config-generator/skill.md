@@ -27,7 +27,7 @@ Invoke when: deploying Loki, creating configs from scratch, migrating to Loki, i
 
 ```bash
 # Simple Scalable with S3 (production)
-python scripts/generate_config.py \
+python3 scripts/generate_config.py \
   --mode simple-scalable \
   --storage s3 \
   --bucket my-loki-bucket \
@@ -37,14 +37,14 @@ python scripts/generate_config.py \
   --output loki-config.yaml
 
 # Monolithic with filesystem (development)
-python scripts/generate_config.py \
+python3 scripts/generate_config.py \
   --mode monolithic \
   --storage filesystem \
-  --auth-enabled=false \
+  --no-auth-enabled \
   --output loki-dev.yaml
 
 # Production with Thanos storage (Loki 3.4+)
-python scripts/generate_config.py \
+python3 scripts/generate_config.py \
   --mode simple-scalable \
   --storage s3 \
   --thanos-storage \
@@ -58,11 +58,14 @@ python scripts/generate_config.py \
 |--------|-------------|
 | `--mode` | monolithic, simple-scalable, microservices |
 | `--storage` | filesystem, s3, gcs, azure |
+| `--auth-enabled` / `--no-auth-enabled` | Explicitly enable/disable auth |
 | `--otlp-enabled` | Enable OTLP ingestion configuration |
-| `--thanos-storage` | Use Thanos object storage client (3.4+) |
-| `--time-sharding` | Enable out-of-order ingestion (3.4+) |
-| `--ruler` | Enable alerting/recording rules |
-| `--horizontal-compactor` | main/worker mode (3.6+) |
+| `--thanos-storage` | Use Thanos object storage client (3.4+, cloud backends) |
+| `--time-sharding` | Enable out-of-order ingestion (simple-scalable) |
+| `--ruler` | Enable alerting/recording rules (not monolithic) |
+| `--horizontal-compactor` | main/worker mode (simple-scalable, 3.6+) |
+| `--zone-awareness` | Enable multi-AZ placement safeguards |
+| `--limits-dry-run` | Log limit rejections without enforcing |
 
 ### Method 2: Manual Configuration
 
@@ -125,7 +128,7 @@ Use when Context7 unavailable: `"Grafana Loki 3.6 [component] configuration docu
 
 **Key Questions:** Expected log volume? Retention period? Multi-tenancy needed? High availability requirements? Kubernetes deployment?
 
-Use AskUserQuestion if information is missing.
+Ask the user directly if required information is missing.
 
 ### Stage 2: Schema Configuration (CRITICAL)
 

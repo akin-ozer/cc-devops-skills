@@ -261,7 +261,15 @@ class Notifications implements Serializable {{
 
         if (email) {{
             def subject = "[${{status}}] ${{script.env.JOB_NAME}} #${{script.env.BUILD_NUMBER}}"
-            this.email(email, subject, message.replace('*', '<b>').replace('</b>', '</b>'))
+            def htmlBody = """
+                <h3>Build ${{status}}</h3>
+                <ul>
+                    <li><b>Job:</b> ${{script.env.JOB_NAME}} #${{script.env.BUILD_NUMBER}}</li>
+                    <li><b>Branch:</b> ${{script.env.BRANCH_NAME ?: 'N/A'}}</li>
+                </ul>
+                <p><a href="${{script.env.BUILD_URL}}">View Build</a></p>
+            """.stripIndent().trim()
+            this.email(email, subject, htmlBody)
         }}
     }}
 }}
@@ -393,6 +401,7 @@ def call(Map config = [:]) {{
     def environment = config.get('environment', 'dev')
     def kubeConfig = config.get('kubeConfig')
     def namespace = config.get('namespace', 'default')
+    def deploymentName = config.get('deploymentName', env.JOB_NAME)
     def manifests = config.get('manifests', 'k8s/')
     def approval = config.get('approval', environment != 'dev')
 
@@ -409,7 +418,7 @@ def call(Map config = [:]) {{
             withCredentials([file(credentialsId: kubeConfig, variable: 'KUBECONFIG')]) {{
                 sh """
                     kubectl apply -f ${{manifests}} -n ${{namespace}}
-                    kubectl rollout status deployment -n ${{namespace}} --timeout=300s
+                    kubectl rollout status deployment/${{deploymentName}} -n ${{namespace}} --timeout=300s
                 """
             }}
         }} else {{
@@ -419,7 +428,7 @@ def call(Map config = [:]) {{
 }}
 '''
         self._write_file("vars/deployApp.groovy", deploy_app_groovy)
-        self._write_file("vars/deployApp.txt", "Deploy application: deployApp(environment: 'staging', kubeConfig: 'kubeconfig-staging', namespace: 'myapp')")
+        self._write_file("vars/deployApp.txt", "Deploy application: deployApp(environment: 'staging', kubeConfig: 'kubeconfig-staging', namespace: 'myapp', deploymentName: 'myapp')")
 
         # dockerBuild.groovy - Docker build and push
         docker_build_groovy = f'''/**

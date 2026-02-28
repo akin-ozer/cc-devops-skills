@@ -1,7 +1,7 @@
 #!/bin/bash
 # Validate Helm chart directory structure
 
-set -e
+set -euo pipefail
 
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <chart-directory>"
@@ -14,6 +14,46 @@ if [ ! -d "$CHART_DIR" ]; then
     echo "❌ Error: Directory '$CHART_DIR' does not exist"
     exit 1
 fi
+
+yaml_is_valid() {
+    local file="$1"
+    if command -v yq &> /dev/null; then
+        yq eval '.' "$file" > /dev/null 2>&1
+        return $?
+    fi
+
+    if command -v yamllint &> /dev/null; then
+        yamllint -d '{extends: default, rules: {line-length: disable, comments: disable, trailing-spaces: disable}}' "$file" > /dev/null 2>&1
+        return $?
+    fi
+
+    # No YAML parser available
+    return 2
+}
+
+get_top_level_yaml_value() {
+    local file="$1"
+    local key="$2"
+    awk -v key="$key" '
+        /^[[:space:]]*#/ {next}
+        $0 ~ "^" key ":" {
+            value=$0
+            sub("^" key ":[[:space:]]*", "", value)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            print value
+            exit
+        }
+    ' "$file"
+}
+
+strip_wrapping_quotes() {
+    local value="$1"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    printf "%s" "$value"
+}
 
 echo "Validating Helm chart structure: $CHART_DIR"
 echo
@@ -31,33 +71,44 @@ else
     echo "✅ Chart.yaml found"
 
     # Validate Chart.yaml syntax and required fields
-    if command -v yq &> /dev/null; then
-        if ! yq eval '.' "$CHART_DIR/Chart.yaml" > /dev/null 2>&1; then
-            ERRORS+=("Chart.yaml has invalid YAML syntax")
-            echo "❌ Chart.yaml has invalid syntax"
-        else
-            # Check required fields
+    chart_yaml_validation_rc=0
+    yaml_is_valid "$CHART_DIR/Chart.yaml" || chart_yaml_validation_rc=$?
+    if [ "$chart_yaml_validation_rc" -eq 1 ]; then
+        ERRORS+=("Chart.yaml has invalid YAML syntax")
+        echo "❌ Chart.yaml has invalid syntax"
+    elif [ "$chart_yaml_validation_rc" -eq 2 ]; then
+        WARNINGS+=("No YAML validator available; Chart.yaml syntax validation skipped")
+        echo "   ⚠️  No YAML validator available - skipping Chart.yaml syntax validation"
+    else
+        # Check required fields
+        if command -v yq &> /dev/null; then
             API_VERSION=$(yq eval '.apiVersion' "$CHART_DIR/Chart.yaml" 2>/dev/null)
             NAME=$(yq eval '.name' "$CHART_DIR/Chart.yaml" 2>/dev/null)
             VERSION=$(yq eval '.version' "$CHART_DIR/Chart.yaml" 2>/dev/null)
-
-            if [ "$API_VERSION" = "null" ] || [ -z "$API_VERSION" ]; then
-                ERRORS+=("Chart.yaml is missing 'apiVersion' field")
-            elif [ "$API_VERSION" != "v2" ]; then
-                WARNINGS+=("Chart.yaml apiVersion should be 'v2' for Helm 3+, found: $API_VERSION")
-            fi
-
-            if [ "$NAME" = "null" ] || [ -z "$NAME" ]; then
-                ERRORS+=("Chart.yaml is missing 'name' field")
-            fi
-
-            if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
-                ERRORS+=("Chart.yaml is missing 'version' field")
-            fi
+        else
+            echo "   ℹ️  yq not installed - using basic Chart.yaml field validation"
+            API_VERSION=$(get_top_level_yaml_value "$CHART_DIR/Chart.yaml" "apiVersion")
+            NAME=$(get_top_level_yaml_value "$CHART_DIR/Chart.yaml" "name")
+            VERSION=$(get_top_level_yaml_value "$CHART_DIR/Chart.yaml" "version")
         fi
-    else
-        echo "   ℹ️  yq not installed - skipping Chart.yaml field validation"
-        echo "   Install yq for enhanced validation: brew install yq"
+
+        API_VERSION=$(strip_wrapping_quotes "$API_VERSION")
+        NAME=$(strip_wrapping_quotes "$NAME")
+        VERSION=$(strip_wrapping_quotes "$VERSION")
+
+        if [ "$API_VERSION" = "null" ] || [ -z "$API_VERSION" ]; then
+            ERRORS+=("Chart.yaml is missing 'apiVersion' field")
+        elif [ "$API_VERSION" != "v2" ]; then
+            WARNINGS+=("Chart.yaml apiVersion should be 'v2' for Helm 3+, found: $API_VERSION")
+        fi
+
+        if [ "$NAME" = "null" ] || [ -z "$NAME" ]; then
+            ERRORS+=("Chart.yaml is missing 'name' field")
+        fi
+
+        if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+            ERRORS+=("Chart.yaml is missing 'version' field")
+        fi
     fi
 fi
 
@@ -68,11 +119,14 @@ else
     echo "✅ values.yaml found"
 
     # Validate values.yaml syntax
-    if command -v yq &> /dev/null; then
-        if ! yq eval '.' "$CHART_DIR/values.yaml" > /dev/null 2>&1; then
-            ERRORS+=("values.yaml has invalid YAML syntax")
-            echo "❌ values.yaml has invalid syntax"
-        fi
+    values_yaml_validation_rc=0
+    yaml_is_valid "$CHART_DIR/values.yaml" || values_yaml_validation_rc=$?
+    if [ "$values_yaml_validation_rc" -eq 1 ]; then
+        ERRORS+=("values.yaml has invalid YAML syntax")
+        echo "❌ values.yaml has invalid syntax"
+    elif [ "$values_yaml_validation_rc" -eq 2 ]; then
+        WARNINGS+=("No YAML validator available; values.yaml syntax validation skipped")
+        echo "   ⚠️  No YAML validator available - skipping values.yaml syntax validation"
     fi
 fi
 
@@ -83,7 +137,7 @@ else
     echo "✅ templates/ directory found"
 
     # Check if templates directory has any files
-    TEMPLATE_COUNT=$(find "$CHART_DIR/templates" -type f -name "*.yaml" -o -name "*.tpl" | wc -l)
+    TEMPLATE_COUNT=$(find "$CHART_DIR/templates" -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.tpl" \) | wc -l | tr -d ' ')
     if [ "$TEMPLATE_COUNT" -eq 0 ]; then
         WARNINGS+=("templates/ directory is empty")
         echo "⚠️  templates/ directory is empty"
@@ -148,7 +202,7 @@ else
 fi
 
 if [ -d "$CHART_DIR/crds" ]; then
-    CRD_COUNT=$(find "$CHART_DIR/crds" -type f -name "*.yaml" | wc -l)
+    CRD_COUNT=$(find "$CHART_DIR/crds" -type f \( -name "*.yaml" -o -name "*.yml" \) | wc -l | tr -d ' ')
     echo "✅ crds/ directory found ($CRD_COUNT CRD files)"
 else
     echo "ℹ️  crds/ directory not found (optional - used for Custom Resource Definitions)"

@@ -9,7 +9,20 @@ description: Comprehensive toolkit for validating, linting, testing, and automat
 
 Comprehensive toolkit for validating, linting, and testing Ansible playbooks, roles, and collections. This skill provides automated workflows for ensuring Ansible code quality, syntax validation, dry-run testing with check mode and molecule, and intelligent documentation lookup for custom modules and collections with version awareness.
 
-**IMPORTANT BEHAVIOR:** When validating any Ansible role, this skill AUTOMATICALLY runs molecule tests if a `molecule/` directory is detected in the role. This is non-negotiable and happens without asking for user permission. If molecule tests cannot run due to environmental issues (Docker, version compatibility), the skill documents the blocker but continues with other validation steps.
+**Default behavior:** When validating any Ansible role with a `molecule/` directory, attempt Molecule automatically using `bash scripts/test_role.sh <role-path>`. If Molecule cannot run due to environment/runtime limits, mark Molecule as `BLOCKED`, report why, and continue all non-Molecule validation steps.
+
+## Trigger Guidance
+
+Use this skill when the request is about validating or debugging existing Ansible code, not generating new code.
+
+Common trigger phrases:
+- "validate this playbook"
+- "lint this role"
+- "why is ansible-lint failing"
+- "run check mode safely"
+- "test this role with molecule"
+- "find security issues in these Ansible files"
+- "module not found in this collection"
 
 ## When to Use This Skill
 
@@ -26,19 +39,49 @@ Apply this skill when encountering any of these scenarios:
 - Security validation of Ansible playbooks
 - Version compatibility checks for collections and modules
 
+## Preflight (Run First)
+
+Run preflight before validation to avoid dead ends:
+
+```bash
+bash scripts/setup_tools.sh
+```
+
+Command path assumption: run commands from this skill root (`devops-skills-plugin/skills/ansible-validator`) or use absolute paths.
+
+Preflight requirements:
+- Baseline validation: `ansible`, `ansible-playbook`, `ansible-lint` (plus `yamllint` recommended)
+- Molecule execution: `molecule` plus an available runtime (`docker` or `podman`)
+- Security scanning: `checkov` (wrapper can bootstrap if missing)
+
+Deterministic fallback rules:
+- If baseline tools are missing but Python + pip are available, wrapper scripts bootstrap temporary environments automatically.
+- If wrapper bootstrap fails (offline index, pip failure, missing Python), run direct commands for available tools, mark missing stages as `BLOCKED`, and continue.
+- If Molecule runtime is unavailable (Docker/Podman missing or daemon not running), skip Molecule execution, mark as `BLOCKED`, and continue remaining stages.
+
+## Wrapper vs Direct Command Routing
+
+Use wrappers by default for consistent behavior and fallback handling.
+
+| Validation scenario | Default command | Use direct command when | Fallback if command cannot run |
+|---|---|---|---|
+| Playbook syntax/lint | `bash scripts/validate_playbook.sh <playbook.yml>` | User asks for a single focused check only (`ansible-playbook --syntax-check`, `ansible-lint`, or `yamllint`) | Run any available direct checks and report skipped checks as `BLOCKED` |
+| Role structural validation | `bash scripts/validate_role.sh <role-dir>` | User asks only for specific sub-checks (for example, structure only) | Run structure/YAML checks that are possible and report missing stages |
+| Role Molecule execution | `bash scripts/test_role.sh <role-dir> [scenario]` | User explicitly asks for manual stage-by-stage Molecule commands | Mark Molecule `BLOCKED` with reason and continue non-Molecule role checks |
+| Security scanning | `bash scripts/validate_playbook_security.sh <path>` or `bash scripts/validate_role_security.sh <path>` plus `bash scripts/scan_secrets.sh <path>` | User requests raw Checkov output formatting or custom flags | Run whichever scanner is available; if one is missing, run the other and report coverage gap |
+| Module/collection discovery | `bash scripts/extract_ansible_info_wrapper.sh <path>` | Python environment is already known-good and user wants direct parser output | If extraction fails, manually inspect `requirements.yml`/`galaxy.yml` and continue with best-effort lookup |
+
 ## Validation Workflow
 
-Follow this decision tree for comprehensive Ansible validation:
+Follow this deterministic workflow and never stop at a missing dependency:
 
 ```
-0. Tool Prerequisites Check (RECOMMENDED for first-time validation)
-   ├─> Run bash scripts/setup_tools.sh for diagnostics
-   ├─> Verify required tools are available
-   ├─> Get installation instructions if tools are missing
-   └─> NOTE: Validation scripts auto-install tools in temp venv if missing,
-       but running setup_tools.sh first helps identify system issues early
+0. Preflight
+   ├─> Run: bash scripts/setup_tools.sh
+   ├─> Record tool/runtime readiness
+   └─> Continue even when optional tools are missing
 
-1. Identify Ansible files in scope
+1. Identify scope
    ├─> Single playbook validation
    ├─> Role validation
    ├─> Collection validation
@@ -47,7 +90,7 @@ Follow this decision tree for comprehensive Ansible validation:
 2. Syntax Validation
    ├─> Run ansible-playbook --syntax-check
    ├─> Run yamllint for YAML syntax
-   └─> Report syntax errors
+   └─> Report as PASS/FAIL/BLOCKED
 
 3. Lint and Best Practices
    ├─> Run ansible-lint (comprehensive linting)
@@ -63,42 +106,59 @@ Follow this decision tree for comprehensive Ansible validation:
    ├─> Analyze what would change
    └─> Report potential issues
 
-5. Molecule Testing (for roles) - AUTOMATIC
+5. Molecule Testing (for roles with molecule/) - AUTOMATIC ATTEMPT
    ├─> Check if molecule/ directory exists in role
-   ├─> If present, ALWAYS run molecule test automatically
-   ├─> Test against multiple scenarios
-   ├─> Report test results (pass/fail/blocked)
-   └─> Report any environmental issues if tests cannot run
+   ├─> If present, run: bash scripts/test_role.sh <role-path> [scenario]
+   ├─> If script exits 2, mark Molecule as BLOCKED (environment/runtime issue)
+   ├─> If script exits 1, mark Molecule as FAIL (role/test issue)
+   └─> Continue remaining validation regardless of Molecule outcome
 
 6. Custom Module/Collection Analysis (if detected)
    ├─> Extract module/collection information
    ├─> Identify versions
-   ├─> Lookup documentation (WebSearch or Context7)
+   ├─> Lookup documentation (Context7 first, then web.search_query fallback)
    └─> Provide version-specific guidance
 
-7. Security and Best Practices Review - DUAL SCANNING REQUIRED
+7. Security and Best Practices Review - DUAL SCANNING DEFAULT
    ├─> Run bash scripts/validate_playbook_security.sh or validate_role_security.sh (Checkov)
-   ├─> **ALSO run bash scripts/scan_secrets.sh** for hardcoded secret detection
+   ├─> Run bash scripts/scan_secrets.sh for hardcoded secret detection
    │   └─> This catches secrets Checkov may miss (passwords, API keys, tokens)
+   ├─> If one scanner is unavailable, run the other and report reduced coverage
    ├─> Validate privilege escalation
    ├─> Review file permissions
    └─> Identify common anti-patterns
 
-8. Reference Documentation - MANDATORY CONSULTATION
-   ├─> **MUST READ** references/common_errors.md when ANY errors are detected
-   │   └─> Extract specific remediation steps for the error type
-   │   └─> Include relevant guidance in validation report
-   ├─> **MUST READ** references/best_practices.md when warnings are detected
-   │   └─> Cite specific best practice recommendations
-   ├─> **MUST READ** references/module_alternatives.md when:
-   │   └─> Deprecated modules are detected
-   │   └─> Non-FQCN module names are used (apt, service, etc.)
-   │   └─> Provide specific FQCN migration recommendations
-   └─> **MUST READ** references/security_checklist.md when security issues found
-       └─> Include specific remediation guidance from checklist
+8. Reference Routing
+   ├─> Map each error/warning class to the matching reference file
+   ├─> Extract concrete remediation from references (not file-name-only mention)
+   └─> Include source section + fix guidance in final report
+
+9. Final Report (required format)
+   ├─> Summary counts: PASS / FAIL / BLOCKED / SKIPPED
+   ├─> Findings grouped by severity
+   ├─> Tool/runtime blockers with exact command that failed
+   └─> Next actions to reach full validation coverage
 ```
 
-**CRITICAL: Reference files are NOT optional.** When issues are detected, the corresponding reference file MUST be read and its guidance applied to provide actionable remediation steps to the user. Simply mentioning the reference file path is insufficient - the content must be consulted and relevant guidance extracted.
+**Status contract:** `BLOCKED` means validation could not run due to environment/runtime constraints; `FAIL` means the Ansible code or tests failed.
+
+## Error-Class Reference Routing
+
+When issues are detected, consult the mapped reference and include a specific remediation excerpt in the report.
+
+| Error class | Typical detector | Required reference | Required action |
+|---|---|---|---|
+| YAML parse/format errors | `yamllint`, `ansible-playbook --syntax-check` | `references/common_errors.md` (Syntax Errors) | Quote the matching syntax fix pattern and apply corrected YAML structure |
+| Module/action resolution errors | `ansible-playbook`, `ansible-lint` | `references/common_errors.md` (Module/Collection Errors) | Provide install/version fix commands (`ansible-galaxy collection install ...`) |
+| Deprecated or non-FQCN module usage | `ansible-lint`, `bash scripts/check_fqcn.sh` | `references/module_alternatives.md` | Provide exact FQCN/module replacement per finding |
+| Template/variable errors | `ansible-playbook`, check mode | `references/common_errors.md` (Template/Variable Errors), `references/best_practices.md` (Variable Management) | Recommend `default()`, `required()`, or type conversion fixes |
+| Connection/inventory/privilege errors | `ansible-playbook --check`, runtime output | `references/common_errors.md` (Connection, Inventory, Privilege sections) | Provide corrected inventory/auth/become configuration |
+| Security policy failures (CKV_*) | `validate_*_security.sh` / Checkov | `references/security_checklist.md` | Map failed policy to a secure task rewrite |
+| Hardcoded secrets | `bash scripts/scan_secrets.sh` | `references/security_checklist.md` (Secrets Management) | Replace with Vault/env/external secret manager approach |
+| Role structure/idempotency warnings | `validate_role.sh`, Molecule idempotence | `references/best_practices.md` | Provide role layout or idempotency remediation steps |
+
+External documentation lookup trigger:
+- If the issue involves a custom/private collection or unknown module parameters not covered locally, run module discovery + documentation lookup (see section 7).
 
 ## Core Capabilities
 
@@ -421,7 +481,7 @@ When reviewing check mode output, focus on:
 
 **Purpose:** Test Ansible roles in isolated environments with multiple scenarios.
 
-**AUTOMATIC EXECUTION:** When validating any Ansible role with a `molecule/` directory, this skill AUTOMATICALLY runs molecule tests using `bash scripts/test_role.sh <role-path>`. This is mandatory and happens without asking the user.
+**Automatic attempt policy:** When validating any Ansible role with a `molecule/` directory, automatically attempt Molecule tests using `bash scripts/test_role.sh <role-path> [scenario]`.
 
 **When to Use:**
 - Automatically triggered when validating roles with molecule/ directory
@@ -521,6 +581,21 @@ Example Ansible verifier (`molecule/default/verify.yml`):
 - Network connectivity issues
 - Insufficient permissions for driver
 
+**Molecule Skip/Fallback Policy (Required):**
+- If `molecule/` does not exist: mark Molecule as `SKIPPED` and continue.
+- If `test_role.sh` exits `2`: mark Molecule as `BLOCKED` (missing/unavailable runtime dependency) and continue.
+- If `test_role.sh` exits `1`: mark Molecule as `FAIL` (role/test issue) and continue.
+- Never stop the full validation report because Molecule is blocked.
+
+Use this reporting language for blocked Molecule runs:
+
+```text
+Molecule Status: BLOCKED
+Reason: <missing dependency/runtime and failing command>
+Fallback Applied: Completed syntax, lint, check-mode, and security validation without Molecule runtime tests.
+Next Action: <install/start dependency>; rerun `bash scripts/test_role.sh <role-path> [scenario]`
+```
+
 ### 7. Custom Module and Collection Documentation Lookup
 
 **Purpose:** Automatically discover and retrieve version-specific documentation for custom modules and collections using web search and Context7 MCP.
@@ -547,30 +622,18 @@ Example Ansible verifier (`molecule/default/verify.yml`):
 
 **Documentation Lookup Strategy:**
 
-For **Public Ansible Collections** (e.g., community.general, ansible.posix, cisco.ios):
+Use this deterministic lookup order:
 
-```bash
-# Use Context7 MCP to get version-specific documentation
-# Example: community.general collection version 5.0
-```
-
-Steps:
-1. Use `mcp__context7__resolve-library-id` with collection name
-2. Get documentation with `mcp__context7__get-library-docs`
-3. Focus on specific modules or plugins as needed
-
-For **Custom/Private Modules or Collections:**
-
-```bash
-# Use WebSearch to find documentation
-# Include version in search query
-```
-
-Steps:
-1. Construct search query with module/collection name + version
-2. Use `WebSearch` tool with targeted queries
-3. Prioritize official documentation sources
-4. Extract relevant examples and usage patterns
+1. For public collections/modules:
+   - Resolve library: `mcp__context7__resolve-library-id`
+   - Query docs: `mcp__context7__query-docs`
+2. If Context7 has no suitable result:
+   - Use web search via `web.search_query` with versioned queries
+   - Prioritize official docs (docs.ansible.com, galaxy.ansible.com, vendor docs)
+3. For custom/private modules:
+   - Prefer in-repo docs (`README`, module docs, role docs) first
+   - Then use targeted web search with collection/module/version terms
+4. Always report source + version context used in final guidance
 
 **Search Query Templates:**
 
@@ -606,7 +669,7 @@ User working with: community.docker.docker_container version 3.0.0
 
 3. Search for documentation:
    - Try Context7: mcp__context7__resolve-library-id("ansible community.docker")
-   - Fallback to WebSearch("ansible community.docker collection version 3.0 docker_container module documentation")
+   - Fallback to web.search_query("ansible community.docker collection version 3.0 docker_container module documentation")
 
 4. If official docs found:
    - Parse module parameters (required vs optional)
@@ -720,9 +783,12 @@ For detailed security guidelines and best practices, refer to:
 
 ## Tool Prerequisites
 
-Check for required tools before validation:
+Run this preflight before validation:
 
 ```bash
+# Preferred one-shot preflight
+bash scripts/setup_tools.sh
+
 # Check Ansible installation
 ansible --version
 ansible-playbook --version
@@ -733,14 +799,24 @@ ansible-lint --version
 # Check yamllint installation
 yamllint --version
 
-# Check molecule installation (for role testing)
+# Check molecule installation (for role testing with molecule/)
 molecule --version
+
+# Check container runtime for Molecule
+docker --version
+docker info
+# or
+podman --version
+podman info
 
 # Install missing tools (example for pip)
 pip install ansible ansible-lint yamllint ansible-compat
 
 # Install molecule with docker driver
 pip install molecule molecule-docker
+
+# Install molecule with podman driver (alternative)
+pip install molecule molecule-podman
 ```
 
 **Minimum Versions:**
@@ -748,6 +824,11 @@ pip install molecule molecule-docker
 - ansible-lint: >= 6.0.0
 - yamllint: >= 1.26.0
 - molecule: >= 3.4.0 (if testing roles)
+
+**Execution policy when tools are missing:**
+- If `ansible`/`ansible-lint` are missing, wrappers (`validate_playbook.sh`, `validate_role.sh`) attempt temporary venv bootstrap.
+- If Molecule runtime (`docker info` or `podman info`) is unavailable, Molecule is `BLOCKED` and non-Molecule checks continue.
+- If `checkov` is missing, security wrappers bootstrap it when possible; otherwise run `scan_secrets.sh` and report reduced security coverage.
 
 **Optional Tools:**
 - `ansible-inventory` - Inventory validation and graphing
@@ -809,7 +890,7 @@ Test functionality with new module
 
 ### scripts/
 
-**setup_tools.sh** - Check for required Ansible validation tools and provide installation instructions.
+**setup_tools.sh** - Preflight checker for Ansible validator dependencies. Verifies baseline tools (`ansible`, `ansible-playbook`, `ansible-lint`, `yamllint`) and Molecule runtime readiness (`docker`/`podman`) and provides installation guidance.
 
 Usage:
 ```bash
@@ -865,7 +946,7 @@ Usage:
 bash scripts/validate_role_security.sh <role-directory>
 ```
 
-**test_role.sh** - Wrapper script for molecule testing with automatic dependency installation. If molecule is not installed, automatically creates a temporary venv, installs molecule and dependencies, runs tests, and cleans up.
+**test_role.sh** - Wrapper script for Molecule testing with automatic dependency installation. If `molecule` is missing, it creates a temporary venv and installs dependencies. Returns exit code `2` for environment/runtime blockers (for example missing Docker/Podman runtime) and exit code `1` for role/test failures.
 
 Usage:
 ```bash
@@ -928,13 +1009,14 @@ Provides specific migration recommendations with FQCN alternatives.
 User: "Check if this playbook.yml file is valid"
 
 Steps:
-1. Read the file to understand contents
-2. Run yamllint on the file
-3. Run ansible-playbook --syntax-check
-4. Run ansible-lint
-5. Report any issues found
-6. If custom modules detected, lookup documentation
-7. Propose fixes if needed
+1. Run preflight: `bash scripts/setup_tools.sh`
+2. Run wrapper: `bash scripts/validate_playbook.sh playbook.yml`
+3. If inventory is provided, run check mode: `ansible-playbook -i <inventory> playbook.yml --check --diff`
+4. Run security wrappers:
+   - `bash scripts/validate_playbook_security.sh playbook.yml`
+   - `bash scripts/scan_secrets.sh playbook.yml`
+5. If custom modules are detected, run docs lookup workflow (Context7 first, web fallback)
+6. Report results with PASS/FAIL/BLOCKED/SKIPPED counts and remediation steps
 ```
 
 ### Example 2: Validate an Ansible Role
@@ -943,23 +1025,24 @@ Steps:
 User: "Validate my ansible role in ./roles/webserver/"
 
 Steps:
-1. Run bash scripts/validate_role.sh ./roles/webserver/
-2. This automatically checks:
+1. Run preflight: `bash scripts/setup_tools.sh`
+2. Run role wrapper: `bash scripts/validate_role.sh ./roles/webserver/`
+3. This checks:
    - Role directory structure (tasks/, defaults/, handlers/, meta/, etc.)
    - Required main.yml files
    - YAML syntax with yamllint
    - Ansible syntax with ansible-playbook
    - Best practices with ansible-lint
    - Molecule configuration (if present)
-3. Report any issues found (errors and warnings)
-4. If custom modules detected, lookup documentation
-5. Provide specific recommendations for fixes
-6. **CRITICAL:** If molecule/ directory exists in the role, AUTOMATICALLY run molecule tests:
-   - Run bash scripts/test_role.sh ./roles/webserver/
-   - Do NOT ask user first - molecule testing is mandatory for roles that have it configured
-   - Report test results (pass/fail with details)
-   - If tests fail due to environmental issues (Docker, compatibility), document the blocker
-   - If tests fail due to role issues, provide detailed debugging steps
+4. If `molecule/` exists, attempt Molecule automatically:
+   - `bash scripts/test_role.sh ./roles/webserver/`
+   - Exit `2`: report `Molecule Status: BLOCKED` with reason, continue remaining checks
+   - Exit `1`: report `Molecule Status: FAIL` with debugging guidance
+5. Run role security checks:
+   - `bash scripts/validate_role_security.sh ./roles/webserver/`
+   - `bash scripts/scan_secrets.sh ./roles/webserver/`
+6. If custom modules detected, run documentation lookup workflow
+7. Provide final report with severity, blockers, and rerun actions
 ```
 
 ### Example 3: Dry-Run Testing for Production
@@ -983,9 +1066,9 @@ Steps:
 User: "I'm using community.postgresql.postgresql_db version 2.3.0, what parameters are available?"
 
 Steps:
-1. Try Context7 MCP: resolve-library-id("ansible community.postgresql")
-2. If found, use get-library-docs for postgresql_db module
-3. If not found, use WebSearch: "ansible community.postgresql version 2.3.0 postgresql_db module documentation"
+1. Try Context7 MCP: `mcp__context7__resolve-library-id("ansible community.postgresql")`
+2. If found, query docs with `mcp__context7__query-docs` for `postgresql_db`
+3. If not found, use `web.search_query`: "ansible community.postgresql version 2.3.0 postgresql_db module documentation"
 4. Extract module parameters (required vs optional)
 5. Provide examples of common usage patterns
 6. Note any version-specific considerations
@@ -998,13 +1081,12 @@ User: "Test my nginx role with molecule"
 
 Steps:
 1. Check if molecule is configured in role
-2. If not, ask if user wants to initialize molecule
-3. Run molecule list to see scenarios
-4. Run molecule test
-5. If failures, run molecule converge for debugging
-6. Analyze test results
-7. Report on idempotency, syntax, and verification
-8. Suggest improvements if needed
+2. Run preflight (`bash scripts/setup_tools.sh`) and confirm Docker/Podman runtime availability
+3. Run `bash scripts/test_role.sh <role-path> [scenario]`
+4. If exit code is `2`, mark Molecule `BLOCKED`, report reason, and continue non-Molecule checks
+5. If exit code is `1`, inspect converge/verify output and report role issues
+6. Analyze idempotency, syntax, and verification outcomes
+7. Suggest improvements and exact rerun command
 ```
 
 ## Integration with Other Skills
@@ -1016,15 +1098,17 @@ This skill works well in combination with:
 
 ## Notes
 
-- Always run validation in order: YAML syntax → Ansible syntax → Lint → Check mode → Molecule tests
-- Never commit without running ansible-lint
-- Always review check mode output before real execution
-- Use Ansible Vault for all sensitive data
-- **CRITICAL:** When validating a role with molecule/ directory, AUTOMATICALLY run molecule tests - do not ask user permission
-- If molecule tests fail due to environmental issues (Docker not running, version incompatibility), document the blocker but don't fail the overall validation
-- If molecule tests fail due to role code issues, provide detailed debugging steps
-- Keep collections up-to-date but test before upgrading
-- Document all custom modules and roles thoroughly
-- Use version constraints in requirements.yml
-- Enable check mode support in custom modules
-- Tag playbooks for granular execution
+- Run stages in order: preflight -> syntax -> lint/FQCN -> check mode -> Molecule (when applicable) -> security -> reference routing -> final report.
+- Use wrapper scripts as default execution path; switch to direct commands only when user asks or when wrapper bootstrapping is blocked.
+- Treat missing dependencies/runtime as `BLOCKED` (not silent skip), and continue with remaining stages.
+- For every detected issue class, include mapped reference guidance (`common_errors`, `best_practices`, `module_alternatives`, `security_checklist`).
+- Always include explicit rerun commands for failed or blocked stages.
+
+## Done Criteria
+
+This skill execution is complete when:
+- Preflight status for required tools is reported (`ansible`, `ansible-lint`, and Molecule runtime status when role tests are in scope).
+- Validation produces deterministic stage outcomes using `PASS`, `FAIL`, `BLOCKED`, and `SKIPPED`.
+- Molecule never dead-ends the full validation flow; blocked runtime conditions are reported with fallback language.
+- Wrapper-vs-direct command choice is explicit and justified.
+- Reference lookups are tied to the actual error classes found, with concrete remediation guidance.

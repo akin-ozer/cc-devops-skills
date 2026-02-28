@@ -18,13 +18,28 @@ This skill performs multi-level validation and provides interactive query planni
 
 When a user provides a PromQL query, follow this workflow:
 
+### Working Directory Requirement
+
+Run validation commands from the repository root so relative paths resolve correctly:
+
+```bash
+cd /Users/akinozer/GolandProjects/cc-devops-skills
+```
+
+If running from another location, use absolute paths to `scripts/` files.
+
 ### Step 1: Validate Syntax
 
 Run the syntax validation script to check for basic correctness:
 
 ```bash
-python3 .claude/skills/promql-validator/scripts/validate_syntax.py "<query>"
+python3 devops-skills-plugin/skills/promql-validator/scripts/validate_syntax.py "<query>"
 ```
+
+Output parsing notes:
+- Exit `0`: syntax valid
+- Exit non-zero: syntax failure; include stderr and pinpoint token/position
+- Prefer quoting the smallest failing fragment, then provide corrected query
 
 The script will check for:
 - Valid metric names and label matchers
@@ -39,8 +54,13 @@ The script will check for:
 Run the best practices checker to detect anti-patterns and optimization opportunities:
 
 ```bash
-python3 .claude/skills/promql-validator/scripts/check_best_practices.py "<query>"
+python3 devops-skills-plugin/skills/promql-validator/scripts/check_best_practices.py "<query>"
 ```
+
+Output parsing notes:
+- Treat script sections as independent findings (cardinality, metric-type misuse, regex misuse, etc.)
+- If script output is empty but query is complex, add a manual sanity pass and mark it as `manual-review`
+- Preserve script wording for finding labels, then add remediation in plain English
 
 The script will identify:
 - High cardinality queries without label filters
@@ -75,6 +95,20 @@ Example:
 **Output Labels**: job, instance
 **Expected Result Structure**: Instant vector with one series per job/instance combination
 ```
+
+### Line-Number Citation Method (Required)
+
+When citing examples/docs in recommendations, include file path + 1-based line numbers:
+
+```text
+examples/good_queries.promql:42
+docs/best_practices.md:88
+```
+
+Rules:
+- Cite the most relevant single line (or start line if multi-line snippet)
+- Keep citations tight; do not cite full files
+- If line numbers are unavailable, state `line number unavailable` and provide file path
 
 ### Step 4: Interactive Query Planning (Phase 1 - STOP AND WAIT)
 

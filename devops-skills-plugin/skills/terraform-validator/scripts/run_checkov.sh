@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Checkov Terraform Security Scanner Wrapper Script
-# This script provides a convenient interface for running Checkov security scans
-# on Terraform configurations with common options and helpful error handling.
+# Provides stable CLI parsing and predictable exit handling.
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_SCRIPT="$SCRIPT_DIR/install_checkov.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -20,8 +22,11 @@ COMPACT_OUTPUT="false"
 QUIET_MODE="false"
 SKIP_CHECKS=""
 RUN_CHECKS=""
+SCAN_PATH=""
 
-# Help message
+# Includes commonly used checkov formats.
+ALLOWED_FORMATS=("cli" "json" "sarif" "gitlab_sast" "csv" "junitxml" "cyclonedx" "cyclonedx_json" "github_failed_only" "spdx")
+
 show_help() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS] <path>
@@ -32,7 +37,7 @@ ARGUMENTS:
     path                    Path to Terraform file or directory to scan
 
 OPTIONS:
-    -f, --format FORMAT     Output format: cli, json, sarif, gitlab_sast (default: cli)
+    -f, --format FORMAT     Output format (default: cli)
     -d, --download-modules  Download external Terraform modules before scanning
     -c, --compact           Show compact output (only failed checks)
     -q, --quiet             Suppress informational output
@@ -56,35 +61,58 @@ EXAMPLES:
     # Skip specific checks
     $(basename "$0") --skip CKV_AWS_* ./terraform
 
-    # Scan Terraform plan JSON
+    # Scan Terraform plan JSON as file input
     $(basename "$0") -f json ./tfplan.json
 
 EOF
 }
 
-# Check if checkov is installed
+is_allowed_format() {
+    local format="$1"
+    local allowed
+    for allowed in "${ALLOWED_FORMATS[@]}"; do
+        if [ "$allowed" = "$format" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+require_value() {
+    local flag="$1"
+    local value="${2:-}"
+    if [ -z "$value" ] || [[ "$value" == -* ]]; then
+        echo -e "${RED}ERROR: $flag requires a value${NC}" >&2
+        echo "Use -h or --help for usage information" >&2
+        exit 1
+    fi
+}
+
 check_checkov_installed() {
-    if ! command -v checkov &> /dev/null; then
+    if ! command -v checkov >/dev/null 2>&1; then
         echo -e "${RED}ERROR: checkov is not installed${NC}" >&2
         echo "" >&2
         echo "Install checkov using one of these methods:" >&2
         echo "  pip3 install checkov" >&2
         echo "  brew install checkov  (macOS only)" >&2
+        if [ -f "$INSTALL_SCRIPT" ]; then
+            echo "  bash $INSTALL_SCRIPT install" >&2
+        fi
         echo "" >&2
         echo "For more information, visit: https://www.checkov.io/" >&2
         exit 1
     fi
 }
 
-# Parse command line arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        case "$1" in
             -h|--help)
                 show_help
                 exit 0
                 ;;
             -f|--format)
+                require_value "$1" "${2:-}"
                 OUTPUT_FORMAT="$2"
                 shift 2
                 ;;
@@ -101,10 +129,12 @@ parse_args() {
                 shift
                 ;;
             --skip)
+                require_value "$1" "${2:-}"
                 SKIP_CHECKS="$2"
                 shift 2
                 ;;
             --check)
+                require_value "$1" "${2:-}"
                 RUN_CHECKS="$2"
                 shift 2
                 ;;
@@ -114,76 +144,84 @@ parse_args() {
                 exit 1
                 ;;
             *)
+                if [ -n "$SCAN_PATH" ]; then
+                    echo -e "${RED}ERROR: Multiple paths provided: $SCAN_PATH and $1${NC}" >&2
+                    exit 1
+                fi
                 SCAN_PATH="$1"
                 shift
                 ;;
         esac
     done
 
-    # Validate required arguments
     if [ -z "$SCAN_PATH" ]; then
         echo -e "${RED}ERROR: Path argument is required${NC}" >&2
         echo "Use -h or --help for usage information" >&2
         exit 1
     fi
 
-    # Validate path exists
     if [ ! -e "$SCAN_PATH" ]; then
         echo -e "${RED}ERROR: Path does not exist: $SCAN_PATH${NC}" >&2
         exit 1
     fi
+
+    if ! is_allowed_format "$OUTPUT_FORMAT"; then
+        echo -e "${RED}ERROR: Invalid output format: $OUTPUT_FORMAT${NC}" >&2
+        echo "Allowed formats: ${ALLOWED_FORMATS[*]}" >&2
+        exit 1
+    fi
 }
 
-# Build checkov command
 build_command() {
-    local cmd="checkov"
+    local cmd=(checkov)
 
-    # Determine if scanning a file or directory
     if [ -f "$SCAN_PATH" ]; then
-        cmd="$cmd -f \"$SCAN_PATH\""
+        cmd+=(-f "$SCAN_PATH")
     else
-        cmd="$cmd -d \"$SCAN_PATH\""
+        cmd+=(-d "$SCAN_PATH")
     fi
 
-    # Add output format
     if [ "$OUTPUT_FORMAT" != "cli" ]; then
-        cmd="$cmd -o $OUTPUT_FORMAT"
+        cmd+=(-o "$OUTPUT_FORMAT")
     fi
 
-    # Add module download flag
     if [ "$DOWNLOAD_MODULES" = "true" ]; then
-        cmd="$cmd --download-external-modules true"
+        cmd+=(--download-external-modules true)
     fi
 
-    # Add compact flag
     if [ "$COMPACT_OUTPUT" = "true" ]; then
-        cmd="$cmd --compact"
+        cmd+=(--compact)
     fi
 
-    # Add quiet flag
     if [ "$QUIET_MODE" = "true" ]; then
-        cmd="$cmd --quiet"
+        cmd+=(--quiet)
     fi
 
-    # Add skip checks
     if [ -n "$SKIP_CHECKS" ]; then
-        cmd="$cmd --skip-check $SKIP_CHECKS"
+        cmd+=(--skip-check "$SKIP_CHECKS")
     fi
 
-    # Add run specific checks
     if [ -n "$RUN_CHECKS" ]; then
-        cmd="$cmd --check $RUN_CHECKS"
+        cmd+=(--check "$RUN_CHECKS")
     fi
 
-    echo "$cmd"
+    CHECKOV_CMD=("${cmd[@]}")
 }
 
-# Main execution
+print_command() {
+    local rendered=""
+    local arg
+    for arg in "${CHECKOV_CMD[@]}"; do
+        rendered+=$(printf "%q " "$arg")
+    done
+    echo "$rendered"
+}
+
 main() {
     parse_args "$@"
     check_checkov_installed
+    build_command
 
-    # Display scan information
     if [ "$QUIET_MODE" != "true" ]; then
         echo -e "${BLUE}========================================${NC}"
         echo -e "${BLUE}Checkov Security Scanner${NC}"
@@ -195,28 +233,22 @@ main() {
         [ -n "$RUN_CHECKS" ] && echo -e "Run: ${YELLOW}$RUN_CHECKS${NC}"
         echo -e "${BLUE}========================================${NC}"
         echo ""
-    fi
-
-    # Build and execute command
-    cmd=$(build_command)
-
-    # Execute checkov
-    if [ "$QUIET_MODE" != "true" ]; then
-        echo -e "${BLUE}Running: ${NC}$cmd"
+        echo -e "${BLUE}Running: ${NC}$(print_command)"
         echo ""
     fi
 
-    eval "$cmd"
+    set +e
+    "${CHECKOV_CMD[@]}"
     exit_code=$?
+    set -e
 
-    # Display summary based on exit code
     if [ "$QUIET_MODE" != "true" ]; then
         echo ""
         echo -e "${BLUE}========================================${NC}"
         if [ $exit_code -eq 0 ]; then
             echo -e "${GREEN}Scan completed: No security issues found${NC}"
         else
-            echo -e "${YELLOW}Scan completed: Security issues detected${NC}"
+            echo -e "${YELLOW}Scan completed: Security issues detected or scanner returned non-zero exit${NC}"
             echo -e "Review the output above for details"
         fi
         echo -e "${BLUE}========================================${NC}"
@@ -225,5 +257,4 @@ main() {
     exit $exit_code
 }
 
-# Run main function
 main "$@"

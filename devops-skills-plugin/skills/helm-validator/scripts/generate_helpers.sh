@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate standard Helm helpers (_helpers.tpl) for a chart
 
-set -e
+set -euo pipefail
 
 # Parse arguments
 FORCE=false
@@ -78,8 +78,7 @@ echo
 # Check if _helpers.tpl already exists
 if [ -f "$HELPERS_FILE" ]; then
     echo "⚠️  Warning: $HELPERS_FILE already exists"
-    echo "   This script will append to the existing file."
-    echo "   Review the output carefully and remove duplicates."
+    echo "   This script will overwrite the existing file."
     echo
 
     if [ "$FORCE" = true ]; then
@@ -99,13 +98,12 @@ if [ -f "$HELPERS_FILE" ]; then
             exit 1
         fi
     fi
-    echo >> "$HELPERS_FILE"  # Add newline before appending
 else
     # Create templates directory if it doesn't exist
     mkdir -p "$CHART_DIR/templates"
 fi
 
-cat >> "$HELPERS_FILE" << EOF
+cat > "$HELPERS_FILE" << EOF
 {{/*
 Expand the name of the chart.
 */}}

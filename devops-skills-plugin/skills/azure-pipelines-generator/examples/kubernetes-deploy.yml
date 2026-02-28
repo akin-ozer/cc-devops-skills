@@ -35,11 +35,12 @@ stages:
         containerRegistry: $(dockerRegistryServiceConnection)
         tags: |
           $(tag)
-          latest
+          $(Build.SourceVersion)
 
 - stage: DeployToK8s
   displayName: 'Deploy to Kubernetes'
   dependsOn: BuildAndPush
+  condition: succeeded()
   jobs:
   - deployment: DeployK8s
     displayName: 'Deploy to AKS Cluster'
@@ -52,17 +53,14 @@ stages:
           steps:
           - checkout: self
 
-          - task: KubernetesManifest@0
+          - task: Kubernetes@1
             displayName: 'Create namespace (if not exists)'
             inputs:
-              action: 'deploy'
-              kubernetesServiceConnection: $(kubernetesServiceConnection)
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: $(kubernetesServiceConnection)
               namespace: $(namespace)
-              manifests: |
-                apiVersion: v1
-                kind: Namespace
-                metadata:
-                  name: $(namespace)
+              command: 'create'
+              arguments: 'namespace $(namespace)'
             continueOnError: true
 
           - task: KubernetesManifest@0

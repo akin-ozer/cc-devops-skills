@@ -15,6 +15,10 @@ echo ""
 
 MISSING_TOOLS=()
 INSTALLED_TOOLS=()
+RUNTIME_WARNINGS=()
+DOCKER_READY=0
+PODMAN_READY=0
+MOLECULE_FOUND=0
 
 # Function to check if command exists
 command_exists() {
@@ -86,8 +90,41 @@ if command_exists molecule; then
     VERSION=$(molecule --version | head -n 1)
     echo -e "${COLOR_GREEN}✓ Found${COLOR_RESET} - $VERSION"
     INSTALLED_TOOLS+=("molecule")
+    MOLECULE_FOUND=1
 else
     echo -e "${COLOR_YELLOW}⚠ Not found${COLOR_RESET} (optional)"
+fi
+
+# Check Docker runtime (optional, required for common Molecule drivers)
+echo -n "Checking docker runtime (for molecule docker driver)... "
+if command_exists docker; then
+    VERSION=$(docker --version 2>/dev/null | head -n 1)
+    if docker info >/dev/null 2>&1; then
+        echo -e "${COLOR_GREEN}✓ Ready${COLOR_RESET} - $VERSION"
+        INSTALLED_TOOLS+=("docker")
+        DOCKER_READY=1
+    else
+        echo -e "${COLOR_YELLOW}⚠ Found but daemon unavailable${COLOR_RESET} - $VERSION"
+        RUNTIME_WARNINGS+=("docker is installed but daemon/socket is not reachable")
+    fi
+else
+    echo -e "${COLOR_YELLOW}⚠ Not found${COLOR_RESET} (optional, needed for docker-based Molecule)"
+fi
+
+# Check Podman runtime (optional alternative to Docker for Molecule)
+echo -n "Checking podman runtime (for molecule podman driver)... "
+if command_exists podman; then
+    VERSION=$(podman --version 2>/dev/null | head -n 1)
+    if podman info >/dev/null 2>&1; then
+        echo -e "${COLOR_GREEN}✓ Ready${COLOR_RESET} - $VERSION"
+        INSTALLED_TOOLS+=("podman")
+        PODMAN_READY=1
+    else
+        echo -e "${COLOR_YELLOW}⚠ Found but runtime unavailable${COLOR_RESET} - $VERSION"
+        RUNTIME_WARNINGS+=("podman is installed but runtime info is unavailable")
+    fi
+else
+    echo -e "${COLOR_YELLOW}⚠ Not found${COLOR_RESET} (optional, needed for podman-based Molecule)"
 fi
 
 # Check ansible-galaxy
@@ -115,9 +152,22 @@ fi
 echo ""
 echo "========================================"
 
+if [ $MOLECULE_FOUND -eq 1 ] && [ $DOCKER_READY -eq 0 ] && [ $PODMAN_READY -eq 0 ]; then
+    RUNTIME_WARNINGS+=("molecule is installed but no ready container runtime (docker/podman); molecule tests may be BLOCKED")
+fi
+
 # Summary
 if [ ${#MISSING_TOOLS[@]} -eq 0 ]; then
     echo -e "${COLOR_GREEN}All required tools are installed!${COLOR_RESET}"
+    if [ ${#RUNTIME_WARNINGS[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${COLOR_YELLOW}Runtime warnings:${COLOR_RESET}"
+        for warning in "${RUNTIME_WARNINGS[@]}"; do
+            echo "  - $warning"
+        done
+        echo ""
+        echo "Validation can proceed. Molecule stages may be marked BLOCKED until runtime is ready."
+    fi
     exit 0
 else
     echo -e "${COLOR_YELLOW}Missing tools detected${COLOR_RESET}"
@@ -188,6 +238,14 @@ else
         echo ""
         echo "  # Optional: Install molecule for role testing"
         echo "  pip3 install molecule molecule-docker"
+    fi
+
+    if [ ${#RUNTIME_WARNINGS[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${COLOR_YELLOW}Runtime warnings:${COLOR_RESET}"
+        for warning in "${RUNTIME_WARNINGS[@]}"; do
+            echo "  - $warning"
+        done
     fi
 
     echo ""

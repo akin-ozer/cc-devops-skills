@@ -8,7 +8,7 @@ Before installing this chart, ensure the following are installed in your cluster
 
 1. **cert-manager** (for Certificate resources)
    ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
    ```
 
 2. **Prometheus Operator** (for ServiceMonitor resources)

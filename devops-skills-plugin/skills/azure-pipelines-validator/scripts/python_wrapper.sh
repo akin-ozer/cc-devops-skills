@@ -19,6 +19,13 @@ if [ $# -lt 2 ]; then
     exit 1
 fi
 
+# Hard requirement: python3 must exist
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 is required to run Azure Pipelines validators." >&2
+    echo "Install python3, then rerun validation." >&2
+    exit 1
+fi
+
 PYTHON_SCRIPT="$1"
 shift  # Remove first argument, rest are passed to the Python script
 
@@ -33,17 +40,28 @@ fi
 if [ ! -d "$VENV_DIR" ]; then
     # Create persistent venv
     echo "PyYAML not found. Creating persistent virtual environment..." >&2
-    python3 -m venv "$VENV_DIR" >&2
+    if ! python3 -m venv "$VENV_DIR" >&2; then
+        echo "Error: Failed to create virtual environment at $VENV_DIR" >&2
+        echo "Install Python venv support (for example python3-venv) and retry." >&2
+        exit 1
+    fi
 
     # Activate venv
     source "$VENV_DIR/bin/activate" >&2
 
     # Upgrade pip quietly
-    pip install --quiet --upgrade pip >&2
+    if ! pip install --quiet --upgrade pip >&2; then
+        echo "Error: Failed to upgrade pip in $VENV_DIR" >&2
+        exit 1
+    fi
 
     # Install required packages
     echo "Installing required packages (PyYAML, yamllint)..." >&2
-    pip install --quiet pyyaml yamllint >&2
+    if ! pip install --quiet pyyaml yamllint >&2; then
+        echo "Error: Failed to install required packages (PyYAML, yamllint)." >&2
+        echo "Check network access or preinstall dependencies, then retry." >&2
+        exit 1
+    fi
 
     echo "Virtual environment created at $VENV_DIR" >&2
     echo "" >&2
@@ -54,7 +72,10 @@ else
     # Check if yamllint is installed, install if missing
     if ! python3 -c "import yamllint" 2>/dev/null; then
         echo "Installing yamllint in virtual environment..." >&2
-        pip install --quiet yamllint >&2
+        if ! pip install --quiet yamllint >&2; then
+            echo "Error: Failed to install yamllint in $VENV_DIR" >&2
+            exit 1
+        fi
     fi
 fi
 

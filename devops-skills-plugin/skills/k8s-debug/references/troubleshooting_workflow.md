@@ -1,5 +1,25 @@
 # Kubernetes Troubleshooting Workflows
 
+## How to Use This Reference
+
+Use this file for deterministic, step-by-step diagnosis once you know the rough symptom category.
+
+Routing guide:
+
+| Symptom | Jump to |
+| --- | --- |
+| Pod is not scheduling | `Pod Pending Workflow` |
+| Pod repeatedly restarts | `Pod CrashLoopBackOff Workflow` |
+| Image pull fails | `Pod ImagePullBackOff Workflow` |
+| Service or DNS is failing | `Network Troubleshooting Workflow` |
+| Node or pod resource pressure | `Resource and Performance Workflow` |
+| PVC/PV/storage class issue | `Storage Troubleshooting Workflow` |
+| Rollout is blocked | `Deployment and Rollout Workflow` |
+
+Safety note:
+- Treat `kubectl delete ... --force`, `kubectl drain`, `kubectl rollout restart`, and `kubectl rollout undo` as disruptive commands.
+- Capture current state before running disruptive operations.
+
 ## General Debugging Workflow
 
 When facing any Kubernetes issue, follow this systematic approach:
@@ -328,3 +348,12 @@ kubectl cordon <node-name>
 # Drain node (evict pods)
 kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
 ```
+
+## Workflow Done Criteria
+
+A troubleshooting run is complete when all checks pass:
+- [ ] Issue category was mapped to one workflow above.
+- [ ] Evidence was captured (events, logs, describe output, and at least one config/state snapshot).
+- [ ] Root cause and fix are connected by observable data.
+- [ ] Post-fix verification succeeded (`kubectl get`, `kubectl rollout status`, or service connectivity checks).
+- [ ] Any disruptive action was documented with reason and rollback option.

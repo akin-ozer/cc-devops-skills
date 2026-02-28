@@ -13,6 +13,7 @@ set -euo pipefail
 # Script metadata
 readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly -a ALL_TARGETS=(all install uninstall clean distclean test check help dist)
 
 # Colors for output
 if [[ -t 1 ]]; then
@@ -54,6 +55,7 @@ print_skipped() {
 usage() {
     cat << EOF
 Usage: ${SCRIPT_NAME} [MAKEFILE] [TARGETS...]
+       ${SCRIPT_NAME} [TARGETS...]
 
 Add standard GNU targets to an existing Makefile.
 
@@ -81,6 +83,7 @@ Examples:
     ${SCRIPT_NAME}                          # Add all missing targets to ./Makefile
     ${SCRIPT_NAME} build.mk                 # Add all targets to build.mk
     ${SCRIPT_NAME} Makefile clean test      # Add only clean and test targets
+    ${SCRIPT_NAME} clean test               # Add clean and test to ./Makefile
     ${SCRIPT_NAME} -n Makefile install      # Preview install target addition
 
 EOF
@@ -102,6 +105,18 @@ Available standard GNU targets:
   dist        - Create distribution tarball
 
 EOF
+}
+
+# Check if a target name is part of the standard set
+is_known_target() {
+    local candidate="$1"
+    local target
+    for target in "${ALL_TARGETS[@]}"; do
+        if [[ "$target" == "$candidate" ]]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Check if target exists in Makefile
@@ -328,7 +343,6 @@ VERSION := 1.0.0
 # Main function
 main() {
     local dry_run=0
-    local list_only=0
 
     # Parse options
     while [[ $# -gt 0 ]]; do
@@ -356,44 +370,68 @@ main() {
         esac
     done
 
-    # Get Makefile path
-    MAKEFILE="${1:-Makefile}"
-    shift 2>/dev/null || true
+    local makefile_path="Makefile"
+    local -a targets=()
 
-    # Get targets (default: all standard targets)
-    if [[ $# -eq 0 ]]; then
-        TARGETS=(all install uninstall clean distclean test check help dist)
-    else
-        TARGETS=("$@")
+    # Parse positional args:
+    # - If first arg is a known target, use default Makefile and treat all args as targets.
+    # - Otherwise treat first arg as Makefile path and remaining args as targets.
+    if [[ $# -gt 0 ]]; then
+        if is_known_target "$1"; then
+            targets=("$@")
+        else
+            makefile_path="$1"
+            shift
+            targets=("$@")
+        fi
     fi
 
+    # Default target set when none explicitly requested
+    if [[ ${#targets[@]} -eq 0 ]]; then
+        targets=("${ALL_TARGETS[@]}")
+    fi
+
+    # Validate requested target names before modifying files
+    local target
+    for target in "${targets[@]}"; do
+        if ! is_known_target "$target"; then
+            print_error "Unknown target: $target"
+            echo ""
+            list_targets
+            exit 1
+        fi
+    done
+
     # Check if Makefile exists
-    if [[ ! -f "$MAKEFILE" ]]; then
-        print_error "Makefile not found: $MAKEFILE"
+    if [[ ! -f "$makefile_path" ]]; then
+        print_error "Makefile not found: $makefile_path"
         exit 1
     fi
 
-    print_info "Processing: $MAKEFILE"
+    print_info "Processing: $makefile_path"
     echo ""
 
     # Track what we'll add
     local targets_added=0
     local targets_skipped=0
     local content_to_add=""
+    local -a added_targets=()
 
     # Check each target
-    for target in "${TARGETS[@]}"; do
-        if target_exists "$target" "$MAKEFILE"; then
+    for target in "${targets[@]}"; do
+        if target_exists "$target" "$makefile_path"; then
             print_skipped "$target"
-            ((targets_skipped++))
-        else
-            if [[ $dry_run -eq 1 ]]; then
-                echo -e "${GREEN}+${NC} Would add: ${BLUE}$target${NC}"
-            else
-                content_to_add+="$(generate_target "$target")"
-            fi
-            ((targets_added++))
+            targets_skipped=$((targets_skipped + 1))
+            continue
         fi
+
+        if [[ $dry_run -eq 1 ]]; then
+            echo -e "${GREEN}+${NC} Would add: ${BLUE}$target${NC}"
+        else
+            content_to_add+="$(generate_target "$target")"
+            added_targets+=("$target")
+        fi
+        targets_added=$((targets_added + 1))
     done
 
     echo ""
@@ -401,22 +439,17 @@ main() {
     # Apply changes if not dry run
     if [[ $dry_run -eq 0 ]] && [[ $targets_added -gt 0 ]]; then
         # Add missing variables first
-        add_missing_variables "$MAKEFILE"
+        add_missing_variables "$makefile_path"
 
         # Append targets to Makefile
-        echo "$content_to_add" >> "$MAKEFILE"
+        echo "$content_to_add" >> "$makefile_path"
 
         # Report results
-        for target in "${TARGETS[@]}"; do
-            if ! target_exists "$target" "$MAKEFILE" 2>/dev/null; then
-                # This shouldn't happen, but just in case
-                :
-            elif [[ "$content_to_add" == *"$target"* ]]; then
-                print_added "$target"
-            fi
+        for target in "${added_targets[@]}"; do
+            print_added "$target"
         done
 
-        print_success "Added $targets_added target(s) to $MAKEFILE"
+        print_success "Added $targets_added target(s) to $makefile_path"
     elif [[ $dry_run -eq 1 ]]; then
         print_info "Dry run - no changes made"
         echo "Would add $targets_added target(s), skip $targets_skipped existing target(s)"

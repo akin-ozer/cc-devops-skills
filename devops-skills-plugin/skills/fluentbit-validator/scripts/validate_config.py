@@ -7,27 +7,89 @@ Checks syntax, semantics, security, performance, and best practices.
 """
 
 import argparse
-import configparser
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-from collections import defaultdict
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Set
 
 
 class FluentBitValidator:
     """Validates Fluent Bit configuration files."""
 
-    def __init__(self, config_file: str):
+    VALID_INPUT_PLUGINS = {
+        "tail",
+        "systemd",
+        "tcp",
+        "udp",
+        "forward",
+        "http",
+        "syslog",
+        "docker",
+        "kubernetes",
+        "exec",
+        "dummy",
+    }
+
+    VALID_FILTER_PLUGINS = {
+        "grep",
+        "kubernetes",
+        "parser",
+        "modify",
+        "nest",
+        "rewrite_tag",
+        "throttle",
+        "multiline",
+        "record_modifier",
+        "lua",
+        "geoip2",
+        "expect",
+        "type_converter",
+        "stdout",
+        "log_to_metrics",
+        "wasm",
+    }
+
+    VALID_OUTPUT_PLUGINS = {
+        "es",
+        "elasticsearch",
+        "kafka",
+        "loki",
+        "s3",
+        "cloudwatch",
+        "cloudwatch_logs",
+        "http",
+        "forward",
+        "stdout",
+        "file",
+        "opentelemetry",
+        "null",
+        "influxdb",
+        "datadog",
+        "splunk",
+        "stackdriver",
+        "azure",
+        "tcp",
+        "udp",
+        "nats",
+        "counter",
+        "flowcounter",
+        "firehose",
+        "kinesis_firehose",
+        "kinesis_streams",
+        "gelf",
+        "pgsql",
+    }
+
+    def __init__(self, config_file: str, require_dry_run: bool = False):
         self.config_file = config_file
+        self.require_dry_run = require_dry_run
         self.errors = []
         self.warnings = []
-        self.info = []
+        self.recommendations = []
         self.sections = []
-        self.line_map = {}  # Maps section/key to line number
 
     def validate_all(self) -> bool:
         """Run all validation checks."""
@@ -68,44 +130,82 @@ class FluentBitValidator:
     def _parse_config(self) -> None:
         """Parse configuration file and build section list."""
         try:
-            with open(self.config_file, "r") as f:
+            self.sections = []
+
+            with open(self.config_file, "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
             current_section = None
-            line_num = 0
 
             for i, line in enumerate(lines, start=1):
-                line_num = i
                 stripped = line.strip()
 
                 # Skip empty lines and comments
                 if not stripped or stripped.startswith("#"):
                     continue
 
+                # Detect mixed indentation (tabs + spaces)
+                indent_match = re.match(r"^[ \t]+", line)
+                if indent_match:
+                    indent = indent_match.group(0)
+                    if " " in indent and "\t" in indent:
+                        self.warnings.append(
+                            f"Line {i}: Mixed tabs and spaces in indentation"
+                        )
+
                 # Section header
-                if stripped.startswith("[") and stripped.endswith("]"):
-                    section_name = stripped[1:-1].upper()
+                if stripped.startswith("["):
+                    if not stripped.endswith("]"):
+                        self.errors.append(
+                            f"Line {i}: Malformed section header '{stripped}'"
+                        )
+                        current_section = None
+                        continue
+
+                    section_name = stripped[1:-1].strip().upper()
+                    if not section_name:
+                        self.errors.append(f"Line {i}: Empty section header []")
+                        current_section = None
+                        continue
+
                     current_section = {
                         "type": section_name,
-                        "line": line_num,
+                        "line": i,
                         "params": {},
                     }
                     self.sections.append(current_section)
                     continue
 
-                # Key-value pair
-                if current_section and "  " in line and not stripped.startswith("["):
-                    # Parse key-value (handle various spacing)
-                    parts = stripped.split(None, 1)
-                    if len(parts) == 2:
-                        key, value = parts
-                        current_section["params"][key] = {
-                            "value": value,
-                            "line": line_num,
-                        }
+                if current_section is None:
+                    self.errors.append(
+                        f"Line {i}: Parameter outside of a section '{stripped}'"
+                    )
+                    continue
+
+                key, value = self._parse_key_value(stripped)
+                if key is None:
+                    self.errors.append(f"Line {i}: Malformed key-value pair '{stripped}'")
+                    continue
+
+                current_section["params"][key] = {
+                    "value": value,
+                    "line": i,
+                }
 
         except Exception as e:
             self.errors.append(f"Failed to parse configuration: {str(e)}")
+
+    def _parse_key_value(self, line: str):
+        """Parse key-value pair supporting both whitespace and '=' delimiters."""
+        equals_match = re.match(r"^([^\s=]+)\s*=\s*(.*)$", line)
+        if equals_match:
+            return equals_match.group(1), equals_match.group(2).strip()
+
+        space_match = re.match(r"^([^\s=]+)\s+(.*)$", line)
+        if space_match:
+            return space_match.group(1), space_match.group(2).strip()
+
+        return None, None
 
     def validate_syntax(self) -> None:
         """Validate INI syntax."""
@@ -206,22 +306,22 @@ class FluentBitValidator:
             return
 
         plugin_name = params["Name"]["value"]
-        valid_inputs = ["tail", "systemd", "tcp", "udp", "forward", "http", "syslog", "docker", "kubernetes", "exec", "dummy"]
+        plugin_name_normalized = plugin_name.lower()
 
-        if plugin_name not in valid_inputs:
+        if plugin_name_normalized not in self.VALID_INPUT_PLUGINS:
             self.warnings.append(
                 f"Line {params['Name']['line']}: Unknown INPUT plugin '{plugin_name}'"
             )
 
         # Check Tag parameter (recommended)
         if "Tag" not in params:
-            if plugin_name != "forward":  # forward provides dynamic tags
+            if plugin_name_normalized != "forward":  # forward provides dynamic tags
                 self.warnings.append(
                     f"Line {section['line']}: [INPUT] missing Tag parameter (recommended)"
                 )
 
         # tail plugin specific checks
-        if plugin_name == "tail":
+        if plugin_name_normalized == "tail":
             if "Path" not in params:
                 self.errors.append(
                     f"Line {section['line']}: [INPUT tail] missing required parameter 'Path'"
@@ -238,7 +338,7 @@ class FluentBitValidator:
                 )
 
             if "Skip_Long_Lines" not in params:
-                self.info.append(
+                self.recommendations.append(
                     f"Line {section['line']}: [INPUT tail] consider adding Skip_Long_Lines On"
                 )
 
@@ -252,6 +352,13 @@ class FluentBitValidator:
             return
 
         filter_name = params["Name"]["value"]
+        filter_name_normalized = filter_name.lower()
+
+        if filter_name_normalized not in self.VALID_FILTER_PLUGINS:
+            self.warnings.append(
+                f"Line {params['Name']['line']}: Unknown FILTER plugin '{filter_name}' "
+                f"(plugin-specific validation skipped)"
+            )
 
         if "Match" not in params and "Match_Regex" not in params:
             self.errors.append(
@@ -259,45 +366,45 @@ class FluentBitValidator:
             )
 
         # Filter-specific validation
-        if filter_name == "kubernetes":
+        if filter_name_normalized == "kubernetes":
             self._validate_kubernetes_filter(section, params)
-        elif filter_name == "parser":
+        elif filter_name_normalized == "parser":
             self._validate_parser_filter(section, params)
-        elif filter_name == "grep":
+        elif filter_name_normalized == "grep":
             self._validate_grep_filter(section, params)
-        elif filter_name == "modify":
+        elif filter_name_normalized == "modify":
             self._validate_modify_filter(section, params)
-        elif filter_name == "nest":
+        elif filter_name_normalized == "nest":
             self._validate_nest_filter(section, params)
-        elif filter_name == "rewrite_tag":
+        elif filter_name_normalized == "rewrite_tag":
             self._validate_rewrite_tag_filter(section, params)
-        elif filter_name == "throttle":
+        elif filter_name_normalized == "throttle":
             self._validate_throttle_filter(section, params)
-        elif filter_name == "multiline":
+        elif filter_name_normalized == "multiline":
             self._validate_multiline_filter(section, params)
 
     def _validate_kubernetes_filter(self, section: Dict, params: Dict) -> None:
         """Validate kubernetes filter specific parameters."""
         # Check for common K8s filter parameters
         if "Kube_URL" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [FILTER kubernetes] consider setting Kube_URL "
                 f"(default: https://kubernetes.default.svc:443)"
             )
 
         # Recommend best practices
         if "Merge_Log" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [FILTER kubernetes] consider setting Merge_Log On to parse JSON logs"
             )
 
         if "Keep_Log" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [FILTER kubernetes] consider setting Keep_Log Off to reduce payload size"
             )
 
         if "Labels" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [FILTER kubernetes] consider enabling Labels On for pod labels"
             )
 
@@ -305,7 +412,7 @@ class FluentBitValidator:
         if "Buffer_Size" in params:
             buffer_size = params["Buffer_Size"]["value"]
             if buffer_size != "0":
-                self.info.append(
+                self.recommendations.append(
                     f"Line {params['Buffer_Size']['line']}: [FILTER kubernetes] Buffer_Size 0 is recommended for performance"
                 )
 
@@ -323,7 +430,7 @@ class FluentBitValidator:
 
         # Recommend Reserve_Data
         if "Reserve_Data" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [FILTER parser] consider setting Reserve_Data On to keep unparsed data"
             )
 
@@ -407,6 +514,13 @@ class FluentBitValidator:
             return
 
         plugin_name = params["Name"]["value"]
+        plugin_name_normalized = plugin_name.lower()
+
+        if plugin_name_normalized not in self.VALID_OUTPUT_PLUGINS:
+            self.warnings.append(
+                f"Line {params['Name']['line']}: Unknown OUTPUT plugin '{plugin_name}' "
+                f"(plugin-specific validation skipped)"
+            )
 
         if "Match" not in params and "Match_Regex" not in params:
             self.errors.append(
@@ -420,25 +534,25 @@ class FluentBitValidator:
             )
 
         # Plugin-specific checks
-        if plugin_name in ["es", "elasticsearch"]:
+        if plugin_name_normalized in ["es", "elasticsearch"]:
             self._validate_elasticsearch_output(section, params)
-        elif plugin_name == "kafka":
+        elif plugin_name_normalized == "kafka":
             self._validate_kafka_output(section, params)
-        elif plugin_name == "loki":
+        elif plugin_name_normalized == "loki":
             self._validate_loki_output(section, params)
-        elif plugin_name == "s3":
+        elif plugin_name_normalized == "s3":
             self._validate_s3_output(section, params)
-        elif plugin_name in ["cloudwatch", "cloudwatch_logs"]:
+        elif plugin_name_normalized in ["cloudwatch", "cloudwatch_logs"]:
             self._validate_cloudwatch_output(section, params)
-        elif plugin_name == "http":
+        elif plugin_name_normalized == "http":
             self._validate_http_output(section, params)
-        elif plugin_name == "forward":
+        elif plugin_name_normalized == "forward":
             self._validate_forward_output(section, params)
-        elif plugin_name == "stdout":
+        elif plugin_name_normalized == "stdout":
             self._validate_stdout_output(section, params)
-        elif plugin_name == "file":
+        elif plugin_name_normalized == "file":
             self._validate_file_output(section, params)
-        elif plugin_name == "opentelemetry":
+        elif plugin_name_normalized == "opentelemetry":
             self._validate_opentelemetry_output(section, params)
 
     def _validate_elasticsearch_output(self, section: Dict, params: Dict) -> None:
@@ -450,13 +564,13 @@ class FluentBitValidator:
 
         # Recommend Logstash format for better indexing
         if "Logstash_Format" not in params and "Index" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT es] consider using Logstash_Format On or specify Index"
             )
 
         # Check for TLS in production
         if "tls" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT es] consider enabling TLS for production"
             )
 
@@ -474,7 +588,7 @@ class FluentBitValidator:
 
         # Recommend message format
         if "Format" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT kafka] consider setting Format (json, msgpack, gelf)"
             )
 
@@ -516,13 +630,13 @@ class FluentBitValidator:
 
         # Recommend compression
         if "compression" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT s3] consider enabling compression (gzip)"
             )
 
         # Recommend s3_key_format for organization
         if "s3_key_format" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT s3] consider setting s3_key_format for log organization"
             )
 
@@ -540,7 +654,7 @@ class FluentBitValidator:
 
         # Recommend auto_create_group
         if "auto_create_group" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT cloudwatch_logs] consider setting auto_create_group On"
             )
 
@@ -558,13 +672,13 @@ class FluentBitValidator:
 
         # Recommend format
         if "Format" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT http] consider setting Format (json, msgpack)"
             )
 
         # Recommend compression
         if "Compress" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT http] consider enabling Compress (gzip)"
             )
 
@@ -635,13 +749,13 @@ class FluentBitValidator:
         # Recommend specific URI endpoints
         has_uri = any(key in params for key in ["metrics_uri", "logs_uri", "traces_uri"])
         if not has_uri:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT opentelemetry] consider specifying metrics_uri, logs_uri, or traces_uri"
             )
 
         # Check for authentication header
         if "Header" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT opentelemetry] consider adding Header for authentication "
                 f"(e.g., Header Authorization Bearer ${{OTEL_TOKEN}})"
             )
@@ -656,7 +770,7 @@ class FluentBitValidator:
 
         # Check TLS configuration
         if "tls" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT opentelemetry] consider enabling TLS for production"
             )
         else:
@@ -676,7 +790,7 @@ class FluentBitValidator:
 
         # Recommend add_label for metadata
         if "add_label" not in params:
-            self.info.append(
+            self.recommendations.append(
                 f"Line {section['line']}: [OUTPUT opentelemetry] consider using add_label to add resource attributes"
             )
 
@@ -738,65 +852,147 @@ class FluentBitValidator:
 
             # Recommend flush_timeout
             if "flush_timeout" not in params and "Flush_timeout" not in params:
-                self.info.append(
+                self.recommendations.append(
                     f"Line {section['line']}: [MULTILINE_PARSER] consider setting flush_timeout (e.g., 1000ms)"
                 )
 
     def validate_tags(self) -> None:
         """Validate tag consistency across INPUT, FILTER, OUTPUT."""
         input_tags = []
-        filter_matches = []
-        output_matches = []
-
-        # Collect tags and match patterns
         for section in self.sections:
             if section["type"] == "INPUT":
                 if "Tag" in section["params"]:
                     input_tags.append(section["params"]["Tag"]["value"])
-            elif section["type"] == "FILTER":
-                if "Match" in section["params"]:
-                    filter_matches.append(
-                        (section["params"]["Match"]["value"], section["line"])
+        if not input_tags:
+            return
+
+        produced_tags = set(input_tags)
+
+        # Process filters in order to simulate tag flow and rewrite_tag emissions.
+        for section in self.sections:
+            if section["type"] != "FILTER":
+                continue
+
+            params = section["params"]
+            descriptor = self._match_descriptor(params)
+
+            if not self._section_matches_any_tags(params, produced_tags, section, "FILTER"):
+                if descriptor:
+                    self.warnings.append(
+                        f"Line {section['line']}: [FILTER] {descriptor} doesn't match any INPUT/FILTER tags"
                     )
-            elif section["type"] == "OUTPUT":
-                if "Match" in section["params"]:
-                    output_matches.append(
-                        (section["params"]["Match"]["value"], section["line"])
+                continue
+
+            filter_name = params.get("Name", {}).get("value", "").lower()
+            if filter_name == "rewrite_tag":
+                generated_patterns = self._extract_rewrite_tag_patterns(section)
+                produced_tags.update(generated_patterns)
+
+        # Validate outputs against tags produced by inputs and filters.
+        for section in self.sections:
+            if section["type"] != "OUTPUT":
+                continue
+
+            params = section["params"]
+            descriptor = self._match_descriptor(params)
+            if not self._section_matches_any_tags(params, produced_tags, section, "OUTPUT"):
+                if descriptor:
+                    self.warnings.append(
+                        f"Line {section['line']}: [OUTPUT] {descriptor} doesn't match any INPUT/FILTER tags"
                     )
 
-        # Check if FILTER Match patterns match any INPUT tags
-        for match, line in filter_matches:
-            if match == "*":
-                continue  # Matches everything
+    def _extract_rewrite_tag_patterns(self, section: Dict) -> Set[str]:
+        """Extract tags emitted by rewrite_tag filters from Rule entries."""
+        params = section["params"]
+        generated = set()
 
-            # Check if match pattern matches any input tags
-            matched = False
-            for tag in input_tags:
-                if self._tag_matches(tag, match):
-                    matched = True
-                    break
+        for key, meta in params.items():
+            if not key.lower().startswith("rule"):
+                continue
 
-            if not matched and input_tags:
+            rule = meta["value"].strip()
+            parts = rule.split()
+            if len(parts) < 3:
                 self.warnings.append(
-                    f"Line {line}: [FILTER] Match pattern '{match}' doesn't match any INPUT tags"
+                    f"Line {meta['line']}: [FILTER rewrite_tag] Rule should be "
+                    f"'$KEY REGEX NEW_TAG KEEP'"
                 )
+                continue
 
-        # Check if OUTPUT Match patterns match any INPUT tags
-        for match, line in output_matches:
-            if match == "*":
-                continue  # Matches everything
+            new_tag = parts[2]
+            generated.add("*" if "$" in new_tag else new_tag)
 
-            # Check if match pattern matches any input tags
-            matched = False
-            for tag in input_tags:
-                if self._tag_matches(tag, match):
-                    matched = True
-                    break
+        return generated
 
-            if not matched and input_tags:
-                self.warnings.append(
-                    f"Line {line}: [OUTPUT] Match pattern '{match}' doesn't match any INPUT tags"
+    def _section_matches_any_tags(
+        self, params: Dict, tags: Set[str], section: Dict, section_type: str
+    ) -> bool:
+        """Check if Match/Match_Regex for a section matches any known tags."""
+        has_match = False
+        has_regex = False
+
+        if "Match" in params:
+            has_match = True
+            match_pattern = params["Match"]["value"]
+
+            if match_pattern == "*":
+                return True
+
+            for tag in tags:
+                if self._tag_patterns_overlap(tag, match_pattern):
+                    return True
+
+        if "Match_Regex" in params:
+            has_regex = True
+            regex_pattern = params["Match_Regex"]["value"]
+            try:
+                regex = re.compile(regex_pattern)
+            except re.error as exc:
+                self.errors.append(
+                    f"Line {params['Match_Regex']['line']}: [{section_type}] "
+                    f"invalid Match_Regex '{regex_pattern}': {exc}"
                 )
+                return False
+
+            for tag in tags:
+                for candidate in self._sample_tags_from_pattern(tag):
+                    if regex.match(candidate):
+                        return True
+
+        return not has_match and not has_regex
+
+    def _sample_tags_from_pattern(self, pattern: str) -> List[str]:
+        """Generate representative sample tags from wildcard patterns."""
+        if "*" not in pattern:
+            return [pattern]
+
+        return [
+            pattern.replace("*", "sample"),
+            pattern.replace("*", "x"),
+        ]
+
+    def _tag_patterns_overlap(self, left: str, right: str) -> bool:
+        """Approximate overlap check for two wildcard-style tag patterns."""
+        if left == "*" or right == "*":
+            return True
+
+        for sample in self._sample_tags_from_pattern(left):
+            if self._tag_matches(sample, right):
+                return True
+
+        for sample in self._sample_tags_from_pattern(right):
+            if self._tag_matches(sample, left):
+                return True
+
+        return False
+
+    def _match_descriptor(self, params: Dict):
+        """Return human-friendly descriptor for Match or Match_Regex."""
+        if "Match" in params:
+            return f"Match pattern '{params['Match']['value']}'"
+        if "Match_Regex" in params:
+            return f"Match_Regex pattern '{params['Match_Regex']['value']}'"
+        return None
 
     def _tag_matches(self, tag: str, pattern: str) -> bool:
         """Check if tag matches pattern (with wildcard support)."""
@@ -813,7 +1009,16 @@ class FluentBitValidator:
             params = section["params"]
 
             # Check for hardcoded credentials
-            sensitive_keys = ["HTTP_Passwd", "Password", "AWS_Secret_Key", "Secret", "API_Key"]
+            sensitive_keys = [
+                "HTTP_User",
+                "HTTP_Passwd",
+                "Password",
+                "AWS_Access_Key",
+                "AWS_Secret_Key",
+                "Secret",
+                "API_Key",
+                "Token",
+            ]
             for key in sensitive_keys:
                 if key in params:
                     value = params[key]["value"]
@@ -838,6 +1043,31 @@ class FluentBitValidator:
                     if verify_value in ["off", "false", "no"]:
                         self.warnings.append(
                             f"Line {params['tls.verify']['line']}: TLS verification disabled (MITM risk)"
+                        )
+
+            # Check network exposure in SERVICE HTTP server
+            if section["type"] == "SERVICE":
+                http_server_on = params.get("HTTP_Server", {}).get("value", "").lower() in [
+                    "on",
+                    "true",
+                    "yes",
+                ]
+                if http_server_on and params.get("HTTP_Listen", {}).get("value") == "0.0.0.0":
+                    self.warnings.append(
+                        f"Line {params['HTTP_Listen']['line']}: HTTP_Server exposed on 0.0.0.0 "
+                        f"(limit to internal interface in production)"
+                    )
+
+            # Check network listener exposure for INPUT network plugins
+            if section["type"] == "INPUT":
+                plugin_name = params.get("Name", {}).get("value", "").lower()
+                network_inputs = {"http", "tcp", "udp", "forward", "syslog"}
+                if plugin_name in network_inputs:
+                    listener = params.get("Listen", params.get("Host"))
+                    if listener and listener["value"] == "0.0.0.0":
+                        self.warnings.append(
+                            f"Line {listener['line']}: [INPUT {plugin_name}] listening on 0.0.0.0 "
+                            f"(ensure network controls and authentication are in place)"
                         )
 
     def validate_performance(self) -> None:
@@ -890,7 +1120,7 @@ class FluentBitValidator:
             # Check OUTPUT storage limits
             if section["type"] == "OUTPUT":
                 if "storage.total_limit_size" not in params:
-                    self.info.append(
+                    self.recommendations.append(
                         f"Line {section['line']}: [OUTPUT] consider setting storage.total_limit_size"
                     )
 
@@ -898,11 +1128,13 @@ class FluentBitValidator:
         """Check best practices."""
         has_http_server = False
         has_storage_metrics = False
-        has_db_for_tail = False
-        has_retry_limit_on_outputs = True
-        has_mem_buf_limit_on_tail = True
         has_exclude_path_for_k8s = False
         is_kubernetes_setup = False
+        tail_inputs = 0
+        tail_inputs_with_db = 0
+        tail_inputs_with_mem_buf_limit = 0
+        total_outputs = 0
+        outputs_with_retry_limit = 0
 
         for section in self.sections:
             section_type = section["type"]
@@ -922,14 +1154,16 @@ class FluentBitValidator:
 
             # INPUT section checks
             elif section_type == "INPUT":
-                if params.get("Name", {}).get("value") == "tail":
+                if params.get("Name", {}).get("value", "").lower() == "tail":
+                    tail_inputs += 1
+
                     # Check for DB parameter
                     if "DB" in params:
-                        has_db_for_tail = True
+                        tail_inputs_with_db += 1
 
                     # Check Mem_Buf_Limit
-                    if "Mem_Buf_Limit" not in params:
-                        has_mem_buf_limit_on_tail = False
+                    if "Mem_Buf_Limit" in params:
+                        tail_inputs_with_mem_buf_limit += 1
 
                     # Check for Kubernetes setup
                     if "Path" in params:
@@ -945,23 +1179,39 @@ class FluentBitValidator:
 
             # OUTPUT section checks
             elif section_type == "OUTPUT":
-                if "Retry_Limit" not in params:
-                    has_retry_limit_on_outputs = False
+                total_outputs += 1
+                if "Retry_Limit" in params:
+                    outputs_with_retry_limit += 1
 
         # Generate best practice recommendations
         if not has_http_server:
-            self.info.append(
+            self.recommendations.append(
                 "Consider enabling HTTP_Server for health checks and metrics (SERVICE: HTTP_Server On)"
             )
 
         if not has_storage_metrics:
-            self.info.append(
+            self.recommendations.append(
                 "Consider enabling storage metrics for monitoring (SERVICE: storage.metrics on)"
+            )
+
+        if tail_inputs > 0 and tail_inputs_with_db < tail_inputs:
+            self.recommendations.append(
+                "Consider adding DB parameter to all tail INPUTs for crash recovery and offset tracking"
+            )
+
+        if tail_inputs > 0 and tail_inputs_with_mem_buf_limit < tail_inputs:
+            self.recommendations.append(
+                "Consider adding Mem_Buf_Limit to all tail INPUTs to avoid unbounded memory usage"
+            )
+
+        if total_outputs > 0 and outputs_with_retry_limit < total_outputs:
+            self.recommendations.append(
+                "Consider setting Retry_Limit on all OUTPUTs to avoid infinite retry loops"
             )
 
         if is_kubernetes_setup:
             if not has_exclude_path_for_k8s:
-                self.info.append(
+                self.recommendations.append(
                     "Consider excluding Fluent Bit's own logs to prevent loops (INPUT tail: Exclude_Path *fluent-bit*.log)"
                 )
 
@@ -973,7 +1223,7 @@ class FluentBitValidator:
             )
 
             if not has_k8s_filter:
-                self.info.append(
+                self.recommendations.append(
                     "Consider adding kubernetes FILTER for metadata enrichment in Kubernetes environments"
                 )
 
@@ -983,10 +1233,14 @@ class FluentBitValidator:
         fluent_bit_path = shutil.which("fluent-bit")
 
         if not fluent_bit_path:
-            self.info.append(
-                "fluent-bit binary not found in PATH - skipping dry-run test "
-                "(install Fluent Bit to enable actual configuration testing)"
+            message = (
+                "Dry-run skipped because fluent-bit binary is not available in PATH; "
+                "run dry-run in CI or a Fluent Bit runtime image."
             )
+            if self.require_dry_run:
+                self.errors.append(message)
+            else:
+                self.recommendations.append(message)
             return
 
         # Get absolute path to config file
@@ -1026,7 +1280,7 @@ class FluentBitValidator:
                     )
             else:
                 # Dry-run succeeded
-                self.info.append("Dry-run test passed - configuration is valid")
+                self.recommendations.append("Dry-run test passed - configuration is valid")
 
                 # Check for warnings in output
                 warning_lines = []
@@ -1037,7 +1291,7 @@ class FluentBitValidator:
 
                 if warning_lines:
                     for warning in warning_lines[:3]:  # Limit to first 3 warnings
-                        self.info.append(f"Dry-run warning: {warning}")
+                        self.recommendations.append(f"Dry-run warning: {warning}")
 
         except subprocess.TimeoutExpired:
             self.warnings.append(
@@ -1050,37 +1304,37 @@ class FluentBitValidator:
 
     def print_report(self) -> None:
         """Print validation report."""
-        print(f"\nValidation Report for {self.config_file}")
-        print("=" * 60)
+        print(f"\nValidation Report: {self.config_file}")
 
         if self.errors:
-            print(f"\n❌ Errors ({len(self.errors)}):")
+            print("\nError:")
             for error in self.errors:
                 print(f"  - {error}")
 
         if self.warnings:
-            print(f"\n⚠️  Warnings ({len(self.warnings)}):")
+            print("\nWarning:")
             for warning in self.warnings:
                 print(f"  - {warning}")
 
-        if self.info:
-            print(f"\n💡 Info ({len(self.info)}):")
-            for info_item in self.info:
-                print(f"  - {info_item}")
+        if self.recommendations:
+            print("\nRecommendation:")
+            for recommendation in self.recommendations:
+                print(f"  - {recommendation}")
 
-        if not self.errors and not self.warnings:
-            print("\n✅ All validation checks passed!")
+        if not self.errors and not self.warnings and not self.recommendations:
+            print("\nRecommendation:")
+            print("  - No findings.")
 
         print()
 
-    def get_summary(self) -> Dict:
+    def get_summary(self, fail_on_warning: bool = False) -> Dict:
         """Get validation summary as dict."""
         return {
             "file": self.config_file,
-            "valid": len(self.errors) == 0,
+            "valid": len(self.errors) == 0 and (not fail_on_warning or len(self.warnings) == 0),
             "errors": self.errors,
             "warnings": self.warnings,
-            "info": self.info,
+            "recommendations": self.recommendations,
         }
 
 
@@ -1120,10 +1374,21 @@ def main():
         help="Output results as JSON",
     )
 
+    parser.add_argument(
+        "--fail-on-warning",
+        action="store_true",
+        help="Return non-zero exit code when warnings are present",
+    )
+    parser.add_argument(
+        "--require-dry-run",
+        action="store_true",
+        help="Treat missing fluent-bit binary as an error for dry-run checks",
+    )
+
     args = parser.parse_args()
 
     # Validate configuration
-    validator = FluentBitValidator(args.file)
+    validator = FluentBitValidator(args.file, require_dry_run=args.require_dry_run)
 
     if args.check == "all":
         validator.validate_all()
@@ -1160,12 +1425,15 @@ def main():
 
     # Output results
     if args.json:
-        print(json.dumps(validator.get_summary(), indent=2))
+        print(json.dumps(validator.get_summary(args.fail_on_warning), indent=2))
     else:
         validator.print_report()
 
     # Exit with error code if validation failed
-    sys.exit(0 if len(validator.errors) == 0 else 1)
+    has_failures = len(validator.errors) > 0 or (
+        args.fail_on_warning and len(validator.warnings) > 0
+    )
+    sys.exit(0 if not has_failures else 1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,24 @@
+# Regression example: conditional stage template insertion.
+# This should pass syntax validation.
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - script: echo "build"
+
+  - template: templates/deploy-template.yml
+    parameters:
+      environment: staging
+
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+      - template: templates/deploy-template.yml
+        parameters:
+          environment: production

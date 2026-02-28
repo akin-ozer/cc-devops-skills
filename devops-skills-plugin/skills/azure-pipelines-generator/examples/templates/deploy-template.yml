@@ -5,6 +5,14 @@ parameters:
 - name: environment
   type: string
 
+- name: dependsOn
+  type: object
+  default: []
+
+- name: stageCondition
+  type: string
+  default: 'succeeded()'
+
 - name: azureSubscription
   type: string
 
@@ -26,6 +34,8 @@ parameters:
 stages:
 - stage: Deploy_${{ parameters.environment }}
   displayName: 'Deploy to ${{ parameters.environment }}'
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.stageCondition }}
   jobs:
   - deployment: Deploy${{ parameters.environment }}
     displayName: 'Deploy to ${{ parameters.environment }} Environment'
@@ -36,6 +46,11 @@ stages:
       runOnce:
         preDeploy:
           steps:
+          - ${{ if eq(parameters.approvalRequired, true) }}:
+            - script: |
+                echo "Approval required: configure environment approvals/checks in Azure DevOps for '${{ parameters.environment }}'."
+              displayName: 'Approval Reminder'
+
           - script: echo "Pre-deployment validation for ${{ parameters.environment }}"
             displayName: 'Pre-Deployment Checks'
 

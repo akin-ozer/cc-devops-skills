@@ -260,18 +260,19 @@ main() {
         echo "[0/4] Running YAML lint check..."
         echo ""
 
-        if bash "$SCRIPT_DIR/yamllint_check.sh" "$FILE_PATH"; then
+        set +e
+        bash "$SCRIPT_DIR/yamllint_check.sh" "$FILE_PATH"
+        yaml_lint_exit=$?
+        set -e
+
+        if [ $yaml_lint_exit -eq 0 ]; then
             yaml_lint_result="PASSED"
+        elif [ $yaml_lint_exit -eq 3 ]; then
+            yaml_lint_result="SKIPPED"
         else
-            yaml_lint_exit=$?
-            # yamllint returns 0 if not available (graceful skip)
-            if [ $yaml_lint_exit -eq 0 ]; then
-                yaml_lint_result="SKIPPED"
-            else
-                yaml_lint_result="WARNINGS"
-                if [ "$STRICT_MODE" = true ]; then
-                    overall_exit=1
-                fi
+            yaml_lint_result="WARNINGS"
+            if [ "$STRICT_MODE" = true ]; then
+                overall_exit=1
             fi
         fi
         echo ""

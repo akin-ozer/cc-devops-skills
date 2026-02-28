@@ -11,10 +11,10 @@
 # - Optimization analysis (custom checks)
 # - Automatic cleanup on exit (success or failure)
 #
-# Usage: ./dockerfile-validate [Dockerfile]
+# Usage: ./dockerfile-validate.sh [Dockerfile]
 ################################################################################
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -28,10 +28,14 @@ NC='\033[0m'
 
 # Configuration
 DOCKERFILE="${1:-Dockerfile}"
-VENV_BASE_DIR="${HOME}/.local/share/dockerfile-validator-temp"
-HADOLINT_VENV="${VENV_BASE_DIR}/hadolint-venv"
-CHECKOV_VENV="${VENV_BASE_DIR}/checkov-venv"
+VENV_BASE_DIR=""
+HADOLINT_VENV=""
+CHECKOV_VENV=""
 TEMP_INSTALL=false
+HADOLINT_CMD=""
+CHECKOV_CMD=""
+HADOLINT_MISSING=false
+CHECKOV_MISSING=false
 
 # Environment variable to force temporary installation (for testing cleanup)
 # Usage: FORCE_TEMP_INSTALL=true bash scripts/dockerfile-validate.sh Dockerfile
@@ -44,6 +48,7 @@ EXIT_CODE=0
 BP_ERRORS=0
 BP_WARNINGS=0
 BP_INFO=0
+RUN_COUNT=0
 
 ################################################################################
 # Cleanup Function - Called on EXIT
@@ -51,7 +56,7 @@ BP_INFO=0
 cleanup() {
     local exit_code=$?
 
-    if [ "$TEMP_INSTALL" = true ]; then
+    if [ "$TEMP_INSTALL" = true ] && [ -n "$VENV_BASE_DIR" ]; then
         echo ""
         echo -e "${YELLOW}Cleaning up temporary installation...${NC}"
 
@@ -98,32 +103,30 @@ check_tools() {
     # If FORCE_TEMP_INSTALL is set, skip tool check and force installation
     if [ "$FORCE_TEMP_INSTALL" = "true" ]; then
         echo -e "${YELLOW}FORCE_TEMP_INSTALL=true: Forcing temporary tool installation for testing${NC}"
+        HADOLINT_MISSING=true
+        CHECKOV_MISSING=true
         return 1
     fi
 
-    local hadolint_found=false
-    local checkov_found=false
+    HADOLINT_MISSING=false
+    CHECKOV_MISSING=false
 
-    # Check for hadolint (system-installed or from this script's temp venv)
+    # Check for hadolint (system-installed)
     if command -v hadolint &> /dev/null; then
         HADOLINT_CMD="hadolint"
-        hadolint_found=true
-    elif [ -f "$HADOLINT_VENV/bin/hadolint" ]; then
-        HADOLINT_CMD="$HADOLINT_VENV/bin/hadolint"
-        hadolint_found=true
+    else
+        HADOLINT_MISSING=true
     fi
 
-    # Check for Checkov (system-installed or from this script's temp venv)
+    # Check for Checkov (system-installed)
     if command -v checkov &> /dev/null; then
         CHECKOV_CMD="checkov"
-        checkov_found=true
-    elif [ -f "$CHECKOV_VENV/bin/checkov" ]; then
-        CHECKOV_CMD="$CHECKOV_VENV/bin/checkov"
-        checkov_found=true
+    else
+        CHECKOV_MISSING=true
     fi
 
-    # Return 0 if both found, 1 if need installation
-    [ "$hadolint_found" = true ] && [ "$checkov_found" = true ]
+    # Return 0 if both found, 1 if installation needed
+    [ "$HADOLINT_MISSING" = false ] && [ "$CHECKOV_MISSING" = false ]
 }
 
 install_hadolint() {
@@ -165,14 +168,27 @@ install_checkov() {
 }
 
 install_tools() {
+    if [ "$HADOLINT_MISSING" = false ] && [ "$CHECKOV_MISSING" = false ]; then
+        return 0
+    fi
+
     echo -e "${YELLOW}${BOLD}Installing validation tools...${NC}"
     echo ""
 
     TEMP_INSTALL=true
+    VENV_BASE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dockerfile-validator.XXXXXX")
+    HADOLINT_VENV="${VENV_BASE_DIR}/hadolint-venv"
+    CHECKOV_VENV="${VENV_BASE_DIR}/checkov-venv"
 
     check_python
-    install_hadolint
-    install_checkov
+
+    if [ "$HADOLINT_MISSING" = true ]; then
+        install_hadolint
+    fi
+
+    if [ "$CHECKOV_MISSING" = true ]; then
+        install_checkov
+    fi
 
     echo ""
 }
@@ -196,6 +212,37 @@ normalize_dockerfile() {
     ' "$dockerfile"
 }
 
+count_instruction() {
+    local content="$1"
+    local instruction="$2"
+
+    printf '%s\n' "$content" | awk -v instruction="$instruction" '
+        BEGIN { IGNORECASE=1 }
+        $0 ~ "^[[:space:]]*" instruction "[[:space:]]" { count++ }
+        END { print count + 0 }
+    '
+}
+
+final_from_image() {
+    local content="$1"
+
+    printf '%s\n' "$content" | awk '
+        BEGIN { IGNORECASE=1 }
+        /^[[:space:]]*FROM[[:space:]]+/ { image=$2 }
+        END { print image }
+    '
+}
+
+is_nonroot_base_image() {
+    local image="$1"
+
+    if echo "$image" | grep -qiE 'distroless[^[:space:]]*:nonroot|:nonroot$'; then
+        return 0
+    fi
+
+    return 1
+}
+
 ################################################################################
 # Validation Functions
 ################################################################################
@@ -205,7 +252,7 @@ run_hadolint() {
     echo "====================================="
     echo ""
 
-    if $HADOLINT_CMD "$DOCKERFILE" 2>&1; then
+    if "$HADOLINT_CMD" "$DOCKERFILE" 2>&1; then
         echo ""
         echo -e "${GREEN}✓ Syntax validation passed${NC}"
         return 0
@@ -223,7 +270,7 @@ run_checkov() {
     echo "================================"
     echo ""
 
-    if $CHECKOV_CMD -f "$DOCKERFILE" --framework dockerfile --compact 2>&1; then
+    if "$CHECKOV_CMD" -f "$DOCKERFILE" --framework dockerfile --compact 2>&1; then
         echo ""
         echo -e "${GREEN}✓ Security scan passed${NC}"
         return 0
@@ -247,23 +294,33 @@ run_best_practices() {
     BP_INFO=0
 
     # Create normalized version for accurate multi-line instruction counting
-    NORMALIZED_CONTENT=$(normalize_dockerfile "$DOCKERFILE")
+    local normalized_content
+    normalized_content=$(normalize_dockerfile "$DOCKERFILE")
+    local final_image
+    final_image=$(final_from_image "$normalized_content")
 
     # Check for :latest tag
-    if grep -qE "^FROM[[:space:]]+[^[:space:]]+:latest" "$DOCKERFILE"; then
+    if grep -qiE "^[[:space:]]*FROM[[:space:]]+[^[:space:]]+:latest([[:space:]]|$)" "$DOCKERFILE"; then
         echo -e "${YELLOW}[WARNING] Base image using :latest tag${NC}"
         echo "  → Use specific version tags for reproducibility"
         ((BP_WARNINGS++))
     fi
 
     # Check for USER directive
-    if ! grep -q "^USER" "$DOCKERFILE"; then
-        echo -e "${YELLOW}[WARNING] No USER directive - container will run as root${NC}"
-        echo "  → Add 'USER <non-root-user>' before CMD/ENTRYPOINT"
-        ((BP_WARNINGS++))
+    if ! grep -qiE "^[[:space:]]*USER[[:space:]]+" "$DOCKERFILE"; then
+        if is_nonroot_base_image "$final_image"; then
+            echo -e "${PURPLE}[INFO] No USER directive, but final base image is non-root: $final_image${NC}"
+            echo "  → Confirm runtime user requirements for your platform"
+            ((BP_INFO++))
+        else
+            echo -e "${YELLOW}[WARNING] No USER directive - container will run as root${NC}"
+            echo "  → Add 'USER <non-root-user>' before CMD/ENTRYPOINT"
+            ((BP_WARNINGS++))
+        fi
     else
-        LAST_USER=$(grep "^USER" "$DOCKERFILE" | tail -n1 | awk '{print $2}')
-        if [[ "$LAST_USER" == "root" ]] || [[ "$LAST_USER" == "0" ]]; then
+        LAST_USER=$(grep -iE "^[[:space:]]*USER[[:space:]]+" "$DOCKERFILE" | tail -n1 | awk '{print $2}')
+        LAST_USER_LOWER=$(echo "$LAST_USER" | tr '[:upper:]' '[:lower:]')
+        if [[ "$LAST_USER_LOWER" == "root" ]] || [[ "$LAST_USER" == "0" ]] || [[ "$LAST_USER" == "0:0" ]]; then
             echo -e "${RED}[ERROR] Last USER directive sets user to root${NC}"
             echo "  → Container should not run as root user"
             ((BP_ERRORS++))
@@ -272,8 +329,8 @@ run_best_practices() {
     fi
 
     # Check for HEALTHCHECK
-    if ! grep -q "^HEALTHCHECK" "$DOCKERFILE"; then
-        if grep -qE "^EXPOSE|CMD.*server|ENTRYPOINT.*server" "$DOCKERFILE"; then
+    if ! grep -qiE "^[[:space:]]*HEALTHCHECK[[:space:]]+" "$DOCKERFILE"; then
+        if grep -qiE "^[[:space:]]*EXPOSE[[:space:]]+|^[[:space:]]*(CMD|ENTRYPOINT)[[:space:]].*server" "$DOCKERFILE"; then
             echo -e "${PURPLE}[INFO] No HEALTHCHECK defined for service container${NC}"
             echo "  → Consider adding HEALTHCHECK for monitoring"
             ((BP_INFO++))
@@ -281,34 +338,57 @@ run_best_practices() {
     fi
 
     # Check RUN command efficiency (using normalized content for accurate counting)
-    RUN_COUNT=$(echo "$NORMALIZED_CONTENT" | grep -c "^RUN" || echo "0")
+    RUN_COUNT=$(count_instruction "$normalized_content" "RUN")
     if [ "$RUN_COUNT" -gt "5" ]; then
         echo -e "${PURPLE}[INFO] High number of RUN commands ($RUN_COUNT)${NC}"
         echo "  → Consider combining related commands to reduce layers"
         ((BP_INFO++))
     fi
 
-    # Check for apt-get cache cleanup (using normalized content)
-    if echo "$NORMALIZED_CONTENT" | grep -q "^RUN.*apt-get install"; then
-        if ! echo "$NORMALIZED_CONTENT" | grep -q "rm -rf /var/lib/apt/lists"; then
-            echo -e "${YELLOW}[WARNING] apt-get used but cache not cleaned${NC}"
-            echo "  → Add '&& rm -rf /var/lib/apt/lists/*' to same RUN"
-            ((BP_WARNINGS++))
-        fi
+    # Check for apt-get cache cleanup (must happen in same RUN instruction)
+    APT_INSTALL_WITHOUT_CLEAN=$(printf '%s\n' "$normalized_content" | awk '
+        BEGIN { IGNORECASE=1 }
+        /^[[:space:]]*RUN[[:space:]]+/ && /apt-get[[:space:]]+install/ {
+            has_clean = ($0 ~ /rm[[:space:]]+-rf[[:space:]]+\/var\/lib\/apt\/lists/ || $0 ~ /apt-get[[:space:]]+clean/)
+            if (!has_clean) { count++ }
+        }
+        END { print count + 0 }
+    ')
+
+    if [ "$APT_INSTALL_WITHOUT_CLEAN" -gt 0 ]; then
+        echo -e "${YELLOW}[WARNING] apt-get install found without same-layer cache cleanup${NC}"
+        echo "  → Add '&& rm -rf /var/lib/apt/lists/*' to the same RUN instruction"
+        ((BP_WARNINGS++))
     fi
 
     # Check for apk --no-cache (using normalized content)
-    if echo "$NORMALIZED_CONTENT" | grep -q "^RUN.*apk add"; then
-        if ! echo "$NORMALIZED_CONTENT" | grep -qE "apk add --no-cache|apk add.*--no-cache"; then
-            echo -e "${YELLOW}[WARNING] apk add without --no-cache flag${NC}"
-            echo "  → Use 'apk add --no-cache' to avoid cache in image"
-            ((BP_WARNINGS++))
-        fi
+    APK_ADD_WITHOUT_NOCACHE=$(printf '%s\n' "$normalized_content" | awk '
+        BEGIN { IGNORECASE=1 }
+        /^[[:space:]]*RUN[[:space:]]+/ && /apk[[:space:]]+add/ {
+            has_no_cache = ($0 ~ /apk[[:space:]]+add[^#]*--no-cache/)
+            has_manual_cleanup = ($0 ~ /rm[[:space:]]+-rf[[:space:]]+\/var\/cache\/apk/)
+            if (!has_no_cache && !has_manual_cleanup) { count++ }
+        }
+        END { print count + 0 }
+    ')
+
+    if [ "$APK_ADD_WITHOUT_NOCACHE" -gt 0 ]; then
+        echo -e "${YELLOW}[WARNING] apk add without --no-cache or manual cache cleanup${NC}"
+        echo "  → Use 'apk add --no-cache' to avoid cache in image"
+        ((BP_WARNINGS++))
     fi
 
-    # Check for hardcoded secrets
-    if grep -qiE "ENV.*(password|secret|api_key|token).*=" "$DOCKERFILE" || \
-       grep -qiE "ARG.*(password|secret|api_key|token).*=" "$DOCKERFILE"; then
+    # Check for hardcoded secrets (ignore comments)
+    if awk '
+        BEGIN { IGNORECASE=1 }
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*(ENV|ARG)[[:space:]]+/ {
+            if ($0 ~ /(password|secret|api[_-]?key|token)[[:space:]]*=/) {
+                found=1
+            }
+        }
+        END { exit found ? 0 : 1 }
+    ' "$DOCKERFILE"; then
         echo -e "${RED}[ERROR] Potential hardcoded secrets in ENV/ARG${NC}"
         echo "  → Never hardcode secrets in Dockerfiles"
         ((BP_ERRORS++))
@@ -317,21 +397,40 @@ run_best_practices() {
 
     # Check for poor COPY ordering (COPY . before dependency installation)
     # This hurts build cache efficiency - dependencies should be copied first
-    COPY_ALL_LINE=$(echo "$NORMALIZED_CONTENT" | grep -n "^COPY \. " | head -1 | cut -d: -f1)
-    if [ -n "$COPY_ALL_LINE" ]; then
-        # Check if there's a RUN with package install AFTER the COPY .
-        INSTALL_AFTER_COPY=false
-        while IFS= read -r line; do
-            LINE_NUM=$(echo "$line" | cut -d: -f1)
-            if [ "$LINE_NUM" -gt "$COPY_ALL_LINE" ]; then
-                if echo "$line" | grep -qiE "pip install|npm install|npm ci|yarn|go mod|apt-get install|apk add"; then
-                    INSTALL_AFTER_COPY=true
-                    break
-                fi
-            fi
-        done <<< "$(echo "$NORMALIZED_CONTENT" | grep -n "^RUN")"
+    COPY_ALL_LINE=$(printf '%s\n' "$normalized_content" | awk '
+        BEGIN { IGNORECASE=1 }
+        {
+            line = $0
+            if (line !~ /^[[:space:]]*COPY[[:space:]]+/) {
+                next
+            }
 
-        if [ "$INSTALL_AFTER_COPY" = true ]; then
+            sub(/^[[:space:]]*COPY[[:space:]]+/, "", line)
+            while (line ~ /^--[^[:space:]]+[[:space:]]+/) {
+                sub(/^--[^[:space:]]+[[:space:]]+/, "", line)
+            }
+
+            split(line, parts, /[[:space:]]+/)
+            if (parts[1] == "." || parts[1] == "./") {
+                print NR
+                exit
+            }
+        }
+    ')
+
+    if [ -n "$COPY_ALL_LINE" ]; then
+        INSTALL_AFTER_COPY=$(printf '%s\n' "$normalized_content" | awk -v copy_line="$COPY_ALL_LINE" '
+            BEGIN { IGNORECASE=1 }
+            NR > copy_line && /^[[:space:]]*RUN[[:space:]]+/ {
+                if ($0 ~ /pip[[:space:]]+install|npm[[:space:]]+install|npm[[:space:]]+ci|yarn([[:space:]]+install)?|go[[:space:]]+mod|apt-get[[:space:]]+install|apk[[:space:]]+add/) {
+                    found=1
+                    exit
+                }
+            }
+            END { print found + 0 }
+        ')
+
+        if [ "$INSTALL_AFTER_COPY" -gt 0 ]; then
             echo -e "${YELLOW}[WARNING] COPY . appears before dependency installation${NC}"
             echo "  → Copy dependency files (package.json, requirements.txt) first for better cache"
             echo "  → Then install dependencies, then COPY . for source code"
@@ -364,13 +463,21 @@ run_optimization() {
     echo ""
 
     # Create normalized version for accurate multi-line instruction counting
-    NORMALIZED_CONTENT=$(normalize_dockerfile "$DOCKERFILE")
+    local normalized_content
+    normalized_content=$(normalize_dockerfile "$DOCKERFILE")
 
     # Analyze base images
-    BASE_IMAGES=$(grep "^FROM" "$DOCKERFILE" | awk '{print $2}' | sed 's/[[:space:]]*AS.*//')
+    BASE_IMAGES=$(printf '%s\n' "$normalized_content" | awk '
+        BEGIN { IGNORECASE=1 }
+        /^[[:space:]]*FROM[[:space:]]+/ { print $2 }
+    ')
 
     echo -e "${BLUE}Base Image Analysis:${NC}"
     for image in $BASE_IMAGES; do
+        if echo "$image" | grep -qi "distroless"; then
+            continue
+        fi
+
         if echo "$image" | grep -qiE "ubuntu|debian|centos|fedora"; then
             echo -e "  ${PURPLE}[OPTIMIZATION] Consider Alpine alternative for: $image${NC}"
             echo "    → Alpine images are 10-100x smaller"
@@ -379,17 +486,17 @@ run_optimization() {
     echo ""
 
     # Multi-stage analysis (using normalized content)
-    FROM_COUNT=$(echo "$NORMALIZED_CONTENT" | grep -c "^FROM" || echo "0")
+    FROM_COUNT=$(count_instruction "$normalized_content" "FROM")
 
     echo -e "${BLUE}Build Structure:${NC}"
     if [ "$FROM_COUNT" -eq "1" ]; then
-        if echo "$NORMALIZED_CONTENT" | grep -qE "apt-get install.*(gcc|make|build)" || \
-           echo "$NORMALIZED_CONTENT" | grep -qE "apk add.*(gcc|make|build)"; then
+        if echo "$normalized_content" | grep -qiE "apt-get install.*(gcc|make|build)" || \
+           echo "$normalized_content" | grep -qiE "apk add.*(gcc|make|build)"; then
             echo -e "  ${PURPLE}[OPTIMIZATION] Build tools detected in single-stage build${NC}"
             echo "    → Consider multi-stage build to exclude build tools from final image"
         fi
     else
-        FINAL_FROM=$(echo "$NORMALIZED_CONTENT" | grep "^FROM" | tail -n1 | awk '{print $2}')
+        FINAL_FROM=$(final_from_image "$normalized_content")
         if echo "$FINAL_FROM" | grep -qiE "distroless|alpine|scratch"; then
             echo -e "  ${GREEN}✓ Using minimal base for final stage: $FINAL_FROM${NC}"
         else
@@ -400,9 +507,7 @@ run_optimization() {
     echo ""
 
     # Layer count (reuse RUN_COUNT from best practices if available, otherwise calculate)
-    if [ -z "$RUN_COUNT" ]; then
-        RUN_COUNT=$(echo "$NORMALIZED_CONTENT" | grep -c "^RUN" || echo "0")
-    fi
+    RUN_COUNT=$(count_instruction "$normalized_content" "RUN")
 
     echo -e "${BLUE}Layer Optimization:${NC}"
     echo "  RUN commands: $RUN_COUNT"
@@ -461,7 +566,8 @@ EOF
 }
 
 # Check for help
-if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+ARG1="${1:-}"
+if [[ "$ARG1" == "-h" ]] || [[ "$ARG1" == "--help" ]]; then
     show_help
     exit 0
 fi

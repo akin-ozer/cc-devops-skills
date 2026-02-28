@@ -186,7 +186,7 @@ stages:
               containerRegistry: $(dockerRegistryServiceConnection)
               tags: |
                 $(tag)
-                latest
+                $(Build.SourceVersion)
 
   # ============================================================================
   # Stage 3: Deploy to Staging

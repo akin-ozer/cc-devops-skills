@@ -4,6 +4,8 @@
 
 This reference provides common patterns and code examples for generating Terragrunt configurations. Use these patterns as building blocks when creating new Terragrunt resources.
 
+> **Include syntax standard:** Use `find_in_parent_folders("root.hcl")` for new projects. Only use `find_in_parent_folders()` when the repository intentionally keeps a legacy root file named `terragrunt.hcl`.
+
 ## Root Configuration Patterns
 
 ### Pattern 1: Basic Root with S3 Backend
@@ -11,7 +13,7 @@ This reference provides common patterns and code examples for generating Terragr
 **Use when:** Starting a new Terragrunt project with AWS S3 backend
 
 ```hcl
-# Root terragrunt.hcl
+# root.hcl (modern root file name)
 remote_state {
   backend = "s3"
   config = {
@@ -50,7 +52,7 @@ inputs = {
 **Use when:** Managing multiple AWS accounts with role assumption
 
 ```hcl
-# Root terragrunt.hcl
+# root.hcl (modern root file name)
 locals {
   account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))
   region_vars  = read_terragrunt_config(find_in_parent_folders("region.hcl"))
@@ -111,7 +113,7 @@ inputs = {
 **Use when:** Managing resources across multiple cloud providers
 
 ```hcl
-# Root terragrunt.hcl
+# root.hcl (modern root file name)
 generate "providers" {
   path      = "providers.tf"
   if_exists = "overwrite_terragrunt"
@@ -161,7 +163,7 @@ EOF
 ```hcl
 # modules/vpc/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {
@@ -192,7 +194,7 @@ inputs = {
 ```hcl
 # modules/rds/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {
@@ -239,7 +241,7 @@ inputs = {
 ```hcl
 # modules/eks/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {
@@ -299,7 +301,7 @@ inputs = {
 ```hcl
 # modules/app/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 locals {
@@ -348,7 +350,7 @@ inputs = {
 
 ```
 infrastructure/
-├── terragrunt.hcl           # Root config
+├── root.hcl                 # Root config (modern)
 ├── _env/
 │   ├── prod.hcl            # Production variables
 │   ├── staging.hcl         # Staging variables
@@ -380,7 +382,7 @@ locals {
 **prod/vpc/terragrunt.hcl:**
 ```hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 locals {
@@ -408,7 +410,7 @@ inputs = {
 ```hcl
 # modules/cross-account-resource/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 locals {
@@ -442,7 +444,7 @@ terraform {
 ```hcl
 # modules/application-stack/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {
@@ -504,7 +506,7 @@ inputs = {
 ```hcl
 # modules/database/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {
@@ -535,7 +537,7 @@ terraform {
 ```hcl
 # modules/app/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 locals {
@@ -572,7 +574,7 @@ inputs = {
 ```hcl
 # modules/k8s-app/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 dependency "eks" {
@@ -638,7 +640,7 @@ terraform {
 ```hcl
 # modules/legacy-resource/terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 generate "provider_version_override" {
@@ -677,11 +679,16 @@ locals {
   environment = "prod"
   aws_region  = "us-east-1"
   units_path  = find_in_parent_folders("catalog/units")
+
+  # Keep this mode consistent across dependent units.
+  # Do not mix .terragrunt-stack generation with direct path generation.
+  use_direct_paths = true
 }
 
 unit "vpc" {
   source = "${local.units_path}/vpc"
   path   = "vpc"
+  no_dot_terragrunt_stack = local.use_direct_paths
   values = {
     vpc_name    = "${local.environment}-vpc"
     cidr        = "10.0.0.0/16"
@@ -692,6 +699,7 @@ unit "vpc" {
 unit "database" {
   source = "${local.units_path}/database"
   path   = "database"
+  no_dot_terragrunt_stack = local.use_direct_paths
   values = {
     db_name     = "${local.environment}-db"
     engine      = "postgres"

@@ -7,6 +7,7 @@
 FROM golang:1.21-alpine AS builder
 
 # Install build dependencies
+# hadolint ignore=DL3018
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /src
@@ -26,6 +27,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     ./cmd/server
 
 # Runtime stage - distroless (minimal, secure)
+# checkov:skip=CKV_DOCKER_2:Distroless runtime uses external liveness/readiness probes instead of in-container HEALTHCHECK.
+# checkov:skip=CKV_DOCKER_3:distroless:nonroot image already runs as a non-root user.
 FROM gcr.io/distroless/static-debian11:nonroot
 
 # Copy CA certificates for HTTPS

@@ -7,205 +7,201 @@ description: Comprehensive toolkit for generating best practice LogQL (Loki Quer
 
 ## Overview
 
-Interactive workflow for generating production-ready LogQL queries. LogQL is Grafana Loki's query language—distributed grep with labels for filtering, plus aggregation and metrics capabilities.
+Interactive workflow for generating production-ready LogQL queries. LogQL is Grafana Loki's query language with indexed label selection, line filtering, parsing, and metric aggregation.
 
-## When to Use This Skill
+## Trigger Hints
 
-- Creating LogQL queries for log analysis, dashboards, or alerting
-- Converting log analysis requirements into LogQL expressions
-- Troubleshooting applications through log analysis
-- Working with structured logs (JSON, logfmt)
+- "Write a LogQL query for error rate by service."
+- "Help me build a Loki alert query."
+- "Convert this troubleshooting requirement into LogQL."
+- "I need step-by-step LogQL query construction."
 
-## Interactive Query Planning Workflow
+Use this skill for query generation, dashboard queries, alerting expressions, and troubleshooting with Loki logs.
 
-**CRITICAL**: Always engage the user in collaborative planning before generating queries.
+## Execution Flow (Deterministic)
 
-### Stage 1: Understand the Goal
+Always run stages in order. Do not skip required stages.
 
-Gather requirements using **AskUserQuestion**:
+### Stage 1 (Required): Capture Intent
 
-1. **Primary Goal**: Error analysis, performance tracking, security monitoring, debugging, pattern detection?
-2. **Use Case**: Dashboard, alerting rule, ad-hoc troubleshooting, metrics generation?
-3. **Context**: Application/service, environment, time range, log format?
+Use `AskUserQuestion` to collect goal and use case.
 
-### Stage 2: Identify Log Sources
+Template:
+- "What is your primary goal: debugging, alerting, dashboard metric, or investigation?"
+- "Do you need a log query (raw lines) or a metric query (numeric output)?"
+- "What time window should this cover (example: last 15m, 1h, 24h)?"
 
-1. **Labels**: What labels identify your logs? (`job`, `namespace`, `app`, `level`, `service_name`)
-2. **Log Format**: JSON, logfmt, plain text, or custom?
-3. **Strategy**: Use labels for stream selection (indexed), line filters for content (not indexed)
+Fallback if `AskUserQuestion` is unavailable:
+- Ask the same questions in plain text and continue.
 
-### Stage 3: Determine Query Parameters
+### Stage 2 (Required): Capture Log Source Details
 
-1. **Query Type**: Log query (return lines) or metric query (calculate values)?
-2. **Filtering**: Stream selector `{job="app"}`, line filters `|= "error"`, label filters `| status >= 500`
-3. **Parsing**: `| json`, `| logfmt`, `| pattern "<ip> - <user>"`, `| regexp "(?P<field>...)"`
-4. **Aggregation**: `count_over_time()`, `rate()`, `sum by (label)`, `quantile_over_time()`
-5. **Time Range**: `[5m]`, `[1h]`, `[24h]`
+Collect:
+1. Labels for stream selectors (`job`, `namespace`, `app`, `service_name`, `cluster`)
+2. Log format (JSON, logfmt, plain text, mixed)
+3. Known fields to filter/aggregate (`status`, `level`, `duration`, `path`, `trace_id`)
 
-### Stage 4: Present Plan & Confirm
+Ambiguity and partial-answer handling:
+1. If a required field is missing, ask one focused follow-up question.
+2. If still missing, proceed with explicit assumptions.
+3. Prefix assumptions with `Assumptions:` in the output so the user can correct them quickly.
 
-**Before generating code**, present a plain-English plan:
+### Stage 3 (Required): Discover Loki and Grafana Versions
 
-```
-## LogQL Query Plan
+Collect or infer:
+- Loki version (example: `2.9.x`, `3.0+`, unknown)
+- Grafana version (example: `10.x`, `11.x`, unknown)
+- Deployment context (self-hosted Loki, Grafana Cloud, unknown)
 
-**Goal**: [Description]
-**Query Structure**:
-1. Select streams: `{label="value"}`
-2. Filter lines: [operations]
-3. Parse logs: [parser]
-4. Aggregate: [function]
+Version compatibility policy:
+1. If versions are known, use the newest compatible syntax only.
+2. If versions are unknown, use compatibility-first syntax and avoid 3.x-only features by default.
+3. For unknown versions, provide an optional "3.x optimized variant" separately.
 
-**Does this match your intentions?**
-```
+Avoid by default when version is unknown:
+- Pattern match operators `|>` and `!>`
+- `approx_topk`
+- Structured metadata specific behavior (`detected_level`, accelerated metadata filtering assumptions)
 
-Use **AskUserQuestion** to confirm before proceeding.
+### Stage 4 (Required): Plan Confirmation and Output Mode
 
-### Stage 4a: Consult Reference Files (REQUIRED for Complex Queries)
+Present a plain-English plan, then ask the user to choose output mode.
 
-**MANDATORY**: Use the **Read tool** to explicitly read reference files during skill execution. Do NOT rely on prior knowledge or cached information.
-
-**BEFORE generating queries**, when the query involves ANY of the following, you MUST use the Read tool:
-
-| Query Complexity | Action Required |
-|------------------|-----------------|
-| **Complex aggregations** (nested topk, multiple sum by, percentiles) | `Read examples/common_queries.logql` for verified patterns |
-| **Performance-critical queries** (large time ranges, high-volume streams) | `Read references/best_practices.md` sections #1-5, #15-18 |
-| **Alerting rules** | `Read references/best_practices.md` sections #19-21, #39 |
-| **Structured metadata / Loki 3.x features** | `Read references/best_practices.md` sections #35-37 |
-| **Template functions** (line_format, label_format) | `Read examples/common_queries.logql` Template Functions section |
-| **IP filtering, pattern extraction, regex** | `Read examples/common_queries.logql` for exact syntax |
-
-**How to consult (MUST use Read tool)**:
-```
-# Use the Read tool with these paths during skill execution:
-Read(".claude/skills/logql-generator/examples/common_queries.logql")   # For query patterns
-Read(".claude/skills/logql-generator/references/best_practices.md")    # For optimization and anti-patterns
+Plan template:
+```text
+LogQL Query Plan
+Goal: <goal>
+Query type: <log or metric>
+Streams: <selector>
+Filters/parsing: <filters + parser>
+Aggregation window: <function and [range]>
+Compatibility mode: <version-aware or compatibility-first>
 ```
 
-**Example workflow**:
-1. User requests alerting rule with topk aggregation
-2. **MUST** call: `Read examples/common_queries.logql` to get topk patterns
-3. **MUST** call: `Read references/best_practices.md` to get alerting best practices (#19-21, #39)
-4. Then generate query using patterns from the files you just read
+Mode selection template:
+- "Do you want `final query only` (default) or `incremental build` (step-by-step)?"
 
-**Why this matters**: Reference files contain battle-tested patterns and edge cases not covered in the skill overview. Explicit consultation during each skill execution ensures you use the latest patterns and prevents syntax errors.
+If user does not choose, default to `final query only`.
 
-### Stage 5: Generate Query
+### Stage 5 (Conditional, Blocking): Reference Checkpoint for Complex Queries
 
-#### Best Practices
+Complex query triggers:
+- Nested aggregations (`topk(sum by(...))`, multiple `sum by`, percentiles)
+- Performance-sensitive queries (high volume streams, long ranges)
+- Alerting expressions
+- Template functions (`line_format`, `label_format`)
+- Regex-heavy extraction, IP matching, pattern parsing
+- Loki 3.x feature usage
 
-1. **Specific Stream Selectors**: `{namespace="prod", app="api", level="error"}` not just `{namespace="prod"}`
-2. **Filter Order**: Line filter → parse → label filter (fastest to slowest)
-3. **Parser Performance**: pattern > logfmt > json > regexp
+Blocking checkpoint rule:
+1. Read relevant files before generation using explicit file-open/read actions.
+2. Minimum file set:
+   - `examples/common_queries.logql` for syntax and query patterns
+   - `references/best_practices.md` for performance and alerting guidance
+3. Do not generate the final query until this checkpoint is complete.
 
-#### Core Query Patterns
+Fallback when file-read tools are unavailable:
+1. State that reference files could not be read in this environment.
+2. Generate a conservative query (compatibility-first, simpler operators).
+3. Mark result as `Unverified against local references`.
 
-**Log Filtering**:
+### Stage 6 (Conditional): External Docs Lookup Policy (Context7 Before WebSearch)
+
+Use external lookup only for version-specific behavior, unclear syntax, or advanced features not covered in local references.
+
+Decision order:
+1. Context7 first:
+   - `mcp__context7__resolve-library-id` with `libraryName="grafana loki"`
+   - `mcp__context7__query-docs` for the exact topic
+2. WebSearch second (fallback only) when:
+   - Context7 is unavailable
+   - Context7 does not provide required version-specific detail
+   - You need latest release/deprecation confirmation
+
+WebSearch fallback constraints:
+- Prefer official Grafana/Loki docs and release notes.
+- Note which statement came from fallback search.
+
+### Stage 7 (Required): Generate Query
+
+#### Stage 7A (Default): Final Query Only
+
+Return one production-ready query plus short explanation.
+
+#### Stage 7B (Optional): Incremental Build Mode
+
+Use this when requested or when debugging complex pipelines.
+
+Step-by-step template:
+1. Stream selector
+2. Line filter
+3. Parser
+4. Parsed-field filter
+5. Aggregation/window
+
+### Stage 8 (Required): Deliver Usage and Checks
+
+Always include:
+1. Final query or incremental sequence
+2. How to run it (Grafana Explore/panel or `logcli`)
+3. Tunables (labels, thresholds, range)
+4. Any assumptions and compatibility notes
+
+## AskUserQuestion Templates
+
+### Intake Template
+- "What system/service should this query target?"
+- "Which labels are reliable for stream selection?"
+- "What defines a match (error text, status code, latency threshold, user path)?"
+- "Should output be raw logs or a metric for alert/dashboard?"
+
+### Version Template
+- "What Loki version are you running?"
+- "What Grafana version are you using?"
+- "If unknown, should I generate a compatibility-first query and add an optional 3.x variant?"
+
+### Ambiguity Follow-up Template
+- "I am missing `<field>`. Should I assume `<default>` so I can continue?"
+
+## Core Patterns
+
+### Stream Selection and Filtering
 ```logql
-{job="app"} |= "error" |= "timeout"        # Contains both
-{job="app"} |~ "error|fatal|critical"       # Regex match
-{job="app"} != "debug"                      # Exclude
+{job="app"} |= "error" |= "timeout"
+{job="app"} |~ "error|fatal|critical"
+{job="app"} != "debug"
 ```
 
-**JSON/logfmt Parsing**:
+### Parsing
 ```logql
 {app="api"} | json | level="error" | status_code >= 500
-{app="app"} | logfmt | caller="database.go"
-```
-
-**Pattern Extraction**:
-```logql
+{app="api"} | logfmt | caller="database.go"
 {job="nginx"} | pattern "<ip> - - [<_>] \"<method> <path>\" <status> <size>"
 ```
 
-**Metrics**:
+### Metric Aggregation
 ```logql
-# Rate
 rate({job="app"} | json | level="error" [5m])
-
-# Count by label
 sum by (app) (count_over_time({namespace="prod"} | json [5m]))
-
-# Error percentage
 sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"}[5m])) * 100
-
-# Latency percentiles
 quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m])
-
-# Top N
 topk(10, sum by (error_type) (count_over_time({job="app"} | json | level="error" [1h])))
 ```
 
-**Formatting**:
+### Formatting and IP Matching
 ```logql
 {job="app"} | json | line_format "{{.level}}: {{.message}}"
 {job="app"} | json | label_format env="{{.environment}}"
-```
-
-**IP Filtering** (prefer label filter after parsing for precision):
-```logql
 {job="nginx"} | logfmt | remote_addr = ip("192.168.4.0/24")
 ```
 
-### Stage 5a: Incremental Query Building (Educational/Debugging)
+## Query Construction Rules
 
-**When to use this stage:**
-- User is learning LogQL
-- Complex multi-stage queries
-- Debugging query issues
-- User explicitly requests step-by-step explanation
-
-**Present the query construction incrementally:**
-
-```
-## Building Your Query Step-by-Step
-
-### Step 1: Stream Selector (verify logs exist)
-```logql
-{app="api"}
-```
-*Test this first to confirm logs are flowing*
-
-### Step 2: Add Line Filter (fast pre-filtering)
-```logql
-{app="api"} |= "error"
-```
-*Reduces data before parsing*
-
-### Step 3: Add Parser (extract fields)
-```logql
-{app="api"} |= "error" | json
-```
-*Now you can filter on extracted labels*
-
-### Step 4: Add Label Filter (precise filtering)
-```logql
-{app="api"} |= "error" | json | level="error"
-```
-*Final filter on parsed data*
-
-### Step 5: Add Aggregation (if metric query)
-```logql
-sum(count_over_time({app="api"} |= "error" | json | level="error" [5m]))
-```
-*Complete metric query*
-```
-
-**Benefits of incremental building:**
-1. Identify which step breaks (no results, parse errors)
-2. Understand performance impact of each operation
-3. Debug unexpected results by testing each stage
-4. Learn LogQL query structure naturally
-
-**Use AskUserQuestion** to offer incremental mode:
-- Option: "Show step-by-step construction" vs "Show final query only"
-
-### Stage 6: Provide Usage
-
-1. **Final Query** with explanation
-2. **How to Use**: Grafana panel, Loki alerting rules, `logcli query`, HTTP API
-3. **Customization**: Labels to modify, thresholds to tune
+1. Use specific stream selectors (indexed labels first).
+2. Prefer filter order: line filter -> parse -> parsed-field filter.
+3. Prefer parser cost order: `pattern` > `logfmt` > `json` > `regexp`.
+4. For unknown Loki version, stay on compatibility-first syntax.
+5. For complex/critical queries, complete Stage 5 checkpoint before final output.
 
 ## Advanced Techniques
 
@@ -356,55 +352,55 @@ sum(rate({app="api"} | json | level="error" [5m])) or vector(0) > 10
 
 ## Documentation Lookup
 
-### When to Fetch External Documentation (MANDATORY)
-
-**Trigger context7 MCP or WebSearch when the query involves ANY of these:**
+Use Stage 6 policy. Trigger external docs for:
 
 | Trigger | Topic to Search | Tool to Use |
 |---------|-----------------|-------------|
-| User mentions "Loki 3.x" features | `structured metadata`, `bloom filters`, `detected_level` | context7 MCP |
-| `approx_topk` function needed | `approx_topk probabilistic` | context7 MCP |
-| Pattern match operators (`\|>`, `!>`) | `pattern match operator` | context7 MCP |
-| `vector()` function for alerting | `vector function alerting` | context7 MCP |
-| Recording rules configuration | `recording rules loki` | context7 MCP |
-| Unclear syntax or edge cases | Specific function or operator | context7 MCP |
-| Version-specific behavior questions | Version + feature | WebSearch |
-| Grafana Alloy integration | `grafana alloy loki` | WebSearch |
-
-### How to Use
-
-**context7 MCP** (preferred - authoritative docs):
-```
-1. mcp__context7__resolve-library-id with libraryName="grafana loki"
-2. mcp__context7__get-library-docs with context7CompatibleLibraryID and topic="[specific topic]"
-```
-
-**WebSearch** (fallback for latest features):
-```
-WebSearch query: "Grafana Loki LogQL [topic] documentation [year]"
-```
-
-### Example Workflow
-
-When user asks for "error tracking with trace correlation in Loki 3.x":
-1. Recognize trigger: "Loki 3.x" + "trace" → structured metadata
-2. Fetch docs: `mcp__context7__get-library-docs` with topic="structured metadata trace_id"
-3. Apply patterns from docs to generate accurate query
+| User mentions Loki 3.x features | `structured metadata`, `bloom filters`, `detected_level` | Context7 first |
+| `approx_topk` function needed | `approx_topk probabilistic` | Context7 first |
+| Pattern match operators (`\|>`, `!>`) | `pattern match operator` | Context7 first |
+| `vector()` function for alerting | `vector function alerting` | Context7 first |
+| Recording rules configuration | `recording rules loki` | Context7 first |
+| Unclear syntax or edge cases | Specific function/operator | Context7 first |
+| Version-specific behavior questions | Version + feature | WebSearch fallback |
+| Grafana Alloy integration | `grafana alloy loki` | WebSearch fallback |
 
 ## Resources
 
-- **examples/common_queries.logql**: Comprehensive query examples
-- **references/best_practices.md**: 39+ LogQL best practices, performance optimization, anti-patterns
+- `examples/common_queries.logql`: Query patterns, template function examples
+- `references/best_practices.md`: Optimization, anti-patterns, alerting guidance
 
-## Guidelines
+## Example Flows
 
-1. **Always plan interactively** - Present plain-English plan before generating
-2. **Use AskUserQuestion** - Gather requirements and confirm plans
-3. **MUST use Read tool for complex queries** - Explicitly call `Read` on `examples/common_queries.logql` and `references/best_practices.md` during skill execution for alerting rules, topk, percentiles, or performance-critical queries. Do NOT skip this step or rely on prior knowledge.
-4. **Fetch docs for advanced features** - Use context7 MCP when Loki 3.x features, approx_topk, or unclear syntax is involved (see Documentation Lookup triggers)
-5. **Offer incremental building** - For learning or debugging, present step-by-step query construction (see Stage 5a)
-6. **Explain queries** - What it does, how to interpret results
-7. **Prioritize performance** - Specific selectors, filter early, simpler parsers
+### Example A: Final Query Only (Default)
+1. User asks for 5xx rate by service over 15m.
+2. Capture labels and format (`json`).
+3. Confirm version and mode (`final query only`).
+4. Generate one query:
+```logql
+sum by (service) (rate({namespace="prod", app="api"} | json | status_code >= 500 [15m]))
+```
+
+### Example B: Incremental Build (Optional)
+1. User asks to debug login failures and requests step-by-step mode.
+2. Provide staged build:
+```logql
+{app="auth"}
+{app="auth"} |= "login failed"
+{app="auth"} |= "login failed" | json
+sum(count_over_time({app="auth"} |= "login failed" | json [5m]))
+```
+3. Explain where to stop if any step returns zero results.
+
+## Done Criteria
+
+Mark task done only when all checks pass:
+1. Required stages (1, 2, 3, 4, 7, 8) were completed.
+2. Stage 5 checkpoint was completed for any complex query.
+3. Stage 6 lookup order followed Context7 before WebSearch when external docs were needed.
+4. Output mode was explicitly selected or defaulted (`final query only`).
+5. Loki/Grafana compatibility assumptions were stated when versions were unknown.
+6. Final output includes query text, usage note, tunables, and assumptions.
 
 ## Version Notes
 

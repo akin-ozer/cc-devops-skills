@@ -79,6 +79,8 @@ EOF
 
 # Parse command line options
 parse_args() {
+    local -a positional=()
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--force)
@@ -95,18 +97,27 @@ parse_args() {
                 exit 1
                 ;;
             *)
-                # First positional argument is PROJECT_TYPE
-                if [[ -z "${PROJECT_TYPE}" ]]; then
-                    PROJECT_TYPE="$1"
-                elif [[ "${PROJECT_NAME}" == "myproject" ]]; then
-                    PROJECT_NAME="$1"
-                else
-                    OUTPUT_FILE="$1"
-                fi
+                positional+=("$1")
                 shift
                 ;;
         esac
     done
+
+    if [[ ${#positional[@]} -gt 3 ]]; then
+        print_error "Too many positional arguments. Expected: [PROJECT_TYPE] [PROJECT_NAME] [OUTPUT_FILE]"
+        usage
+        exit 1
+    fi
+
+    if [[ ${#positional[@]} -ge 1 ]]; then
+        PROJECT_TYPE="${positional[0]}"
+    fi
+    if [[ ${#positional[@]} -ge 2 ]]; then
+        PROJECT_NAME="${positional[1]}"
+    fi
+    if [[ ${#positional[@]} -ge 3 ]]; then
+        OUTPUT_FILE="${positional[2]}"
+    fi
 }
 
 # Generate C project Makefile
@@ -249,16 +260,18 @@ generate_go_makefile() {
     local project="$1"
     sed "s/PROJECT_NAME/${project}/g" << 'EOF'
 # Makefile for Go project
-.PHONY: all build install test clean help
+.PHONY: all build install test clean fmt lint help
 
 PROJECT := PROJECT_NAME
 GO ?= go
 PREFIX ?= /usr/local
+GO_MAIN ?= ./cmd/$(PROJECT)
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 SOURCES := $(shell find . -name '*.go' -not -path './vendor/*')
+GO_SUM := $(wildcard go.sum)
 TARGET := $(PROJECT)
 
 ## Build the application (default)
@@ -267,8 +280,8 @@ all: build
 ## Build binary
 build: $(TARGET)
 
-$(TARGET): $(SOURCES) go.mod go.sum
-	$(GO) build $(LDFLAGS) -o $@ ./cmd/$(PROJECT)
+$(TARGET): $(SOURCES) go.mod $(GO_SUM)
+	$(GO) build $(LDFLAGS) -o $@ $(GO_MAIN)
 
 ## Install to PREFIX
 install: $(TARGET)
@@ -306,7 +319,7 @@ generate_python_makefile() {
     local project="$1"
     sed "s/PROJECT_NAME/${project}/g" << 'EOF'
 # Makefile for Python project
-.PHONY: all build install test clean help
+.PHONY: all build install develop test format lint clean help
 
 PROJECT := PROJECT_NAME
 PYTHON ?= python3
@@ -396,7 +409,7 @@ endif
 # Output JAR
 TARGET := $(DISTDIR)/$(PROJECT)-$(VERSION).jar
 
-.PHONY: all build compile jar run test clean distclean docs help
+.PHONY: all build compile jar run run-jar test clean distclean docs help
 
 ## Build the project (default)
 all: build

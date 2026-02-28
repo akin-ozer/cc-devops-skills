@@ -5,16 +5,17 @@
 #
 # Options:
 #   --force             Overwrite existing chart without prompting
-#   --image <repo>      Set image repository WITHOUT tag (default: nginx)
+#   --image <repo>      Set image repository (default: nginx; supports tag or digest refs)
 #   --tag <tag>         Set image tag (default: uses chart appVersion)
 #   --port <number>     Set service port (default: 80)
+#   --target-port <number> Set container target port (default: 8080)
 #   --type <type>       Set workload type: deployment, statefulset, daemonset (default: deployment)
 #   --with-templates    Generate basic resource templates (deployment.yaml, service.yaml, etc.)
 #   --with-ingress      Include ingress template (implies --with-templates)
 #   --with-hpa          Include HPA template (implies --with-templates)
 #
-# Note: If --image contains a colon (e.g., redis:7-alpine), it will be automatically
-#       split into repository and tag
+# Note: If --image includes a tag (e.g., redis:7-alpine), it will be auto-split into
+# repository and tag unless --tag is provided explicitly.
 
 set -e
 
@@ -28,11 +29,14 @@ NC='\033[0m' # No Color
 FORCE=false
 IMAGE_REPO="nginx"
 IMAGE_TAG=""
+IMAGE_DIGEST=""
 SERVICE_PORT=80
+TARGET_PORT=8080
 WORKLOAD_TYPE="deployment"
 WITH_TEMPLATES=false
 WITH_INGRESS=false
 WITH_HPA=false
+TAG_EXPLICIT=false
 
 # Function to print error and exit
 error_exit() {
@@ -43,6 +47,16 @@ error_exit() {
 # Function to print warning
 warn() {
     echo -e "${YELLOW}WARNING: $1${NC}" >&2
+}
+
+# Function to ensure options that require values are passed correctly
+require_option_arg() {
+    local option_name="$1"
+    local option_value="${2:-}"
+
+    if [ -z "$option_value" ] || [[ "$option_value" == -* ]]; then
+        error_exit "Option ${option_name} requires a value"
+    fi
 }
 
 # Function to validate chart name (DNS-1123 subdomain)
@@ -84,6 +98,25 @@ validate_port() {
     fi
 }
 
+# Function to validate image tag format
+validate_image_tag() {
+    local tag="$1"
+    if [[ "$tag" =~ [[:space:]] ]]; then
+        error_exit "Image tag '${tag}' is invalid. Tags cannot contain spaces"
+    fi
+    if [[ "$tag" == *"@"* ]]; then
+        error_exit "Image tag '${tag}' is invalid. Use --image <repo>@<digest> for digest references"
+    fi
+}
+
+# Function to validate image digest format
+validate_image_digest() {
+    local digest="$1"
+    if [[ "$digest" =~ [[:space:]] ]] || [[ "$digest" != *:* ]]; then
+        error_exit "Invalid image digest '${digest}'. Use format <algorithm>:<hash> (e.g., sha256:...)"
+    fi
+}
+
 # Function to validate workload type
 validate_workload_type() {
     local type="$1"
@@ -95,6 +128,62 @@ validate_workload_type() {
             error_exit "Invalid workload type '${type}'. Must be: deployment, statefulset, or daemonset"
             ;;
     esac
+}
+
+# Function to parse image references while supporting registry ports and digest references
+parse_image_reference() {
+    local image_ref="$1"
+    local last_segment
+
+    if [ -z "$image_ref" ]; then
+        error_exit "Image repository cannot be empty"
+    fi
+
+    if [[ "$image_ref" =~ [[:space:]] ]]; then
+        error_exit "Image repository '${image_ref}' is invalid. It cannot contain spaces"
+    fi
+
+    # Digest references have priority over tag parsing.
+    if [[ "$image_ref" == *@* ]]; then
+        IMAGE_REPO="${image_ref%@*}"
+        IMAGE_DIGEST="${image_ref##*@}"
+
+        if [ -z "$IMAGE_REPO" ] || [ -z "$IMAGE_DIGEST" ]; then
+            error_exit "Invalid digest image reference '${image_ref}'. Use format <repository>@<algorithm>:<hash>"
+        fi
+
+        if [ "$TAG_EXPLICIT" = true ] || [ -n "$IMAGE_TAG" ]; then
+            error_exit "Do not combine --tag with digest image references. Remove --tag or provide an image without '@'"
+        fi
+
+        validate_image_digest "$IMAGE_DIGEST"
+        return 0
+    fi
+
+    last_segment="${image_ref##*/}"
+
+    # If --tag is explicitly set, image must not include a tag already.
+    if [ "$TAG_EXPLICIT" = true ] && [[ "$last_segment" == *":"* ]]; then
+        error_exit "--image appears to include a tag. Remove the tag from --image when using --tag"
+    fi
+
+    # Auto-split "<repo>:<tag>" only when ":" appears in the last path segment.
+    # This preserves registry ports such as "registry.example.com:5000/myapp".
+    if [ "$TAG_EXPLICIT" = false ] && [[ "$last_segment" == *":"* ]]; then
+        IMAGE_TAG="${last_segment##*:}"
+        IMAGE_REPO="${image_ref%:*}"
+
+        if [ -z "$IMAGE_REPO" ] || [ -z "$IMAGE_TAG" ]; then
+            error_exit "Invalid tagged image reference '${image_ref}'"
+        fi
+
+        validate_image_tag "$IMAGE_TAG"
+        echo "  Note: Auto-split image into repository '${IMAGE_REPO}' and tag '${IMAGE_TAG}'"
+        return 0
+    fi
+
+    IMAGE_REPO="$image_ref"
+    return 0
 }
 
 # Function to show usage
@@ -109,9 +198,13 @@ Arguments:
 Options:
   --force           Overwrite existing chart without prompting
   --image <repo>    Set image repository (default: nginx)
-                    Note: If image contains ':' (e.g., redis:7-alpine), it will be
-                    automatically split into repository and tag
+                    Supports registry ports, tags, and digest refs:
+                    - registry:5000/app
+                    - registry:5000/app:1.2.3
+                    - registry:5000/app@sha256:...
   --tag <tag>       Set image tag (default: uses chart appVersion)
+  --target-port <number>
+                    Set container target port (default: 8080)
   --port <number>   Set service port (default: 80)
   --type <type>     Set workload type: deployment, statefulset, daemonset (default: deployment)
   --with-templates  Generate basic resource templates (deployment.yaml, service.yaml, etc.)
@@ -121,8 +214,10 @@ Options:
 
 Examples:
   $0 myapp ./charts
-  $0 my-service ./charts --image myregistry/myapp --port 8080
+  $0 my-service ./charts --image myregistry/myapp --port 8080 --target-port 8080
   $0 my-service ./charts --image redis --tag 7-alpine
+  $0 my-service ./charts --image localhost:5000/team/api:1.2.0
+  $0 my-service ./charts --image ghcr.io/acme/api@sha256:abc123... --with-templates
   $0 my-db ./charts --type statefulset --force
   $0 myapp ./charts --with-templates --with-ingress
 
@@ -148,18 +243,28 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --image)
+            require_option_arg "$1" "${2:-}"
             IMAGE_REPO="$2"
             shift 2
             ;;
         --tag)
+            require_option_arg "$1" "${2:-}"
             IMAGE_TAG="$2"
+            TAG_EXPLICIT=true
             shift 2
             ;;
         --port)
+            require_option_arg "$1" "${2:-}"
             SERVICE_PORT="$2"
             shift 2
             ;;
+        --target-port)
+            require_option_arg "$1" "${2:-}"
+            TARGET_PORT="$2"
+            shift 2
+            ;;
         --type)
+            require_option_arg "$1" "${2:-}"
             WORKLOAD_TYPE="$2"
             shift 2
             ;;
@@ -205,14 +310,13 @@ CHART_DIR="${OUTPUT_DIR}/${CHART_NAME}"
 # Validate inputs
 validate_chart_name "$CHART_NAME"
 validate_port "$SERVICE_PORT"
+validate_port "$TARGET_PORT"
 validate_workload_type "$WORKLOAD_TYPE"
+parse_image_reference "$IMAGE_REPO"
 
-# Auto-split image:tag if colon is present and --tag wasn't explicitly set
-if [[ "$IMAGE_REPO" == *":"* ]] && [ -z "$IMAGE_TAG" ]; then
-    # Split on the last colon (to handle registry:port/image:tag format)
-    IMAGE_TAG="${IMAGE_REPO##*:}"
-    IMAGE_REPO="${IMAGE_REPO%:*}"
-    echo "  Note: Auto-split image into repository '${IMAGE_REPO}' and tag '${IMAGE_TAG}'"
+# Validate explicit tag if provided
+if [ -n "$IMAGE_TAG" ]; then
+    validate_image_tag "$IMAGE_TAG"
 fi
 
 # Check if chart directory already exists
@@ -232,10 +336,20 @@ if [ -d "$CHART_DIR" ]; then
     fi
 fi
 
+IMAGE_DISPLAY="$IMAGE_REPO"
+if [ -n "$IMAGE_DIGEST" ]; then
+    IMAGE_DISPLAY="${IMAGE_REPO}@${IMAGE_DIGEST}"
+elif [ -n "$IMAGE_TAG" ]; then
+    IMAGE_DISPLAY="${IMAGE_REPO}:${IMAGE_TAG}"
+else
+    IMAGE_DISPLAY="${IMAGE_REPO}:<chart appVersion>"
+fi
+
 echo "Creating Helm chart structure for: ${CHART_NAME}"
 echo "  Output directory: ${CHART_DIR}"
-echo "  Image: ${IMAGE_REPO}"
-echo "  Port: ${SERVICE_PORT}"
+echo "  Image: ${IMAGE_DISPLAY}"
+echo "  Service port: ${SERVICE_PORT}"
+echo "  Target port: ${TARGET_PORT}"
 echo "  Workload type: ${WORKLOAD_TYPE}"
 
 # Create directories
@@ -272,8 +386,10 @@ replicaCount: 1
 image:
   repository: ${IMAGE_REPO}
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
+  # Overrides the image tag whose default is the chart appVersion (ignored when digest is set).
   tag: "${IMAGE_TAG}"
+  # Image digest in format algorithm:hash (takes precedence over tag when set).
+  digest: "${IMAGE_DIGEST}"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -308,7 +424,8 @@ securityContext:
 service:
   type: ClusterIP
   port: ${SERVICE_PORT}
-  targetPort: 8080
+  # -- Container port exposed by the workload
+  targetPort: ${TARGET_PORT}
   # -- Port name used in service and container port definitions
   # Customize for non-HTTP services (e.g., redis, mysql, grpc)
   portName: http
@@ -368,6 +485,17 @@ autoscaling:
   maxReplicas: 100
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
+
+# -- ConfigMap template toggle used by checksum annotations
+configMap:
+  enabled: false
+  data: {}
+
+# -- Secret template toggle used by checksum annotations
+secret:
+  enabled: false
+  type: Opaque
+  stringData: {}
 EOF
 
 # Add StatefulSet-specific values if workload type is statefulset
@@ -544,12 +672,41 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.service.portName | default "http" }}
+      targetPort: {{ .Values.service.targetPort }}
       protocol: TCP
       name: {{ .Values.service.portName | default "http" }}
   selector:
     {{- include "${CHART_NAME}.selectorLabels" . | nindent 4 }}
 SVCEOF
+
+    # Generate ConfigMap template used by optional checksum annotations
+    cat > "${CHART_DIR}/templates/configmap.yaml" <<CMEOF
+{{- if .Values.configMap.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "${CHART_NAME}.fullname" . }}
+  labels:
+    {{- include "${CHART_NAME}.labels" . | nindent 4 }}
+data:
+  {{- toYaml .Values.configMap.data | nindent 2 }}
+{{- end }}
+CMEOF
+
+    # Generate Secret template used by optional checksum annotations
+    cat > "${CHART_DIR}/templates/secret.yaml" <<SECEOF
+{{- if .Values.secret.enabled -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "${CHART_NAME}.fullname" . }}
+  labels:
+    {{- include "${CHART_NAME}.labels" . | nindent 4 }}
+type: {{ .Values.secret.type | default "Opaque" }}
+stringData:
+  {{- toYaml .Values.secret.stringData | nindent 2 }}
+{{- end }}
+SECEOF
 
     # Generate headless service for StatefulSet
     if [ "$WORKLOAD_TYPE" = "statefulset" ]; then
@@ -565,7 +722,7 @@ spec:
   clusterIP: None
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.service.portName | default "http" }}
+      targetPort: {{ .Values.service.targetPort }}
       protocol: TCP
       name: {{ .Values.service.portName | default "http" }}
   selector:
@@ -623,7 +780,11 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: {{ .Values.service.portName | default "http" }}
@@ -720,7 +881,11 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: {{ .Values.service.portName | default "http" }}
@@ -843,7 +1008,11 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: {{ .Values.service.portName | default "http" }}
@@ -1002,6 +1171,8 @@ echo "   │   ├── NOTES.txt"
 if [ "$WITH_TEMPLATES" = true ]; then
     echo "   │   ├── serviceaccount.yaml"
     echo "   │   ├── service.yaml"
+    echo "   │   ├── configmap.yaml"
+    echo "   │   ├── secret.yaml"
     if [ "$WORKLOAD_TYPE" = "statefulset" ]; then
         echo "   │   ├── service-headless.yaml"
         echo "   │   ├── statefulset.yaml"

@@ -24,33 +24,30 @@ terraform {
   # Git repository:
   #   source = "git::https://github.com/[ORG]/[REPO].git//[PATH]?ref=[VERSION]"
   # Terraform Registry:
-  #   source = "tfr://registry.terraform.io/[NAMESPACE]/[NAME]/[PROVIDER]?version=[VERSION]"
+  #   source = "tfr:///[NAMESPACE]/[NAME]/[PROVIDER]?version=[VERSION]"
 }
 
-# Dependencies on other Terragrunt modules
-dependencies {
-  paths = [
-    # Example: "../vpc",
-    # Example: "../security-groups",
-  ]
-}
-
-# Dependency configuration with mock outputs for validation
-dependency "[DEPENDENCY_NAME]" {
-  config_path = "[DEPENDENCY_PATH]"
-
-  # Mock outputs for terragrunt validate and plan
-  mock_outputs = {
-    # Example outputs that match the dependency module
-    # [output_name] = "[mock_value]"
-  }
-
-  # Allow destroy even if dependencies exist
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "destroy"]
-
-  # Fail if output is empty in apply
-  # skip_outputs = false
-}
+# Optional dependencies on other Terragrunt modules
+# Uncomment only when this module has real upstream dependencies.
+#
+# dependencies {
+#   paths = [
+#     "../vpc",
+#     "../security-groups",
+#   ]
+# }
+#
+# dependency "vpc" {
+#   config_path = "../vpc"
+#
+#   # Mock outputs for terragrunt validate and plan
+#   mock_outputs = {
+#     vpc_id = "vpc-mock123"
+#   }
+#
+#   # Allow destroy even if dependencies exist
+#   mock_outputs_allowed_terraform_commands = ["validate", "plan", "destroy"]
+# }
 
 # Module-specific inputs
 inputs = {

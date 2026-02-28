@@ -21,6 +21,30 @@ Generate production-ready GitHub Actions workflows and custom actions following 
 
 ---
 
+## Trigger Decision Tree
+
+Route every request through this decision tree before reading references or generating files:
+
+1. If the user asks for `.github/workflows/*.yml` CI/CD automation, choose **Workflow Generation**.
+2. If the user asks for `action.yml` or a reusable step package, choose **Custom Action Generation**.
+3. If the user asks for `workflow_call` or shared pipelines across repositories, choose **Reusable Workflow Generation**.
+4. If the request includes security-only scanning (dependency review, SBOM, CodeQL), stay on **Workflow Generation** with the security pattern.
+5. If intent is ambiguous, ask one disambiguation question: "Do you want a workflow, a custom action, or a reusable workflow?"
+
+## Progressive Disclosure Route
+
+Load only what is needed for the selected route, in this order:
+
+| Route | Load First (required) | Load Next (only if needed) | Primary Template |
+|-------|------------------------|------------------------------|------------------|
+| Workflow Generation | `references/best-practices.md` | `references/common-actions.md`, `references/expressions-and-contexts.md`, `references/modern-features.md` | `assets/templates/workflow/basic_workflow.yml` |
+| Custom Action Generation | `references/custom-actions.md` | `references/best-practices.md` | `assets/templates/action/composite/action.yml`, `assets/templates/action/docker/`, `assets/templates/action/javascript/` |
+| Reusable Workflow Generation | `references/advanced-triggers.md` | `references/best-practices.md`, `references/common-actions.md` | `assets/templates/workflow/reusable_workflow.yml` |
+
+If a required reference/template is unavailable, continue with the closest available reference and report the fallback explicitly in output.
+
+---
+
 ## Core Capabilities
 
 ### 1. Generate Workflows
@@ -29,13 +53,16 @@ Generate production-ready GitHub Actions workflows and custom actions following 
 
 **Process:**
 1. Understand requirements (triggers, runners, dependencies)
-2. Reference `references/best-practices.md` for patterns
-3. Reference `references/common-actions.md` for action versions
-4. Generate workflow with:
-   - Semantic names, pinned actions (SHA), proper permissions
+2. Define trust boundaries (internal branches vs fork PRs vs external triggers)
+3. Set default `permissions` to read-only, then elevate only per job when required
+4. Reference `references/best-practices.md` for patterns
+5. Reference `references/common-actions.md` for action versions
+6. Generate workflow with:
+   - Semantic names, pinned actions (SHA), explicit permissions
    - Concurrency controls, caching, matrix strategies
-5. **Validate** with devops-skills:github-actions-validator skill
-6. Fix issues and re-validate if needed
+   - Fork-safe PR handling (no secrets in untrusted contexts)
+7. **Validate** with devops-skills:github-actions-validator skill
+8. Fix issues and re-validate if needed
 
 **Minimal Example:**
 ```yaml
@@ -45,6 +72,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -57,13 +85,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
       - run: npm ci
       - run: npm test
+```
+
+**Untrusted PR Guardrail (required for secret-using jobs):**
+```yaml
+jobs:
+  deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 ```
 
 ### 2. Generate Custom Actions
@@ -93,6 +128,7 @@ See `references/custom-actions.md` for:
 **Key Elements:**
 - `workflow_call` trigger with typed inputs
 - Explicit secrets (avoid `secrets: inherit`)
+- Explicit trusted-caller expectations (document org/repo boundaries)
 - Outputs mapped from job outputs
 - Minimal permissions
 
@@ -105,11 +141,13 @@ on:
         type: string
     secrets:
       deploy-token:
-        required: true
+        required: false
     outputs:
       result:
         value: ${{ jobs.build.outputs.result }}
 ```
+
+When secrets are required, pass only the exact secret names needed and prefer environment protection rules for deployment stages.
 
 See `references/advanced-triggers.md` for complete patterns.
 
@@ -122,13 +160,19 @@ See `references/advanced-triggers.md` for complete patterns.
 - **SBOM Attestations:** `actions/attest-sbom@v2`
 - **CodeQL Analysis:** `github/codeql-action`
 
-**Required Permissions:**
+**Permission Model:**
+Use a read-only workflow-level baseline, then elevate only in the security job that requires write scopes.
 ```yaml
 permissions:
   contents: read
-  security-events: write  # For CodeQL
-  id-token: write         # For attestations
-  attestations: write     # For attestations
+
+jobs:
+  security-scan:
+    permissions:
+      contents: read
+      security-events: write  # For CodeQL
+      id-token: write         # For attestations
+      attestations: write     # For attestations
 ```
 
 See `references/best-practices.md` section on security.
@@ -143,9 +187,9 @@ See `references/modern-features.md` for:
 - Container jobs with services
 - Workflow annotations
 
-### 6. Public Action Documentation
+### 6. Third-Party Action Documentation and Citation
 
-When using public actions:
+When using third-party actions (any `uses:` entry not in the same repository):
 
 1. **Search for documentation:**
    ```
@@ -154,12 +198,18 @@ When using public actions:
 
 2. **Or use Context7 MCP:**
    - `mcp__context7__resolve-library-id` to find action
-   - `mcp__context7__get-library-docs` for documentation
+   - `mcp__context7__query-docs` for documentation
 
 3. **Pin to SHA with version comment:**
    ```yaml
-   - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+   - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
    ```
+
+4. **Cite source and version in the response:**
+   - Action source (repository URL)
+   - Version source (release/tag/changelog URL)
+   - Selected commit SHA and human-readable version
+   - Access date for the source used
 
 See `references/common-actions.md` for pre-verified action versions.
 
@@ -178,6 +228,23 @@ See `references/common-actions.md` for pre-verified action versions.
 - Partial code snippets
 - Documentation examples
 - User explicitly requests skip
+
+## Fallback Behavior (Tooling and Environment Constraints)
+
+If required tooling or network access is unavailable, use this deterministic fallback order:
+
+1. If `devops-skills:github-actions-validator` is unavailable, run local fallback checks:
+   - `actionlint` (if installed)
+   - `yamllint` (if installed)
+   - manual YAML/schema review with a clear "not tool-validated" note
+2. If Context7 or internet access is unavailable:
+   - use `references/common-actions.md` for known action versions
+   - state that external version verification could not be completed
+3. If a template path is missing:
+   - generate from the closest template pattern in `assets/templates/`
+   - document which template was substituted
+
+Fallback usage must always be reported in the final output.
 
 ---
 
@@ -214,6 +281,7 @@ See `references/best-practices.md` for complete guidelines.
 | Template | Location |
 |----------|----------|
 | Basic Workflow | `assets/templates/workflow/basic_workflow.yml` |
+| Reusable Workflow | `assets/templates/workflow/reusable_workflow.yml` |
 | Composite Action | `assets/templates/action/composite/action.yml` |
 | Docker Action | `assets/templates/action/docker/` |
 | JavaScript Action | `assets/templates/action/javascript/` |
@@ -251,14 +319,32 @@ deploy:
     name: build-${{ github.sha }}
 ```
 
+### Third-Party Action Citation Block
+```text
+Third-party action citations:
+- actions/checkout: https://github.com/actions/checkout (version: v6.0.2, sha: de0fac2e4500dabe0009e67214ff5f5447ce83dd, accessed: 2026-02-28)
+```
+
+---
+
+## Done Criteria
+
+The task is complete only when all checks below pass:
+
+1. The request route was selected using the trigger decision tree.
+2. Only the minimum required references/templates were loaded first.
+3. Every third-party action is pinned to a commit SHA and has source/version citation.
+4. Validation was run, or a skip exception/fallback path was explicitly documented.
+5. Output includes assumptions, security-sensitive decisions (permissions/secrets), and generated file paths.
+
 ---
 
 ## Workflow Summary
 
-1. **Understand** requirements
-2. **Reference** appropriate docs
-3. **Generate** with standards
-4. **Search** for public action docs (if needed)
-5. **Validate** with devops-skills:github-actions-validator
-6. **Fix** any errors
-7. **Present** validated result
+1. **Route** the request using the trigger decision tree
+2. **Load** the minimum references/templates for that route
+3. **Generate** using mandatory security and naming standards
+4. **Cite** and pin third-party actions (source, version, SHA)
+5. **Validate** with `devops-skills:github-actions-validator` (or documented fallback)
+6. **Fix and re-validate** until clean
+7. **Present** validated output with citations, assumptions, and file paths

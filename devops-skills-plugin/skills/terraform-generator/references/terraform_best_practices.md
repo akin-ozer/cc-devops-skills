@@ -92,7 +92,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"  # Allow patch versions
+      version = "~> 6.0"  # Allow patch versions within major v6
     }
     random = {
       source  = "hashicorp/random"
@@ -101,6 +101,10 @@ terraform {
   }
 }
 ```
+
+Version policy:
+- Prefer major-version pinning with `~>` across AWS/Azure/GCP providers.
+- Avoid hardcoding "latest" numbers in static templates; verify current versions during execution when needed.
 
 ### Module Versions
 
@@ -453,15 +457,24 @@ variable "environments" {
 }
 
 resource "aws_instance" "env_servers" {
-  for_each = var.environments
+  # Build one instance object per environment and index
+  for_each = merge([
+    for env_name, env_cfg in var.environments : {
+      for idx in range(env_cfg.instance_count) :
+      "${env_name}-${idx + 1}" => {
+        environment   = env_name
+        instance_type = env_cfg.instance_type
+        ordinal       = idx + 1
+      }
+    }
+  ]...)
 
   ami           = data.aws_ami.ubuntu.id
   instance_type = each.value.instance_type
-  count         = each.value.instance_count
 
   tags = {
-    Name        = "${each.key}-server"
-    Environment = each.key
+    Name        = "${each.value.environment}-server-${each.value.ordinal}"
+    Environment = each.value.environment
   }
 }
 ```

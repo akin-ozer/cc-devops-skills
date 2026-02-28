@@ -9,7 +9,7 @@ Analyze log files and generate summary reports
 
 Options:
     -h          Show this help
-    -t TYPE     Report type: errors|summary|timeline (default: summary)
+    -t TYPE     Report type: errors|summary (default: summary)
     -o FILE     Output file (default: stdout)
 
 Examples:
@@ -33,7 +33,7 @@ analyze_errors() {
         | awk '{printf "  %-40s %6d\n", $2, $1}'
 
     echo ""
-    echo "Total errors: $(grep -c "ERROR" "${log_file}" 2>/dev/null || echo "0")"
+    echo "Total errors: $(grep -c "ERROR" "${log_file}" 2>/dev/null || true)"
 }
 
 generate_summary() {
@@ -48,7 +48,8 @@ generate_summary() {
 
     echo "Log Levels:"
     for level in DEBUG INFO WARN ERROR FATAL; do
-        local count=$(grep -c "${level}" "${log_file}" 2>/dev/null || echo "0")
+        local count
+        count=$(grep -c "${level}" "${log_file}" 2>/dev/null || true)
         printf "  %-10s %6d\n" "${level}:" "${count}"
     done
 }

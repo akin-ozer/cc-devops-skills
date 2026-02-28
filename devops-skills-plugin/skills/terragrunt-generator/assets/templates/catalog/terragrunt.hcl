@@ -40,14 +40,15 @@ terraform {
 # Dependencies (if this unit depends on other units)
 # ==============================================================================
 
-# Declare execution order dependencies
-# The paths here should match the values.xxx_path passed from the stack
-dependencies {
-  paths = [
-    # Example: Use values passed from stack to determine dependency paths
-    # try(values.vpc_path, ""),
-  ]
-}
+# Declare execution order dependencies only when required.
+# Keep stack units on the same no_dot_terragrunt_stack mode so values.vpc_path
+# (for example "../vpc") resolves consistently.
+#
+# dependencies {
+#   paths = [
+#     values.vpc_path,
+#   ]
+# }
 
 # Dependency with mock outputs for validation and planning
 # Uncomment and customize based on your unit's dependencies
@@ -104,7 +105,7 @@ inputs = {
 
 # Define feature flags that can be overridden at runtime
 # feature "enable_feature" {
-#   default = try(values.enable_feature, false)
+#   default = false
 # }
 
 # ==============================================================================

@@ -71,6 +71,9 @@ bash scripts/validate_terragrunt.sh [TARGET_DIR]
 - `SKIP_PLAN=true` - Skip terragrunt plan step
 - `SKIP_SECURITY=true` - Skip security scanning (Trivy/tfsec)
 - `SKIP_LINT=true` - Skip tflint linting
+- `SKIP_INIT=true` - Skip `terragrunt init` before validation
+- `SKIP_BACKEND_INIT=true` - Run init with `-backend=false` (useful in CI/offline)
+- `SOFT_FAIL_SECURITY=true` - Report security findings without failing
 - `TG_STRICT_MODE=true` - Enable strict mode (errors on deprecated features)
 
 **Example usage:**
@@ -113,13 +116,13 @@ python3 scripts/detect_custom_resources.py [DIRECTORY] [--format text|json]
      - Example: `"mongodb/mongodbatlas terraform provider documentation version 1.14.0"`
    - **Option B - Context7 MCP (Preferred):** Use Context7 for structured documentation lookup
      - Step 1: Resolve library ID: `mcp__context7__resolve-library-id` with provider name (e.g., "datadog terraform provider")
-     - Step 2: **REQUIRED** - Fetch documentation: `mcp__context7__get-library-docs` with the resolved library ID
-     - Use `topic: "authentication"` or `topic: "configuration"` for targeted docs
+     - Step 2: **REQUIRED** - Fetch docs via `mcp__context7__query-docs` with the resolved library ID
+     - Use queries like `"authentication requirements"` and `"configuration examples"`
 
 2. **For custom modules (EQUALLY IMPORTANT - DO NOT SKIP):**
    - **Terraform Registry modules:**
      - Use Context7: `mcp__context7__resolve-library-id` with module name (e.g., "terraform-aws-modules vpc")
-     - Then fetch docs with `mcp__context7__get-library-docs`
+     - Then fetch docs with `mcp__context7__query-docs`
      - Or visit `https://registry.terraform.io/modules/{source}/{version}`
    - **Git modules:** Use WebSearch with the repository URL to find README or documentation
    - **HTTP modules:** Investigate the source URL for documentation
@@ -132,10 +135,12 @@ python3 scripts/detect_custom_resources.py [DIRECTORY] [--format text|json]
       - Note the exact version
       - Use Context7 MCP:
         1. mcp__context7__resolve-library-id with libraryName: "{provider/module name}"
-        2. mcp__context7__get-library-docs with:
-           - context7CompatibleLibraryID: "{resolved ID}"
-           - topic: "authentication" (for auth requirements)
-           - topic: "configuration" (for setup requirements)
+        2. mcp__context7__query-docs with:
+           - libraryId: "{resolved ID}"
+           - query: "authentication requirements" (for auth requirements)
+        3. mcp__context7__query-docs with:
+           - libraryId: "{resolved ID}"
+           - query: "configuration examples" (for setup requirements)
       - OR use WebSearch with version-specific queries
       - Review documentation for:
         * Required configuration blocks
@@ -157,14 +162,14 @@ mcp__context7__resolve-library-id with libraryName: "datadog terraform provider"
 # Result: /datadog/terraform-provider-datadog
 
 # 3. Fetch authentication docs (REQUIRED)
-mcp__context7__get-library-docs with:
-  context7CompatibleLibraryID: "/datadog/terraform-provider-datadog"
-  topic: "authentication"
+mcp__context7__query-docs with:
+  libraryId: "/datadog/terraform-provider-datadog"
+  query: "authentication requirements"
 
 # 4. Fetch configuration docs
-mcp__context7__get-library-docs with:
-  context7CompatibleLibraryID: "/datadog/terraform-provider-datadog"
-  topic: "configuration"
+mcp__context7__query-docs with:
+  libraryId: "/datadog/terraform-provider-datadog"
+  query: "configuration examples"
 ```
 
 **Example using WebSearch:**
@@ -508,7 +513,7 @@ terragrunt exec -- checkov -d .
 terragrunt exec -- aws s3 ls s3://my-bucket
 
 # Run custom scripts with Terragrunt context
-terragrunt exec -- ./scripts/validate.sh
+terragrunt exec -- ./scripts/validate_terragrunt.sh
 
 # Run across all units
 terragrunt run --all exec -- tflint
@@ -598,13 +603,34 @@ terragrunt --experiment cas run --all plan
 
 Follow this workflow when validating Terragrunt configurations:
 
+### Canonical Executable Workflow (Default Path)
+
+Use one executable path so docs and scripts stay aligned:
+
+```bash
+# Main validation
+bash scripts/validate_terragrunt.sh <target-directory>
+
+# Deterministic fixture tests (required after script changes)
+python3 test/test_detect_custom_resources.py
+bash test/test_validate_terragrunt.sh
+```
+
+Execution expectations:
+- Fixture tests should be deterministic (stable pass/fail outcomes).
+- Validation/security failures must surface as non-zero exits.
+
 ### Step 0: Read Best Practices Reference (MANDATORY FIRST STEP)
 
 > **You MUST read the best practices reference file BEFORE starting validation. This is not optional.**
 
 ```bash
 # Read the best practices reference file first
-cat references/best_practices.md
+if [ -f references/best_practices.md ]; then
+  cat references/best_practices.md
+else
+  echo "WARNING: references/best_practices.md not found; continue with built-in checklist below."
+fi
 ```
 
 This ensures you understand the patterns, anti-patterns, and checklists you will verify.
@@ -633,14 +659,14 @@ This ensures you understand the patterns, anti-patterns, and checklists you will
 4. **For EACH detected custom provider - look up documentation:**
    - Use Context7 MCP (preferred):
      1. `mcp__context7__resolve-library-id` with provider name
-     2. `mcp__context7__get-library-docs` with topic: "authentication"
-     3. `mcp__context7__get-library-docs` with topic: "configuration"
+     2. `mcp__context7__query-docs` with query: "authentication requirements"
+     3. `mcp__context7__query-docs` with query: "configuration examples"
    - OR use WebSearch: `"{provider} terraform provider {version} documentation"`
 
 5. **For EACH detected custom module - look up documentation:**
    - Use Context7 MCP for Terraform Registry modules:
      1. `mcp__context7__resolve-library-id` with module name (e.g., "terraform-aws-modules vpc")
-     2. `mcp__context7__get-library-docs` with relevant topic
+     2. `mcp__context7__query-docs` with relevant configuration query
    - For Git modules: Use WebSearch with repository URL
    - For HTTP modules: Investigate source URL for documentation
 
@@ -661,7 +687,7 @@ This ensures you understand the patterns, anti-patterns, and checklists you will
    - Configuration errors → Check terragrunt.hcl syntax and inputs
    - Terraform validation errors → Check .tf files or generated configs
    - Linting issues → Review tflint output and fix
-   - Security issues → Review tfsec output and address
+   - Security issues → Review Trivy/Checkov/tfsec output and address
    - Dependency errors → Check dependency blocks and paths
    - Plan errors → Review Terraform configuration and provider setup
 
@@ -746,6 +772,11 @@ This ensures you understand the patterns, anti-patterns, and checklists you will
    terragrunt force-unlock <LOCK_ID>
    ```
 
+   **Issue: S3 backend `dynamodb_table` deprecation warning**
+   - Recent Terraform versions may warn that `dynamodb_table` is deprecated for S3 backends.
+   - Prefer `use_lockfile = true` in backend config when compatible with your workflow.
+   - Keep `dynamodb_table` only for legacy compatibility needs.
+
    **Issue: Unknown provider or module parameters**
    - Re-run custom resource detection
    - Use WebSearch to look up current documentation
@@ -781,7 +812,11 @@ Reference the comprehensive best practices guide for detailed recommendations:
 
 ```bash
 # Read the best practices reference
-cat references/best_practices.md
+if [ -f references/best_practices.md ]; then
+  cat references/best_practices.md
+else
+  echo "WARNING: references/best_practices.md not found; continue with checklist in this document."
+fi
 ```
 
 **Key best practices to check:**
@@ -857,9 +892,9 @@ If Context7 MCP is available, use it for provider/module documentation lookup:
    mcp__context7__resolve-library-id with libraryName: "mongodb/mongodbatlas"
    ```
 
-2. **Get documentation:**
+2. **Query documentation:**
    ```
-   mcp__context7__get-library-docs with context7CompatibleLibraryID: "/mongodb/mongodbatlas"
+   mcp__context7__query-docs with libraryId: "/mongodb/mongodbatlas" and query: "authentication requirements"
    ```
 
 This provides version-aware documentation directly, as an alternative to WebSearch.
@@ -877,7 +912,7 @@ Example validation in CI/CD pipeline:
 set -e
 
 echo "Installing dependencies..."
-# Install terragrunt, terraform, tflint, tfsec
+# Install terragrunt, terraform, tflint, trivy/checkov
 
 echo "Detecting custom resources..."
 python3 scripts/detect_custom_resources.py . --format json > custom_resources.json
@@ -974,7 +1009,7 @@ TF_LOG=TRACE terragrunt plan
 ### Warning Indicators
 
 ⚠️ **Review needed:**
-- Security warnings from tfsec (non-critical)
+- Security warnings from Trivy/Checkov/tfsec (non-critical)
 - Linting suggestions (best practices)
 - Deprecated provider features
 - Missing recommended configurations
@@ -1061,3 +1096,11 @@ grep -A5 "cycle" <(terragrunt dag graph 2>&1)
 - [Terragrunt Documentation](https://terragrunt.gruntwork.io/docs/)
 - [Terraform Best Practices](https://www.terraform-best-practices.com/)
 - [Terraform Registry](https://registry.terraform.io/)
+
+## Done Criteria
+
+- Docs and scripts agree on one canonical executable workflow.
+- Fixture runs are deterministic via:
+- `python3 test/test_detect_custom_resources.py`
+- `bash test/test_validate_terragrunt.sh`
+- Validation and security failures are reported with correct non-zero exits.

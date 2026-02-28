@@ -176,6 +176,10 @@ Use the **AskUserQuestion** tool to confirm the plan with options:
 - "Modify [specific aspect]"
 - "Show me alternative approaches"
 
+When the user chooses:
+- **"Modify [specific aspect]"**: ask one focused follow-up question about what to change (metric, labels, function, time range, threshold, or output shape), then present an updated plan before generating.
+- **"Show me alternative approaches"**: provide at least two valid query plans with trade-offs (accuracy, cost, cardinality, readability), then ask the user to choose one before generating.
+
 ### Stage 5: Generate the PromQL Query
 
 Once the user confirms the plan, generate the actual PromQL query following best practices.
@@ -184,27 +188,32 @@ Once the user confirms the plan, generate the actual PromQL query following best
 
 **Before writing any query code**, you MUST:
 
-1. **Read the relevant reference file(s)** using the Read tool:
+1. **Identify the query category** first (histogram, RED, USE, function-specific, optimization, etc.).
+
+2. **Read only the relevant reference section(s)** using the Read tool:
    - For histogram queries → Read `references/metric_types.md` (Histogram section)
    - For error/latency patterns → Read `references/promql_patterns.md` (RED method section)
    - For resource monitoring → Read `references/promql_patterns.md` (USE method section)
    - For optimization questions → Read `references/best_practices.md`
    - For specific functions → Read `references/promql_functions.md`
+   - Re-read a section only if requirements changed or you have not consulted it yet in the current thread.
 
-2. **Cite the applicable pattern or best practice** in your response:
+3. **If a needed reference cannot be read**, state the issue and continue with best-effort generation using the most applicable documented pattern you already have.
+
+4. **Cite the applicable pattern or best practice** in your response:
    ```
    As documented in references/promql_patterns.md (Pattern 3: Latency Percentile):
    # 95th percentile latency
    histogram_quantile(0.95, sum by (le) (rate(...)))
    ```
 
-3. **Reference example files** when generating similar queries:
+5. **Reference example files** when generating similar queries:
    ```
    Based on examples/red_method.promql (lines 64-82):
    # P95 latency with proper histogram_quantile usage
    ```
 
-This ensures generated queries follow documented patterns and helps users understand why certain approaches are recommended.
+This keeps generated queries aligned with documented patterns while avoiding unnecessary full-file rereads on iterative follow-ups.
 
 #### Best Practices for Query Generation
 
@@ -339,7 +348,7 @@ max_over_time(queue_depth{job="worker"}[1h])
 
 ### Stage 6: Validate the Generated Query
 
-**ALWAYS validate the generated query** using the devops-skills:promql-validator skill:
+**ALWAYS attempt to validate the generated query first** using the devops-skills:promql-validator skill:
 
 ```
 After generating the query, automatically invoke:
@@ -365,6 +374,11 @@ The devops-skills:promql-validator skill will:
 
 If validation fails, fix issues and re-validate until all checks pass.
 
+If the validator skill is unavailable, fails to run, or cannot complete after two fix/re-validate cycles:
+- Report the validator failure briefly (tool unavailable, timeout, parsing error, etc.).
+- Run a manual fallback check (syntax shape, metric/function compatibility, label filtering, aggregation, time range sanity).
+- Mark any unchecked areas as **UNVERIFIED** and ask the user whether to proceed with best-effort output or provide more context for another validation attempt.
+
 **IMPORTANT: Display Validation Results to User**
 
 After running validation, you MUST display the structured results to the user in this format:
@@ -373,13 +387,18 @@ After running validation, you MUST display the structured results to the user in
 ## PromQL Validation Results
 
 ### Syntax Check
-- Status: ✅ VALID / ⚠️ WARNING / ❌ ERROR
+- Status: ✅ VALID / ⚠️ WARNING / ❌ ERROR / ⚠️ UNVERIFIED
 - Issues: [list any syntax errors]
 
 ### Best Practices Check
-- Status: ✅ OPTIMIZED / ⚠️ CAN BE IMPROVED / ❌ HAS ISSUES
+- Status: ✅ OPTIMIZED / ⚠️ CAN BE IMPROVED / ❌ HAS ISSUES / ⚠️ UNVERIFIED
 - Issues: [list any problems found]
 - Suggestions: [list optimization opportunities]
+
+### Validation Coverage
+- Validator tool run: [successful / failed / unavailable]
+- Checks completed: [syntax, semantics, anti-patterns, performance, intent-match]
+- Checks skipped: [list any skipped checks, or "None"]
 
 ### Query Explanation
 - **What it measures**: [plain English description]
@@ -391,7 +410,7 @@ This transparency helps users understand the validation process and any recommen
 
 ### Stage 7: Provide Usage Instructions
 
-After successful generation and validation, provide the user with:
+After generation and validation (or manual fallback validation), provide the user with:
 
 1. **The Final Query**:
    ```promql
@@ -897,6 +916,32 @@ When generating queries:
 7. **Validate Proactively**: Always validate and fix issues
 8. **Follow Up**: Ask if adjustments are needed
 
+## Fallback When AskUserQuestion Is Unavailable
+
+If a structured question tool is unavailable, continue with an explicit inline questionnaire in plain text:
+1. Ask for goal, metric names/types, labels, time range, aggregation, and use case in one compact prompt.
+2. If the user provides partial answers, proceed with conservative defaults and clearly mark assumptions.
+3. If core inputs are still ambiguous, offer 2-3 concrete query-plan options and ask the user to pick one.
+4. Do not block generation indefinitely waiting for perfect context; generate a best-effort query with assumption notes.
+
+## Relevant Reference Criteria and Trivial-Case Skip Rules
+
+Use references deterministically, but avoid unnecessary reads for trivial requests.
+
+Read references when ANY of the following is true:
+- Histogram or summary quantiles are requested
+- Query uses joins/vector matching, subqueries, offsets, or recording/alerting rules
+- Query is for SLO/burn-rate/error-budget workflows
+- Query includes optimization or cardinality concerns
+- Metric type is unknown or contested
+
+Skip reference reads only when ALL of the following are true:
+- Single-metric, single-function query (`rate`, `increase`, `sum`, `avg`, `max`, `min`)
+- No joins, no recording/alert rules, no advanced functions
+- Metric type and labels are clearly provided by the user
+
+When skipping, explicitly state: `Reference read skipped (trivial case)` and keep validation mandatory.
+
 ## Integration with devops-skills:promql-validator
 
 After generating any PromQL query, **automatically invoke the devops-skills:promql-validator skill** to ensure quality:
@@ -1004,17 +1049,14 @@ This ensures all generated queries follow best practices and are production-read
 
 ## Success Criteria
 
-A successful query generation session should:
-1. Fully understand the user's monitoring goal
-2. Identify correct metrics and their types
-3. Present a clear plan in plain English
-4. Get user confirmation before generating code
-5. Generate a syntactically correct query
-6. Use appropriate functions for metric types
-7. Include specific label filters
-8. Pass devops-skills:promql-validator validation
-9. Provide clear usage instructions
-10. Offer customization guidance
+A successful query generation session should meet these measurable checkpoints:
+1. Requirement capture completed: goal/use-case/metric/time-range/aggregation recorded.
+2. Plan confirmation completed: user approved plan OR explicit assumption set documented.
+3. Reference decision recorded: `consulted` with file names OR `skipped (trivial case)` with reason.
+4. Query validity completed: syntax passes validator or manual fallback check.
+5. Semantic sanity completed: function choice matches metric type (counter/gauge/histogram/summary).
+6. Cardinality guard completed: query includes explicit filters or aggregation rationale.
+7. Delivery completed: final query + interpretation + next-step customization guidance provided.
 
 ## Remember
 

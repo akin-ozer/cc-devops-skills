@@ -40,7 +40,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@e7fa5ac41e1cf5b7d48e45e42232ce7ada589601 # v9.1.0
         with:
-          version: latest
+          version: v1.55.3
           args: --timeout=5m
 
       - name: Run go vet

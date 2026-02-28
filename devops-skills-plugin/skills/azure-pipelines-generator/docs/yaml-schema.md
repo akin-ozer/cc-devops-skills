@@ -2,6 +2,22 @@
 
 This document provides a comprehensive reference for Azure Pipelines YAML syntax and structure.
 
+## How to Use This Reference
+
+Use this deterministic sequence:
+
+1. Confirm root structure (`steps`-only, `jobs`-based, or `stages`-based pipeline).
+2. Add required root keys (`trigger`, `pr`, `pool`, `variables`, `resources`) for the requested mode.
+3. Build hierarchy in order: `stages -> jobs -> steps`.
+4. Apply `dependsOn`, `condition`, and deployment `environment` settings.
+5. Validate YAML and schema compliance.
+
+Fallback behavior:
+
+- If advanced expressions are uncertain, prefer simpler explicit conditions.
+- If schema details are missing locally, use the official schema links in this file and document assumptions.
+- If validation tooling is unavailable, run manual hierarchy and syntax sanity checks before delivery.
+
 ## Pipeline Structure
 
 Azure Pipelines follow a hierarchical structure:
@@ -720,3 +736,12 @@ jobs:
 - [Templates](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/templates)
 - [Expressions](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/expressions)
 - [Predefined Variables](https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables)
+
+## Done Criteria
+
+Schema usage is complete when:
+
+- Pipeline hierarchy is internally consistent (`stages/jobs/steps` are not mixed incorrectly).
+- Runtime conditions and dependencies are explicit for non-trivial flow.
+- Deployment stages use `deployment` jobs and `environment` where applicable.
+- Validation output or documented manual fallback confirms structural correctness.

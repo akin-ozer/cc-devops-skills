@@ -10,13 +10,12 @@ This script analyzes Terragrunt and Terraform configurations to identify:
 Outputs a report that can be used to guide documentation lookup via WebSearch or Context7.
 """
 
-import os
 import re
 import json
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import List
 from collections import defaultdict
 
 
@@ -59,6 +58,18 @@ OFFICIAL_PROVIDERS = {
     'registry.opentofu.org/hashicorp/kubernetes',
 }
 
+# Paths that should never be scanned for source detection.
+IGNORED_DIR_NAMES = {
+    '.git',
+    '.terraform',
+    '.terragrunt-cache',
+    '.idea',
+    '.venv',
+    'venv',
+    '__pycache__',
+    'node_modules',
+}
+
 
 class ResourceDetector:
     def __init__(self, target_dir: str):
@@ -67,35 +78,60 @@ class ResourceDetector:
         self.custom_modules = defaultdict(list)
         self.terragrunt_configs = []
 
+    def _is_ignored_path(self, path: Path) -> bool:
+        """Return True when a file is inside ignored/generated directories."""
+        return any(part in IGNORED_DIR_NAMES for part in path.parts)
+
     def find_hcl_files(self) -> List[Path]:
         """Find all .hcl and .tf files in the target directory."""
         hcl_files = []
         for ext in ['*.hcl', '*.tf']:
-            hcl_files.extend(self.target_dir.rglob(ext))
-        return hcl_files
+            for file_path in self.target_dir.rglob(ext):
+                if self._is_ignored_path(file_path):
+                    continue
+                hcl_files.append(file_path)
+        return sorted(hcl_files)
 
-    def extract_providers(self, content: str, filepath: str) -> None:
-        """Extract provider configurations from HCL content."""
-        # Find required_providers blocks with balanced braces
+    def _record_custom_provider(self, provider_source: str, provider_version: str) -> None:
+        """Store custom provider in normalized form."""
+        normalized_source = provider_source.strip()
+        if not normalized_source:
+            return
+
+        version = provider_version.strip() if provider_version else "unspecified"
+        if normalized_source not in OFFICIAL_PROVIDERS:
+            self.custom_providers[normalized_source].add(version)
+
+    def _extract_required_providers(self, content: str) -> None:
+        """Extract provider declarations from required_providers blocks."""
         start_pattern = r'required_providers\s*{'
         matches = list(re.finditer(start_pattern, content, re.MULTILINE))
 
         for match in matches:
-            # Extract the full block with balanced braces
-            start_pos = match.end() - 1  # Position of opening brace
+            start_pos = match.end() - 1
             block_content = self._extract_balanced_braces(content, start_pos)
+            if not block_content:
+                continue
 
-            # Extract individual provider declarations
-            # Format: provider_name = { source = "org/provider", version = "x.y.z" }
-            provider_decl_pattern = r'(\w+)\s*=\s*{[^}]*source\s*=\s*"([^"]+)"[^}]*version\s*=\s*"([^"]+)"'
-            for provider_match in re.finditer(provider_decl_pattern, block_content):
+            provider_block_pattern = r'(\w+)\s*=\s*{'
+            for provider_match in re.finditer(provider_block_pattern, block_content):
                 provider_name = provider_match.group(1)
-                provider_source = provider_match.group(2)
-                provider_version = provider_match.group(3)
+                provider_start = provider_match.end() - 1
+                provider_body = self._extract_balanced_braces(block_content, provider_start)
+                if not provider_body:
+                    continue
 
-                # Check if it's a custom provider (not official HashiCorp)
-                if provider_source not in OFFICIAL_PROVIDERS:
-                    self.custom_providers[provider_source].add(provider_version)
+                source_match = re.search(r'source\s*=\s*"([^"]+)"', provider_body)
+                version_match = re.search(r'version\s*=\s*"([^"]+)"', provider_body)
+
+                provider_source = source_match.group(1) if source_match else provider_name
+                provider_version = version_match.group(1) if version_match else "unspecified"
+
+                self._record_custom_provider(provider_source, provider_version)
+
+    def extract_providers(self, content: str, filepath: str) -> None:
+        """Extract provider configurations from HCL content."""
+        self._extract_required_providers(content)
 
         # Also look for standalone provider blocks
         standalone_provider_pattern = r'provider\s+"(\w+)"\s*{([^}]+)}'
@@ -105,40 +141,19 @@ class ResourceDetector:
             version_match = re.search(r'version\s*=\s*"([^"]+)"', match.group(2))
             if version_match:
                 version = version_match.group(1)
-                # Assume non-official if not in common list
-                potential_source = f"hashicorp/{provider_name}"
-                if potential_source not in OFFICIAL_PROVIDERS:
-                    self.custom_providers[provider_name].add(version)
+                self._record_custom_provider(provider_name, version)
 
         # Check for providers in Terragrunt generate blocks
-        # Format: generate "name" { ... contents = <<EOF ... required_providers { ... } EOF }
-        generate_pattern = r'generate\s+"[^"]+"\s*{[^}]*contents\s*=\s*<<EOF(.*?)EOF'
+        # Format: generate "name" { ... contents = <<EOT ... EOT } (supports custom delimiters)
+        generate_pattern = r'generate\s+"[^"]+"\s*{.*?contents\s*=\s*<<-?([A-Za-z0-9_]+)\n(.*?)\n\s*\1'
         for match in re.finditer(generate_pattern, content, re.MULTILINE | re.DOTALL):
-            generated_content = match.group(1)
+            generated_content = match.group(2)
             # Recursively extract providers from generated content
             self._extract_providers_from_block(generated_content)
 
     def _extract_providers_from_block(self, content: str) -> None:
         """Helper to extract providers from a content block."""
-        # Find required_providers blocks with nested braces
-        # Use a simple approach: find the start, then match balanced braces
-        start_pattern = r'required_providers\s*{'
-        matches = list(re.finditer(start_pattern, content, re.MULTILINE))
-
-        for match in matches:
-            # Extract the full block with balanced braces
-            start_pos = match.end() - 1  # Position of opening brace
-            block_content = self._extract_balanced_braces(content, start_pos)
-
-            # Now extract individual provider declarations
-            provider_decl_pattern = r'(\w+)\s*=\s*{[^}]*source\s*=\s*"([^"]+)"[^}]*version\s*=\s*"([^"]+)"'
-            for provider_match in re.finditer(provider_decl_pattern, block_content):
-                provider_name = provider_match.group(1)
-                provider_source = provider_match.group(2)
-                provider_version = provider_match.group(3)
-
-                if provider_source not in OFFICIAL_PROVIDERS:
-                    self.custom_providers[provider_source].add(provider_version)
+        self._extract_required_providers(content)
 
     def _extract_balanced_braces(self, content: str, start_pos: int) -> str:
         """Extract content within balanced braces starting from start_pos."""
@@ -159,7 +174,7 @@ class ResourceDetector:
     def extract_modules(self, content: str, filepath: str) -> None:
         """Extract module configurations from HCL content."""
         # Pattern for module blocks
-        module_pattern = r'module\s+"([^"]+)"\s*{([^}]+)}'
+        module_pattern = r'module\s+"([^"]+)"\s*{(.*?)}'
         matches = re.finditer(module_pattern, content, re.MULTILINE | re.DOTALL)
 
         for match in matches:
@@ -275,12 +290,12 @@ class ResourceDetector:
         """Generate JSON format report."""
         report = {
             'custom_providers': {
-                provider: list(versions)
-                for provider, versions in self.custom_providers.items()
+                provider: sorted(list(versions))
+                for provider, versions in sorted(self.custom_providers.items())
             },
             'custom_modules': {
                 source: modules
-                for source, modules in self.custom_modules.items()
+                for source, modules in sorted(self.custom_modules.items())
             }
         }
         return json.dumps(report, indent=2)
@@ -300,8 +315,10 @@ class ResourceDetector:
             for provider, versions in sorted(self.custom_providers.items()):
                 lines.append(f"\nProvider: {provider}")
                 lines.append(f"  Versions: {', '.join(sorted(versions))}")
-                lines.append(f"  → Action: Search for '{provider} terraform provider documentation'")
-                lines.append(f"            or use Context7 with library ID: /{provider}")
+                lines.append(f"  → Action: Resolve with Context7 library lookup:")
+                lines.append(f"            mcp__context7__resolve-library-id (libraryName: \"{provider} terraform provider\")")
+                lines.append(f"            mcp__context7__query-docs (query: \"authentication and configuration\")")
+                lines.append(f"            or search web: '{provider} terraform provider documentation'")
             lines.append("")
         else:
             lines.append("CUSTOM PROVIDERS: None detected")
@@ -321,12 +338,14 @@ class ResourceDetector:
 
                 # Provide search guidance based on module type
                 if module_info['type'] == 'git':
-                    lines.append(f"  → Action: Search for '{source} documentation'")
+                    clean_source = source.replace('git::', '')
+                    lines.append(f"  → Action: Search repository docs for '{clean_source}'")
                 elif module_info['type'] == 'registry' or module_info['type'] == 'terragrunt':
                     # Clean up tfr:/// prefix for registry lookup
                     clean_source = source.replace('tfr:///', '')
-                    lines.append(f"  → Action: Search for 'terraform {clean_source} module documentation'")
-                    lines.append(f"            or visit https://registry.terraform.io/modules/{clean_source}")
+                    registry_source = clean_source.split('//')[0]
+                    lines.append(f"  → Action: Visit https://registry.terraform.io/modules/{registry_source}")
+                    lines.append(f"            and resolve with Context7: \"{registry_source}\"")
                 else:
                     lines.append(f"  → Action: Search for documentation related to this module source")
             lines.append("")

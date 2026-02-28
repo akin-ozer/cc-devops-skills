@@ -71,6 +71,29 @@ class AzurePipelinesValidator:
         self.defined_stages: Set[str] = set()
         self.defined_jobs: Set[str] = set()
 
+    @staticmethod
+    def _is_template_expression_key(key: Any) -> bool:
+        """Return true when key looks like an Azure template expression key."""
+        if not isinstance(key, str):
+            return False
+        stripped = key.strip()
+        return stripped.startswith('${{') and stripped.endswith('}}')
+
+    def _extract_conditional_block(self, node: Dict[str, Any]) -> Any:
+        """
+        Return the payload for a template-conditional mapping node.
+
+        Azure template conditionals commonly appear as:
+          - ${{ if <expr> }}:
+            - <stage|job|step>
+        """
+        if not isinstance(node, dict) or len(node) != 1:
+            return None
+        key = next(iter(node.keys()))
+        if not self._is_template_expression_key(key):
+            return None
+        return node[key]
+
     def validate(self) -> Tuple[bool, List[ValidationError]]:
         """Run all validations and return results"""
 
@@ -258,6 +281,10 @@ class AzurePipelinesValidator:
     def _validate_stages(self):
         """Validate stages configuration"""
         stages = self.config.get('stages', [])
+        self._validate_stage_list(stages)
+
+    def _validate_stage_list(self, stages: Any):
+        """Validate a stage list (root stages or nested conditional stage blocks)."""
 
         if not isinstance(stages, list):
             self.errors.append(ValidationError(
@@ -271,6 +298,24 @@ class AzurePipelinesValidator:
             if isinstance(stage, dict):
                 # Check if it's a template reference
                 if 'template' in stage:
+                    continue
+
+                # Handle template conditional insertion blocks:
+                # - ${{ if ... }}:
+                #   - stage: ...
+                conditional_payload = self._extract_conditional_block(stage)
+                if conditional_payload is not None:
+                    if isinstance(conditional_payload, list):
+                        self._validate_stage_list(conditional_payload)
+                    elif isinstance(conditional_payload, dict):
+                        self._validate_stage_list([conditional_payload])
+                    else:
+                        line = self._find_line_containing(next(iter(stage.keys())))
+                        self.errors.append(ValidationError(
+                            'error', line,
+                            'Conditional stage block must contain a stage list or mapping',
+                            'stage-conditional-invalid-type'
+                        ))
                     continue
 
                 if 'stage' in stage:
@@ -313,6 +358,22 @@ class AzurePipelinesValidator:
 
             # Check if it's a template reference
             if 'template' in job:
+                continue
+
+            # Handle template conditional insertion blocks in job lists.
+            conditional_payload = self._extract_conditional_block(job)
+            if conditional_payload is not None:
+                if isinstance(conditional_payload, list):
+                    self._validate_jobs(conditional_payload, context)
+                elif isinstance(conditional_payload, dict):
+                    self._validate_jobs([conditional_payload], context)
+                else:
+                    line = self._find_line_containing(next(iter(job.keys())))
+                    self.errors.append(ValidationError(
+                        'error', line,
+                        f'Conditional job block in {context} must contain a job list or mapping',
+                        'job-conditional-invalid-type'
+                    ))
                 continue
 
             job_type = None
@@ -383,6 +444,22 @@ class AzurePipelinesValidator:
 
             # Check if it's a template reference
             if 'template' in step:
+                continue
+
+            # Handle template conditional insertion blocks in step lists.
+            conditional_payload = self._extract_conditional_block(step)
+            if conditional_payload is not None:
+                if isinstance(conditional_payload, list):
+                    self._validate_steps(conditional_payload, context)
+                elif isinstance(conditional_payload, dict):
+                    self._validate_steps([conditional_payload], context)
+                else:
+                    line = self._find_line_containing(next(iter(step.keys())))
+                    self.errors.append(ValidationError(
+                        'error', line,
+                        f'Conditional step block in {context} must contain a step list or mapping',
+                        'step-conditional-invalid-type'
+                    ))
                 continue
 
             # Check for valid step type

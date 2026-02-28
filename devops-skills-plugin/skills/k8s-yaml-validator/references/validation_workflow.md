@@ -4,13 +4,38 @@ This document outlines the comprehensive validation workflow for Kubernetes YAML
 
 ## Validation Stages
 
-### Stage 1: YAML Syntax Validation (yamllint)
+### Stage 0: Resource Count (Deterministic)
+
+**Purpose:** Count non-empty YAML documents before running validators.
+
+**Command:**
+```bash
+python3 scripts/count_yaml_documents.py <file.yaml>
+```
+
+**Fallback when Python is unavailable (estimated count):**
+```bash
+awk 'BEGIN{d=0;seen=0} /^[[:space:]]*---[[:space:]]*$/ {if(seen){d++;seen=0}; next} /^[[:space:]]*#/ {next} NF{seen=1} END{if(seen)d++; print d}' <file.yaml>
+```
+
+### Stage 1: Tool Check
+
+**Purpose:** Determine which validation stages are runnable in the current environment.
+
+**Command:**
+```bash
+bash scripts/setup_tools.sh
+```
+
+If required tools are missing, continue with available tools and report skipped stages.
+
+### Stage 2: YAML Syntax Validation (yamllint)
 
 **Purpose:** Catch YAML syntax errors and style issues before Kubernetes-specific validation.
 
 **Command:**
 ```bash
-yamllint <file.yaml>
+yamllint -c assets/.yamllint <file.yaml>
 ```
 
 **Common Issues Detected:**
@@ -21,20 +46,9 @@ yamllint <file.yaml>
 - Duplicate keys
 - Syntax errors
 
-**Configuration:**
-Create a `.yamllint` config file for custom rules:
-```yaml
-extends: default
-rules:
-  line-length:
-    max: 120
-  indentation:
-    spaces: 2
-  comments:
-    min-spaces-from-content: 1
-```
+Stage 3 (CRD detection and docs lookup) is covered in the dedicated section below.
 
-### Stage 2: Kubernetes Schema Validation (kubeconform)
+### Stage 4: Kubernetes Schema Validation (kubeconform)
 
 **Purpose:** Validate against Kubernetes schemas and detect structural issues.
 
@@ -68,17 +82,17 @@ kubeconform \
 - Unknown fields (in strict mode)
 - Invalid enum values
 
-### Stage 3: Cluster Dry-Run (kubectl)
+### Stage 5: Cluster Dry-Run (kubectl)
 
 **Purpose:** Validate against the actual cluster configuration, admission controllers, and policies.
 
 **Client-Side Dry Run:**
 ```bash
-kubectl apply --dry-run=client -f <file.yaml>
+kubectl apply --dry-run=client --validate=false -f <file.yaml>
 ```
-- Validates against basic Kubernetes API rules
-- Does not contact the cluster
-- Fast but less thorough
+- Best-effort fallback when server-side dry-run is unavailable
+- May still fail if API discovery is unavailable (for example, no reachable cluster)
+- Does not catch admission controller or policy issues
 
 **Server-Side Dry Run:**
 ```bash
@@ -100,27 +114,36 @@ kubectl diff -f <file.yaml>
 ```
 Shows what would change if applied to the cluster.
 
-## CRD Detection and Documentation Lookup
+## CRD Detection and Documentation Lookup (Stage 3)
 
 ### Step 1: Detect CRDs
 
-Use the `detect_crd.py` script:
+Use the wrapper script (handles missing PyYAML automatically):
 ```bash
-python3 scripts/detect_crd.py <file.yaml>
+bash scripts/detect_crd_wrapper.sh <file.yaml>
 ```
 
 Output example:
 ```json
-[
-  {
-    "kind": "Certificate",
-    "apiVersion": "cert-manager.io/v1",
-    "group": "cert-manager.io",
-    "version": "v1",
-    "isCRD": true,
-    "name": "example-cert"
+{
+  "resources": [
+    {
+      "kind": "Certificate",
+      "apiVersion": "cert-manager.io/v1",
+      "group": "cert-manager.io",
+      "version": "v1",
+      "isCRD": true,
+      "name": "example-cert"
+    }
+  ],
+  "parseErrors": [],
+  "summary": {
+    "totalDocuments": 1,
+    "parsedSuccessfully": 1,
+    "parseErrors": 0,
+    "crdsDetected": 1
   }
-]
+}
 ```
 
 ### Step 2: Lookup CRD Documentation
@@ -129,7 +152,7 @@ For each detected CRD:
 
 1. **Use context7 MCP (preferred):**
    - Resolve library ID: `mcp__context7__resolve-library-id` with the CRD group/project name
-   - Fetch documentation: `mcp__context7__get-library-docs` with the library ID
+   - Fetch documentation: `mcp__context7__query-docs` with the library ID
    - Focus on the specific version if available
 
 2. **Fallback to Web Search:**
@@ -150,20 +173,26 @@ Once documentation is found:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│ 0. Count Documents                                          │
+│    Run: python3 scripts/count_yaml_documents.py <file.yaml> │
+│    Record: documents + separators                           │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
 │ 1. Check Tools                                              │
-│    Run: scripts/setup_tools.sh                              │
-│    Ensure yamllint, kubeconform, kubectl are installed      │
+│    Run: bash scripts/setup_tools.sh                         │
+│    Continue with available tools                            │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. YAML Syntax Check                                        │
-│    Run: yamllint <file.yaml>                                │
+│    Run: yamllint -c assets/.yamllint <file.yaml>            │
 │    Fix: Indentation, trailing spaces, syntax errors         │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 3. Detect CRDs                                              │
-│    Run: python3 scripts/detect_crd.py <file.yaml>           │
+│    Run: bash scripts/detect_crd_wrapper.sh <file.yaml>      │
 │    Parse: Extract kind, apiVersion, group                   │
 └─────────────────────────────────────────────────────────────┘
                            ↓
@@ -182,29 +211,22 @@ Once documentation is found:
                     └──────┬──────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Schema Validation                                        │
+│ 4. Schema Validation                                        │
 │    Run: kubeconform -summary <file.yaml>                    │
 │    Fix: Required fields, types, unknown fields              │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. Dry-Run (if cluster available)                           │
+│ 5. Dry-Run (if cluster available)                           │
 │    Run: kubectl apply --dry-run=server -f <file.yaml>       │
 │    Fix: Admission issues, quotas, policies                  │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 7. Generate Validation Report                               │
+│ 6. Generate Validation Report                               │
 │    - Summarize all issues in table format                   │
 │    - Show before/after code blocks for each issue           │
 │    - Do NOT modify files - report only                      │
-└─────────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 8. Provide Next Steps                                       │
-│    - List errors that must be fixed                         │
-│    - List warnings for best practices                       │
-│    - User decides which fixes to apply                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -217,8 +239,9 @@ Once documentation is found:
 
 ### Cluster Not Available
 - Skip server-side dry-run
-- Use client-side dry-run and kubeconform instead
-- Warn user that some validations are skipped
+- Attempt client-side dry-run with `--dry-run=client --validate=false`
+- If client-side still fails due discovery/openapi errors, skip dry-run and rely on kubeconform
+- Warn user that dry-run coverage is limited or unavailable
 
 ### CRD Documentation Not Found
 - Document that CRD docs couldn't be found
@@ -235,7 +258,7 @@ Once documentation is found:
 
 ## Best Practices for Validation
 
-1. **Always validate in order:** syntax → schema → dry-run
+1. **Always validate in order:** count → tool check → syntax → CRD detection → schema → dry-run
 2. **Collect all issues:** Don't stop at first error - gather everything before reporting
 3. **For CRDs:** Always look up documentation first
 4. **Version awareness:** Check K8s version compatibility

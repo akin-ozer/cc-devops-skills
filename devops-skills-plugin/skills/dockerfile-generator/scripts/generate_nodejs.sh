@@ -21,7 +21,7 @@ OPTIONS:
     -v, --version VERSION     Node.js version (default: 20)
     -p, --port PORT          Port to expose (default: 3000)
     -o, --output FILE        Output file (default: Dockerfile)
-    -e, --entry FILE         Application entry point (default: index.js)
+    -e, --entry COMMAND      Application entry point or full start command (default: index.js)
     -b, --build              Include build stage for compilation
     -h, --help               Show this help message
 
@@ -72,6 +72,34 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Escape values that are inserted into JSON-form CMD arrays.
+escape_json_string() {
+    local input="$1"
+    input="${input//\\/\\\\}"
+    input="${input//\"/\\\"}"
+    printf '%s' "$input"
+}
+
+# Escape values that are inserted into sed replacement strings.
+escape_sed_replacement() {
+    local input="$1"
+    input="${input//\\/\\\\}"
+    input="${input//&/\\&}"
+    input="${input//|/\\|}"
+    printf '%s' "$input"
+}
+
+# Build CMD instruction based on entry format:
+# - single token: run with node directly
+# - multi-token: treat as full command executed by shell
+APP_ENTRY_ESCAPED="$(escape_json_string "$APP_ENTRY")"
+if [[ "$APP_ENTRY" =~ [[:space:]] ]]; then
+    CMD_INSTRUCTION="CMD [\"sh\", \"-c\", \"$APP_ENTRY_ESCAPED\"]"
+else
+    CMD_INSTRUCTION="CMD [\"node\", \"$APP_ENTRY_ESCAPED\"]"
+fi
+CMD_INSTRUCTION_SED="$(escape_sed_replacement "$CMD_INSTRUCTION")"
+
 # Generate Dockerfile
 cat > "$OUTPUT_FILE" <<'EOF'
 # syntax=docker/dockerfile:1
@@ -117,13 +145,13 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "require('http').get('http://localhost:PORT_NUMBER/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
 
 # Start application
-CMD ["node", "APP_ENTRY_POINT"]
+CMD_INSTRUCTION_PLACEHOLDER
 EOF
 
 # Replace placeholders
 sed -i.bak "s/NODE_VERSION/$NODE_VERSION/g" "$OUTPUT_FILE"
 sed -i.bak "s/PORT_NUMBER/$PORT/g" "$OUTPUT_FILE"
-sed -i.bak "s/APP_ENTRY_POINT/$APP_ENTRY/g" "$OUTPUT_FILE"
+sed -i.bak "s|CMD_INSTRUCTION_PLACEHOLDER|$CMD_INSTRUCTION_SED|g" "$OUTPUT_FILE"
 
 # Handle build stage
 if [ "$BUILD_STAGE" = "true" ]; then

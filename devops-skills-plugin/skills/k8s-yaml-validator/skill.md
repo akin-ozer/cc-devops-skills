@@ -11,6 +11,15 @@ This skill provides a comprehensive validation workflow for Kubernetes YAML reso
 
 **IMPORTANT: This is a REPORT-ONLY validation tool.** Do NOT modify files, do NOT use Edit tool, do NOT use AskUserQuestion to offer fixes. Generate a comprehensive validation report with suggested fixes shown as before/after code blocks, then let the user decide what to do next.
 
+## Trigger Phrases
+
+Use this skill when prompts look like:
+- "Validate this Kubernetes YAML before deploy."
+- "Lint these manifests and report what is broken."
+- "Check this CRD manifest and explain schema issues."
+- "Run dry-run checks on this manifest."
+- "Find line-level errors in this multi-document YAML."
+
 ## When to Use This Skill
 
 Invoke this skill when:
@@ -22,31 +31,65 @@ Invoke this skill when:
 - Understanding what validation errors exist in manifests (report-only, user fixes manually)
 - The user asks to "validate", "lint", "check", or "test" Kubernetes YAML files
 
+## Read-Only Boundary (Mandatory)
+
+This skill is strictly report-only:
+- Do NOT modify any user files.
+- Do NOT run Edit for fixes.
+- Do NOT ask for permission to apply fixes.
+- Do provide before/after snippets as suggestions in the report.
+
+## Deterministic Path Setup
+
+Run with explicit paths so commands are repeatable:
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+SKILL_DIR="$REPO_ROOT/devops-skills-plugin/skills/k8s-yaml-validator"
+TARGET_FILE="$REPO_ROOT/<relative/path/to/file.yaml>"
+```
+
+Path checks:
+- If `REPO_ROOT` is empty, stop and ask for repository root.
+- If `SKILL_DIR` does not exist, stop and report path mismatch.
+- If `TARGET_FILE` does not exist, stop and ask for the correct file.
+
 ## Validation Workflow
 
 Follow this sequential validation workflow. Each stage catches different types of issues:
 
-### Stage 0: Pre-Validation Setup (Resource Count Check)
+### Stage 0: Pre-Validation Setup (Deterministic Resource Count)
 
-**IMPORTANT: Before running any validation tools, check the file complexity:**
+Before running validators, count documents using the bundled script:
 
-1. **Count the number of resources** in the file by counting `---` document separators or parsing the file
-2. **If the file contains 3 or more resources**, immediately load `references/validation_workflow.md`:
-   ```
-   Read references/validation_workflow.md
-   ```
-   This ensures you have the complete workflow context for handling complex multi-resource files.
+```bash
+python3 "$SKILL_DIR/scripts/count_yaml_documents.py" "$TARGET_FILE"
+```
 
-3. **Note the resource count** for the validation report summary
+Expected output (example):
+```json
+{
+  "file": ".../manifests.yaml",
+  "documents": 3,
+  "separators": 2
+}
+```
 
-This pre-check ensures proper handling of complex files from the start of validation.
+Gate rules:
+- If `documents >= 3`, load `references/validation_workflow.md` before Stage 1.
+- Always include the document count in the final report summary.
+- If `python3` is unavailable, use fallback:
+```bash
+awk 'BEGIN{d=0;seen=0} /^[[:space:]]*---[[:space:]]*$/ {if(seen){d++;seen=0}; next} /^[[:space:]]*#/ {next} NF{seen=1} END{if(seen)d++; print d}' "$TARGET_FILE"
+```
+and mark the count as `estimated` in the report.
 
 ### Stage 1: Tool Check
 
 Before starting validation, verify required tools are installed:
 
 ```bash
-bash scripts/setup_tools.sh
+bash "$SKILL_DIR/scripts/setup_tools.sh"
 ```
 
 Required tools:
@@ -54,14 +97,14 @@ Required tools:
 - **kubeconform**: Kubernetes schema validation with CRD support
 - **kubectl**: Cluster dry-run testing (optional but recommended)
 
-If tools are missing, display the installation instructions from the script output and continue with available tools. Document which tools are missing in the validation report.
+If tools are missing, display installation guidance from script output and continue with available tools. Document missing tools and skipped stages in the report.
 
 ### Stage 2: YAML Syntax Validation
 
 Validate YAML syntax and formatting using yamllint:
 
 ```bash
-yamllint -c assets/.yamllint <file.yaml>
+yamllint -c "$SKILL_DIR/assets/.yamllint" "$TARGET_FILE"
 ```
 
 **Common issues caught:**
@@ -81,7 +124,7 @@ yamllint -c assets/.yamllint <file.yaml>
 Before schema validation, detect if the YAML contains Custom Resource Definitions:
 
 ```bash
-bash scripts/detect_crd_wrapper.sh <file.yaml>
+bash "$SKILL_DIR/scripts/detect_crd_wrapper.sh" "$TARGET_FILE"
 ```
 
 The wrapper script automatically handles Python dependencies by creating a temporary virtual environment if PyYAML is not available.
@@ -123,18 +166,16 @@ The script outputs JSON with resource information and parse status:
 
 **For each detected CRD:**
 
-1. **Try context7 MCP first (preferred):**
-   ```
-   Use mcp__context7__resolve-library-id with the CRD project name
-   Example: "cert-manager" for cert-manager.io CRDs
+1. **Try Context7 MCP first (preferred):**
+   - Resolve library:
+     - Tool: `mcp__context7__resolve-library-id`
+     - `libraryName`: CRD project name (example: `cert-manager` for `cert-manager.io`)
+   - Query docs:
+     - Tool: `mcp__context7__query-docs`
+     - `libraryId`: resolved library ID from previous step
+     - `query`: include CRD kind, group, and version (example: `Certificate cert-manager.io v1 required fields in spec`)
 
-   Then use mcp__context7__get-library-docs with:
-   - context7CompatibleLibraryID from resolve step
-   - topic: The CRD kind (e.g., "Certificate")
-   - tokens: 5000 (adjust based on need)
-   ```
-
-2. **Fallback to WebSearch if context7 fails:**
+2. **Fallback to `web.search_query` if Context7 fails or returns insufficient details:**
    ```
    Search query pattern:
    "<kind>" "<group>" kubernetes CRD "<version>" documentation spec
@@ -149,7 +190,7 @@ The script outputs JSON with resource information and parse status:
    - Examples from documentation
    - Version-specific changes or deprecations
 
-**Secondary CRD Detection via kubeconform:** If the detect_crd_wrapper.sh script fails to detect CRDs (e.g., all documents have syntax errors), but kubeconform successfully validates a CRD resource, you should still look up documentation for that CRD. Parse the kubeconform output to identify validated CRDs and perform context7/WebSearch lookups for them.
+**Secondary CRD Detection via kubeconform:** If `detect_crd_wrapper.sh` cannot identify CRDs (for example, syntax errors in all documents), but kubeconform still validates a CRD resource, look up docs for that CRD anyway. Parse kubeconform output to identify validated CRDs and perform Context7/`web.search_query` lookups.
 
 **Why this matters:** CRDs have custom schemas not available in standard Kubernetes validation tools. Understanding the CRD's spec requirements prevents validation errors and ensures correct resource configuration.
 
@@ -165,7 +206,7 @@ kubeconform \
   -ignore-missing-schemas \
   -summary \
   -verbose \
-  <file.yaml>
+  "$TARGET_FILE"
 ```
 
 **Options explained:**
@@ -190,16 +231,23 @@ kubeconform \
 
 ```
 1. Try server-side dry-run first:
-   kubectl apply --dry-run=server -f <file.yaml>
+   kubectl apply --dry-run=server -f "$TARGET_FILE"
 
    └─ If SUCCESS → Use results, continue to Stage 6
 
    └─ If FAILS with connection error (e.g., "connection refused",
       "unable to connect", "no configuration"):
       │
-      ├─ 2. Fall back to client-side dry-run:
-      │     kubectl apply --dry-run=client -f <file.yaml>
-      │     Document in report: "Server-side validation skipped (no cluster access)"
+      ├─ 2. Attempt client-side dry-run (best effort):
+      │     kubectl apply --dry-run=client --validate=false -f "$TARGET_FILE"
+      │
+      │     ├─ If SUCCESS:
+      │     │    Document in report: "Server-side validation skipped (no cluster access)"
+      │     │
+      │     └─ If FAILS with discovery/openapi error (e.g., "unable to recognize",
+      │        "failed to download openapi", "couldn't get current server API group list"):
+      │        Document in report: "Dry-run skipped (cluster discovery unavailable)"
+      │        Continue to Stage 6
       │
       └─ If FAILS with validation error (e.g., "admission webhook denied",
          "resource quota exceeded", "invalid value"):
@@ -222,7 +270,7 @@ kubeconform \
 - Invalid ConfigMap/Secret references
 - Webhook validations
 
-**Client-side dry-run catches (fallback):**
+**Client-side dry-run catches (fallback, when command succeeds):**
 - Basic schema validation
 - Required field checks
 - Type validation
@@ -232,10 +280,11 @@ kubeconform \
 - If server-side: "Full cluster validation performed"
 - If client-side: "Limited validation (no cluster access) - admission policies not checked"
 - If skipped: "Dry-run skipped - kubectl not available"
+- If skipped after client fallback attempt: "Dry-run skipped (cluster discovery unavailable)"
 
 **For updates to existing resources:**
 ```bash
-kubectl diff -f <file.yaml>
+kubectl diff -f "$TARGET_FILE"
 ```
 This shows what would change, helping catch unintended modifications.
 
@@ -324,11 +373,37 @@ After completing all validation stages, generate a comprehensive report. **This 
    - Let the user decide which fixes to apply
    - User can request fixes after reviewing the report
 
+## Objective Stage Gates (Repeatable)
+
+Use this table to keep stage decisions deterministic:
+
+| Stage | Required | Command | Pass/Fail Criteria | Fallback |
+|------|----------|---------|--------------------|----------|
+| 0 Resource Count | Yes | `python3 "$SKILL_DIR/scripts/count_yaml_documents.py" "$TARGET_FILE"` | Pass when count output is produced and `documents` is recorded. | Use AWK estimator and mark `estimated`. |
+| 1 Tool Check | Yes | `bash "$SKILL_DIR/scripts/setup_tools.sh"` | Pass when command runs and tool availability is known. | Continue with available tools and log skips. |
+| 2 YAML Syntax | If `yamllint` available | `yamllint -c "$SKILL_DIR/assets/.yamllint" "$TARGET_FILE"` | Pass on exit code `0`; fail on lint errors. | Skip with explicit reason if missing binary. |
+| 3 CRD Detection | If `python3` available | `bash "$SKILL_DIR/scripts/detect_crd_wrapper.sh" "$TARGET_FILE"` | Pass when JSON output includes `summary`. | Skip CRD extraction and rely on kubeconform clues. |
+| 4 Schema | If `kubeconform` available | kubeconform command from Stage 4 | Pass when kubeconform reports valid resources. | Skip and record as coverage gap if missing binary. |
+| 5 Dry-Run | If `kubectl` available | `kubectl apply --dry-run=server -f "$TARGET_FILE"` | Pass on successful server dry-run. | Attempt client-side fallback with `--dry-run=client --validate=false`; if discovery still fails, mark stage skipped. |
+| 6 Report | Yes | Report generation | Pass when summary + per-issue snippets + next steps are provided. | No fallback; this stage is mandatory. |
+
+## Fallback Matrix
+
+| Constraint | Action | Report Language |
+|-----------|--------|-----------------|
+| `python3` unavailable | Skip `count_yaml_documents.py` and CRD parser scripts. Use AWK count only. | `Python runtime unavailable; CRD parser skipped, resource count is estimated.` |
+| `yamllint` unavailable | Skip Stage 2; continue with schema/dry-run stages if available. | `YAML lint skipped because yamllint is not installed.` |
+| `kubeconform` unavailable | Skip Stage 4; run lint and dry-run only. | `Schema validation skipped because kubeconform is not installed.` |
+| `kubectl` unavailable | Skip Stage 5 entirely. | `Dry-run skipped because kubectl is not installed.` |
+| No cluster connectivity | Run server-side first, then attempt client-side fallback with `--dry-run=client --validate=false`; if it still fails, skip dry-run and continue. | `Server-side dry-run unavailable due cluster access; client-side dry-run attempted.` |
+| Client dry-run still requires discovery | Treat dry-run as unavailable and rely on lint + schema stages. | `Dry-run skipped (cluster discovery unavailable); lint and schema results used.` |
+| External docs unavailable | Continue local validation and state documentation gap. | `CRD documentation lookup deferred due tooling/network limitation.` |
+
 ## Best Practices Reference
 
 For detailed Kubernetes YAML best practices, load the reference:
 ```
-Read references/k8s_best_practices.md
+Read "$SKILL_DIR/references/k8s_best_practices.md"
 ```
 
 This reference includes:
@@ -349,7 +424,7 @@ This reference includes:
 
 For in-depth workflow details and error handling strategies, load the reference:
 ```
-Read references/validation_workflow.md
+Read "$SKILL_DIR/references/validation_workflow.md"
 ```
 
 This reference includes:
@@ -414,14 +489,14 @@ This ensures users get maximum validation feedback even when some documents have
 ## Error Handling Strategies
 
 ### Tool Not Available
-- Run `scripts/setup_tools.sh` to check availability
+- Run `bash "$SKILL_DIR/scripts/setup_tools.sh"` to check availability
 - Provide installation instructions
 - Skip optional stages but document what was skipped
 - Continue with available tools
 
 ### Cluster Access Issues
-- Fall back to client-side dry-run
-- Skip cluster validation if no kubectl config
+- Attempt client-side dry-run with `--dry-run=client --validate=false`
+- If client dry-run still fails with API discovery/openapi errors, skip dry-run and rely on lint/schema stages
 - Document limitations in validation report
 
 ### CRD Documentation Not Found
@@ -482,8 +557,8 @@ For improved validation speed, some stages can be executed in parallel:
 **Example parallel execution:**
 ```
 # Run these in parallel (using & and wait, or parallel tool calls):
-yamllint -c assets/.yamllint <file.yaml>
-bash scripts/detect_crd_wrapper.sh <file.yaml>
+yamllint -c "$SKILL_DIR/assets/.yamllint" "$TARGET_FILE"
+bash "$SKILL_DIR/scripts/detect_crd_wrapper.sh" "$TARGET_FILE"
 ```
 
 **Must run sequentially:**
@@ -514,7 +589,7 @@ The `test/` directory contains example files to exercise all validation paths. U
 | Test File | Purpose | Expected Behavior |
 |-----------|---------|-------------------|
 | `deployment-test.yaml` | Valid standard K8s resource | All stages pass, no errors |
-| `certificate-crd-test.yaml` | Valid CRD resource | CRD detected, context7 lookup performed, no errors |
+| `certificate-crd-test.yaml` | Valid CRD resource | CRD detected, Context7 lookup performed, no errors |
 | `comprehensive-test.yaml` | Multi-resource with intentional errors | Syntax error detected, partial parsing works, CRD found |
 
 ### Validation Paths to Test
@@ -522,26 +597,80 @@ The `test/` directory contains example files to exercise all validation paths. U
 1. **Happy Path (All Valid)**
    - File: `deployment-test.yaml`
    - Expected: All stages pass, report shows "0 errors, 0 warnings"
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+python3 scripts/count_yaml_documents.py test/deployment-test.yaml
+yamllint -c assets/.yamllint test/deployment-test.yaml
+bash scripts/detect_crd_wrapper.sh test/deployment-test.yaml
+kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -ignore-missing-schemas -summary -verbose \
+  test/deployment-test.yaml
+kubectl apply --dry-run=server -f test/deployment-test.yaml
+```
 
 2. **CRD Detection Path**
    - File: `certificate-crd-test.yaml`
-   - Expected: CRD detected, context7 MCP called, documentation retrieved
+   - Expected: CRD detected, `mcp__context7__resolve-library-id` and `mcp__context7__query-docs` used
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+python3 scripts/count_yaml_documents.py test/certificate-crd-test.yaml
+bash scripts/detect_crd_wrapper.sh test/certificate-crd-test.yaml
+kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -ignore-missing-schemas -summary -verbose \
+  test/certificate-crd-test.yaml
+```
 
 3. **Syntax Error Path**
    - File: `comprehensive-test.yaml`
    - Expected: yamllint catches error, kubeconform reports partial validation, dry-run blocked
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+python3 scripts/count_yaml_documents.py test/comprehensive-test.yaml
+yamllint -c assets/.yamllint test/comprehensive-test.yaml
+bash scripts/detect_crd_wrapper.sh test/comprehensive-test.yaml
+kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -ignore-missing-schemas -summary -verbose \
+  test/comprehensive-test.yaml
+kubectl apply --dry-run=server -f test/comprehensive-test.yaml
+```
 
 4. **Multi-Resource Partial Parsing**
    - File: `comprehensive-test.yaml` (has 3 resources, 1 with syntax error)
    - Expected: 2/3 resources validated, parse error reported for document 1
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+python3 scripts/count_yaml_documents.py test/comprehensive-test.yaml
+bash scripts/detect_crd_wrapper.sh test/comprehensive-test.yaml
+```
 
 5. **No Cluster Access Path**
    - Any valid file with no kubectl cluster configured
-   - Expected: Server-side dry-run fails, falls back to client-side
+   - Expected: Server-side dry-run fails; client-side fallback is attempted and may still fail if API discovery is unavailable
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+KUBECONFIG=/tmp/nonexistent-kubeconfig kubectl apply --dry-run=server -f test/deployment-test.yaml
+KUBECONFIG=/tmp/nonexistent-kubeconfig kubectl apply --dry-run=client --validate=false -f test/deployment-test.yaml
+```
 
 6. **Missing Tools Path**
    - Test by temporarily removing a tool from PATH
    - Expected: setup_tools.sh reports missing, validation continues with available tools
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+PATH="/usr/bin:/bin" bash scripts/setup_tools.sh
+```
 
 ### Creating New Test Files
 
@@ -562,6 +691,15 @@ For any validation, the report should include:
 - [ ] File-absolute line numbers
 - [ ] "Next Steps" section
 
+## Done Criteria
+
+Validation is complete only when all conditions are true:
+- Stage gates were evaluated in order and every skipped stage includes a reason.
+- Resource count came from `count_yaml_documents.py` (or documented AWK fallback).
+- CRD lookups used `mcp__context7__resolve-library-id` + `mcp__context7__query-docs`, with `web.search_query` fallback only when needed.
+- Report-only boundary was preserved (no edits, no fix-application prompts).
+- Output includes exact commands run, findings by severity, and manual next steps.
+
 ## Resources
 
 ### scripts/
@@ -570,20 +708,26 @@ For any validation, the report should include:
 - Wrapper script that handles Python dependency management
 - Automatically creates temporary venv if PyYAML is not available
 - Calls detect_crd.py to parse YAML files
-- Usage: `bash scripts/detect_crd_wrapper.sh <file.yaml>`
+- Usage: `bash "$SKILL_DIR/scripts/detect_crd_wrapper.sh" "$TARGET_FILE"`
 
 **detect_crd.py**
 - Parses YAML files to identify Custom Resource Definitions
 - Extracts kind, apiVersion, group, and version information
 - Outputs JSON for programmatic processing
 - Requires PyYAML (handled automatically by wrapper script)
-- Can be called directly: `python3 scripts/detect_crd.py <file.yaml>`
+- Can be called directly: `python3 "$SKILL_DIR/scripts/detect_crd.py" "$TARGET_FILE"`
+
+**count_yaml_documents.py**
+- Deterministically counts non-empty YAML documents in a multi-doc file
+- Returns JSON with document count and separators
+- Use before Stage 1 to decide whether to load deep workflow reference
+- Usage: `python3 "$SKILL_DIR/scripts/count_yaml_documents.py" "$TARGET_FILE"`
 
 **setup_tools.sh**
 - Checks for required validation tools
 - Provides installation instructions for missing tools
 - Verifies versions of installed tools
-- Usage: `bash scripts/setup_tools.sh`
+- Usage: `bash "$SKILL_DIR/scripts/setup_tools.sh"`
 
 ### references/
 
@@ -606,4 +750,4 @@ For any validation, the report should include:
 - Pre-configured yamllint rules for Kubernetes YAML
 - Follows Kubernetes conventions (2-space indentation, line length, etc.)
 - Can be customized per project
-- Usage: `yamllint -c assets/.yamllint <file.yaml>`
+- Usage: `yamllint -c "$SKILL_DIR/assets/.yamllint" "$TARGET_FILE"`

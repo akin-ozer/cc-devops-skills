@@ -51,10 +51,16 @@ jobs:
         run: flake8 .
 
       - name: Run Pylint
-        run: pylint **/*.py || true
+        run: |
+          FILES=$(git ls-files '*.py')
+          if [ -z "$FILES" ]; then
+            echo "No Python files found to lint"
+            exit 0
+          fi
+          pylint $FILES
 
       - name: Run MyPy
-        run: mypy . || true
+        run: mypy .
 
   test:
     name: Test on Python ${{ matrix.python-version }}

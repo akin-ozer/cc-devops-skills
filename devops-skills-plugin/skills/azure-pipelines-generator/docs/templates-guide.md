@@ -2,6 +2,22 @@
 
 This guide covers how to create and use templates in Azure Pipelines for reusable and maintainable pipeline configurations.
 
+## How to Use This Guide
+
+Use this deterministic sequence:
+
+1. Choose template type (`step`, `job`, `stage`, or `variables`) based on repetition level.
+2. Start from the corresponding example in this file.
+3. Keep parameters explicit, typed, and minimally scoped.
+4. Add runtime `condition` logic at stage/job level for branch or environment gating.
+5. Validate the final root pipeline and template files.
+
+Fallback behavior:
+
+- If template complexity adds more risk than value, inline the logic in the root pipeline and note the reason.
+- If shared template repositories are not available, use local `templates/` files and keep paths explicit.
+- If template expression behavior is uncertain, use simpler runtime conditions and document assumptions.
+
 ## What Are Templates?
 
 Templates allow you to define reusable content, logic, and parameters in YAML pipelines. They promote DRY (Don't Repeat Yourself) principles and make pipelines more maintainable.
@@ -495,7 +511,7 @@ parameters:
 
 - name: version
   type: string
-  default: 'latest'
+  default: '$(Build.BuildId)'
   displayName: 'Application Version'
 
 - name: approvalRequired
@@ -628,7 +644,7 @@ steps:
     dockerfile: ${{ parameters.dockerfilePath }}
     tags: |
       ${{ parameters.imageTag }}
-      latest
+      $(Build.SourceVersion)
 
 - task: Docker@2
   displayName: 'Push Docker image'
@@ -637,7 +653,7 @@ steps:
     repository: ${{ parameters.imageName }}
     tags: |
       ${{ parameters.imageTag }}
-      latest
+      $(Build.SourceVersion)
 ```
 
 ### Deployment Approval Template
@@ -695,6 +711,15 @@ Key takeaways:
 4. Organize templates logically
 5. Version your template repositories
 6. Test templates thoroughly
+
+## Done Criteria
+
+Template design is complete when:
+
+- Selected template type matches the requested reuse scope.
+- Parameters are typed and defaults are explicit.
+- Branch/environment gating is implemented with deterministic runtime conditions.
+- Root pipeline and template composition can be validated without path ambiguity.
 
 ## Further Reading
 

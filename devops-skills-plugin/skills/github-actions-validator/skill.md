@@ -9,6 +9,15 @@ description: Comprehensive toolkit for validating, linting, and testing GitHub A
 
 Validate and test GitHub Actions workflows, custom actions, and public actions using industry-standard tools (actionlint and act). This skill provides comprehensive validation including syntax checking, static analysis, local workflow execution testing, and action verification with version-aware documentation lookup.
 
+## Trigger Phrases
+
+Use this skill when the request includes phrases like:
+- "validate this GitHub Actions workflow"
+- "check my `.github/workflows/*.yml` file"
+- "debug actionlint errors"
+- "test this workflow locally with act"
+- "verify GitHub Action versions or deprecations"
+
 ## When to Use This Skill
 
 Use this skill when:
@@ -19,49 +28,68 @@ Use this skill when:
 - **Verifying public actions**: Validating usage of actions from GitHub Marketplace
 - **Pre-commit validation**: Ensuring workflows are valid before committing
 
-## CRITICAL: Assistant Workflow (MUST FOLLOW)
+## Required Execution Flow
 
-**Every validation MUST follow these steps. Skipping any step is non-compliant.**
+Every validation run should follow these steps in order.
 
-### Step 1: Run Validation Script
+### Step 1: Set Skill Path and Run Validation
+
+Run commands from the repository root that contains `.github/workflows/`.
 
 ```bash
-cd .claude/skills/github-actions-validator
-bash scripts/validate_workflow.sh <workflow-file-or-directory>
+SKILL_DIR="devops-skills-plugin/skills/github-actions-validator"
+bash "$SKILL_DIR/scripts/validate_workflow.sh" <workflow-file-or-directory>
 ```
 
-### Step 2: For EACH Error - Consult Reference File
+### Step 2: Map Each Error to a Reference
 
-When actionlint or act reports ANY error, you MUST:
+For each actionlint/act error, consult the mapping table below, then extract the matching fix pattern.
 
-1. **Read the appropriate reference file** (see mapping below)
-2. **Find the matching error pattern**
-3. **Extract the fix/solution**
+### Step 3: Apply Minimal-Quote Policy
 
-### Step 3: Quote the Fix to User
+For each issue:
+1. Include the exact error line from tool output.
+2. Quote only the smallest useful snippet from `references/` (prefer <=8 lines).
+3. Paraphrase the rest and cite the source file/section.
+4. Show corrected workflow code.
 
-For each error, provide:
+### Step 4: Handle Unmapped Errors Explicitly
 
-1. **Error message** (from script output)
-2. **Explanation** (from reference file)
-3. **Fix code** (quoted from reference file)
-4. **Corrected code** (applied to user's workflow)
+If an error does not match any mapping:
+1. Label it as `UNMAPPED`.
+2. Capture exact tool output, workflow file, and line number (if available).
+3. Check `references/common_errors.md` general sections first.
+4. If still unresolved, search official docs with the exact error string.
+5. Mark the fix as `provisional` until post-fix rerun passes.
 
-### Step 4: Verify Public Actions (if present)
+### Step 5: Verify Public Action Versions
 
-For any public actions (`uses: owner/action@version`):
+For each `uses: owner/action@version`:
+1. Check `references/action_versions.md`.
+2. For unknown actions, verify against official docs.
+3. Confirm required inputs and deprecations.
 
-1. **First check `references/action_versions.md`** for known actions and versions
-2. **Use web search** for unknown actions: `"[action-name] [version] github action documentation"`
-3. **Verify required inputs match**
-4. **Check for deprecation warnings**
+Offline mode behavior:
+- If network/doc lookup is unavailable, rely on `references/action_versions.md` only.
+- Mark unknown actions as `UNVERIFIED-OFFLINE`.
+- Do not claim "latest" version without an online verification pass.
 
-### Step 5: Provide Complete Summary
+### Step 6: Mandatory Post-Fix Rerun
 
-After all errors are addressed:
-- List all fixes applied
-- Note any warnings
-- Recommend best practices from `references/`
+After applying fixes, rerun validation before finalizing:
+
+```bash
+SKILL_DIR="devops-skills-plugin/skills/github-actions-validator"
+bash "$SKILL_DIR/scripts/validate_workflow.sh" <workflow-file-or-directory>
+```
+
+### Step 7: Provide Final Summary
+
+Final output should include:
+- Issues found and fixes applied
+- Any `UNMAPPED` or `UNVERIFIED-OFFLINE` items
+- Post-fix rerun command and result
+- Remaining warnings/risk notes
 
 ### Error Type to Reference File Mapping
 
@@ -122,11 +150,16 @@ runs-on: ubuntu-latest
 
 ## Quick Start
 
+Set once per shell session:
+
+```bash
+SKILL_DIR="devops-skills-plugin/skills/github-actions-validator"
+```
+
 ### Initial Setup
 
 ```bash
-cd .claude/skills/github-actions-validator
-bash scripts/install_tools.sh
+bash "$SKILL_DIR/scripts/install_tools.sh"
 ```
 
 This installs **act** (local workflow execution) and **actionlint** (static analysis) to `scripts/.tools/`.
@@ -135,16 +168,16 @@ This installs **act** (local workflow execution) and **actionlint** (static anal
 
 ```bash
 # Validate a single workflow
-bash scripts/validate_workflow.sh .github/workflows/ci.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/ci.yml
 
 # Validate all workflows
-bash scripts/validate_workflow.sh .github/workflows/
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/
 
 # Lint-only (fastest)
-bash scripts/validate_workflow.sh --lint-only .github/workflows/ci.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --lint-only .github/workflows/ci.yml
 
 # Test-only with act (requires Docker)
-bash scripts/validate_workflow.sh --test-only .github/workflows/
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --test-only .github/workflows/
 ```
 
 ## Core Validation Workflow
@@ -154,7 +187,7 @@ bash scripts/validate_workflow.sh --test-only .github/workflows/
 Start with static analysis to catch syntax errors and common issues:
 
 ```bash
-bash scripts/validate_workflow.sh --lint-only .github/workflows/ci.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --lint-only .github/workflows/ci.yml
 ```
 
 **What actionlint checks:** YAML syntax, schema compliance, expression syntax, runner labels, action inputs/outputs, job dependencies, CRON syntax, glob patterns, shell scripts, security vulnerabilities.
@@ -164,7 +197,7 @@ bash scripts/validate_workflow.sh --lint-only .github/workflows/ci.yml
 After passing static analysis, test workflow execution:
 
 ```bash
-bash scripts/validate_workflow.sh --test-only .github/workflows/
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --test-only .github/workflows/
 ```
 
 **Note:** act has limitations - see `references/act_usage.md`.
@@ -172,8 +205,13 @@ bash scripts/validate_workflow.sh --test-only .github/workflows/
 ### 3. Full Validation
 
 ```bash
-bash scripts/validate_workflow.sh .github/workflows/ci.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/ci.yml
 ```
+
+Default behavior if tools/runtime are unavailable:
+- If `act` is missing, full validation falls back to actionlint-only.
+- If Docker is unavailable, full validation skips act and continues with actionlint.
+- `--check-versions` works in offline/local mode using `references/action_versions.md`.
 
 ## Validating Resource Types
 
@@ -181,10 +219,10 @@ bash scripts/validate_workflow.sh .github/workflows/ci.yml
 
 ```bash
 # Single workflow
-bash scripts/validate_workflow.sh .github/workflows/ci.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/ci.yml
 
 # All workflows
-bash scripts/validate_workflow.sh .github/workflows/
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/
 ```
 
 **Key validation points:** triggers, job configurations, runner labels, environment variables, secrets, conditionals, matrix strategies.
@@ -194,47 +232,56 @@ bash scripts/validate_workflow.sh .github/workflows/
 Create a test workflow that uses the custom action, then validate:
 
 ```bash
-bash scripts/validate_workflow.sh .github/workflows/test-custom-action.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/test-custom-action.yml
 ```
 
 ### Public Actions
 
 When workflows use public actions (e.g., `actions/checkout@v6`):
 
-1. Use web search to find action documentation
-2. Verify required inputs and version
-3. Check for deprecation warnings
-4. Run validation script
+1. Check `references/action_versions.md` first
+2. Use official docs (or web search) for unknown actions
+3. Verify required inputs and version
+4. Check for deprecation warnings
+5. Run validation script
+
+If offline:
+- Mark unknown versions as `UNVERIFIED-OFFLINE`
+- Avoid "latest/current" claims until online verification is possible
 
 **Search format:** `"[action-name] [version] github action documentation"`
 
 ## Reference File Consultation Guide
 
-### MANDATORY Reference Consultation
+### Mandatory Reference Consultation
 
 | Situation | Reference File | Action |
 |-----------|---------------|--------|
-| actionlint reports ANY error | `references/common_errors.md` | Find matching error, quote solution |
-| act fails with Docker error | `references/act_usage.md` | Check Troubleshooting section |
+| actionlint reports any mapped error | `references/common_errors.md` | Find matching error and apply minimal quote policy |
+| actionlint reports unmapped error | `references/common_errors.md` + official docs | Label as `UNMAPPED`, capture exact output and verify by rerun |
+| act fails with Docker/runtime error | `references/act_usage.md` | Check Troubleshooting section |
 | act fails but workflow works on GitHub | `references/act_usage.md` | Read Limitations section |
 | User asks about actionlint config | `references/actionlint_usage.md` | Provide examples |
 | User asks about act options | `references/act_usage.md` | Read Advanced Options |
-| Security vulnerability detected | `references/common_errors.md` | Quote fix |
-| Validating action versions | `references/action_versions.md` | Check version table |
+| Security vulnerability detected | `references/common_errors.md` | Quote minimal safe fix snippet |
+| Validating action versions | `references/action_versions.md` | Check version table and offline note |
 | Using modern features | `references/modern_features.md` | Check syntax examples |
 | Runner questions/errors | `references/runners.md` | Check labels and availability |
 
 ### Script Output to Reference Mapping
 
-| Output Category | Reference File |
-|-----------------|----------------|
-| `[SYNTAX]` | `common_errors.md` - Syntax Errors |
-| `[EXPRESSION]` | `common_errors.md` - Expression Errors |
-| `[ACTION]` | `common_errors.md` - Action Errors |
-| `[SCHEDULE]` | `common_errors.md` - Schedule Errors |
-| `[SECURITY]` | `common_errors.md` - Security section |
-| `[DOCKER]` | `act_usage.md` - Troubleshooting |
-| `[ACT-LIMIT]` | `act_usage.md` - Limitations |
+| Output Pattern | Reference File |
+|----------------|----------------|
+| `[syntax-check]`, parse, YAML errors | `common_errors.md` - Syntax Errors |
+| `[expression]`, `${{`, condition parsing | `common_errors.md` - Expression Errors |
+| `[action]`, `uses:`, input/output mismatch | `common_errors.md` - Action Errors |
+| `[events]` with CRON/schedule text | `common_errors.md` - Schedule Errors |
+| `potentially untrusted`, injection warnings | `common_errors.md` - Security section |
+| `[runner-label]` or unknown `runs-on` label | `runners.md` |
+| `[job-needs]` dependency errors | `common_errors.md` - Job Configuration Errors |
+| `[glob]`, `paths`, pattern errors | `common_errors.md` - Path Filter Errors |
+| Docker/pull/image errors from act | `act_usage.md` - Troubleshooting |
+| No pattern match | `common_errors.md` + official docs (label `UNMAPPED`) |
 
 ## Reference Files Summary
 
@@ -251,9 +298,9 @@ When workflows use public actions (e.g., `actions/checkout@v6`):
 
 | Issue | Solution |
 |-------|----------|
-| "Tools not found" | Run `bash scripts/install_tools.sh` |
+| "Tools not found" | Run `bash "$SKILL_DIR/scripts/install_tools.sh"` |
 | "Docker daemon not running" | Start Docker or use `--lint-only` |
-| "Permission denied" | Run `chmod +x scripts/*.sh` |
+| "Permission denied" | Run `chmod +x "$SKILL_DIR"/scripts/*.sh` |
 | act fails but GitHub works | See `references/act_usage.md` Limitations |
 
 ### Debug Mode
@@ -270,7 +317,7 @@ act -n                                         # Dry-run (no execution)
 2. **Use actionlint in CI/CD** - Automate validation in pipelines
 3. **Pin action versions** - Use `@v6` not `@main` for stability; SHA pinning for security
 4. **Keep tools updated** - Regularly update actionlint and act
-5. **Use web search for unknown actions** - Verify usage with documentation
+5. **Use official docs for unknown actions** - Verify usage and versions
 6. **Check version compatibility** - See `references/action_versions.md`
 7. **Enable shellcheck** - Catch shell script issues early
 8. **Review security warnings** - Address script injection issues
@@ -289,17 +336,17 @@ act -n                                         # Dry-run (no execution)
 ### Example 1: Pre-commit Validation
 
 ```bash
-cd .claude/skills/github-actions-validator
-bash scripts/validate_workflow.sh .github/workflows/
+SKILL_DIR="devops-skills-plugin/skills/github-actions-validator"
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/
 git add .github/workflows/ && git commit -m "Update workflows"
 ```
 
 ### Example 2: Debug Failing Workflow
 
 ```bash
-bash scripts/validate_workflow.sh --lint-only .github/workflows/failing.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --lint-only .github/workflows/failing.yml
 # Fix issues
-bash scripts/validate_workflow.sh .github/workflows/failing.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" .github/workflows/failing.yml
 ```
 
 ## Complete Worked Example: Multi-Error Workflow
@@ -329,7 +376,7 @@ jobs:
 ### Step 1: Run Validation
 
 ```bash
-bash scripts/validate_workflow.sh --lint-only workflow.yml
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --lint-only workflow.yml
 ```
 
 **Output:**
@@ -480,7 +527,17 @@ jobs:
       - run: echo "Deploying"
 ```
 
-### Step 5: Summary
+### Step 5: Mandatory Rerun
+
+```bash
+bash "$SKILL_DIR/scripts/validate_workflow.sh" --lint-only workflow.yml
+```
+
+Expected rerun result:
+- No previous errors reproduced
+- Remaining warnings, if any, are documented explicitly
+
+### Step 6: Summary
 
 | Error | Type | Fix Applied |
 |-------|------|-------------|
@@ -491,17 +548,26 @@ jobs:
 | `needs: biuld` | Job Dependency | Changed to `needs: build` |
 
 **Recommendations:**
-- Run `bash scripts/validate_workflow.sh --check-versions` regularly
+- Run `bash "$SKILL_DIR/scripts/validate_workflow.sh" --check-versions` regularly
 - Use SHA pinning for all actions in production workflows
 - Always pass untrusted input through environment variables
+
+## Done Criteria
+
+Validation work is complete when all are true:
+- Trigger matched and correct validation mode selected.
+- Each mapped error includes source reference and minimal quote.
+- Each unmapped error is labeled `UNMAPPED` with exact output captured.
+- Public action versions are verified, or marked `UNVERIFIED-OFFLINE`.
+- Post-fix rerun executed and result reported.
 
 ## Summary
 
 1. **Setup**: Install tools with `install_tools.sh`
 2. **Validate**: Run `validate_workflow.sh` on workflow files
 3. **Fix**: Address issues using reference documentation
-4. **Test**: Verify locally with act (when possible)
-5. **Search**: Use web search to verify unknown actions
+4. **Rerun**: Verify fixes with a mandatory post-fix validation run
+5. **Search**: Use official docs to verify unknown actions
 6. **Commit**: Push validated workflows with confidence
 
 For detailed information, consult the appropriate reference file in `references/`.

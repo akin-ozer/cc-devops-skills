@@ -11,35 +11,111 @@ Generate production-ready GitLab CI/CD pipeline configurations following current
 
 ---
 
+## Trigger Phrases
+
+Use this skill when the user asks for GitLab CI/CD generation requests such as:
+- "Create a `.gitlab-ci.yml` for..."
+- "Build a GitLab pipeline for Node/Python/Java..."
+- "Add Docker build and deploy jobs in GitLab CI"
+- "Set up GitLab parent-child or multi-project pipelines"
+- "Include SAST/dependency scanning templates in GitLab CI"
+
+## Execution Model
+
+Follow this deterministic flow in order:
+1. Classify request complexity (`lightweight` vs `full`).
+2. Load only the required reference tier for that complexity.
+3. Output the matching confirmation mode (`lightweight` or `full`).
+4. Generate from the closest template and customize.
+5. Validate with strict Critical/High gates.
+6. Present output with validation status and template/version notes.
+
+If tooling is unavailable, use the documented fallback branch and report it explicitly.
+
+## Mode Routing (Quick Decision)
+
+| Request shape | Mode | Required references | Output profile |
+|---------------|------|---------------------|----------------|
+| Simple single-file pipeline with common jobs/stages and low risk | **Lightweight** | Tier 1 (+ Tier 2 only if needed) | Lightweight confirmation + compact final sections |
+| Multi-environment deploy, advanced `rules`, includes/templates, security/compliance-sensitive workflow, or unclear/risky requirement | **Full** | Tier 1 + Tier 2 (Tier 3 only if needed) | Full confirmation + full final sections |
+| Review/Q&A/snippet/focused fix (not full file generation) | **Targeted** | Only directly relevant files | Concise targeted response (no full boilerplate) |
+
+When uncertain, route to **Full** mode.
+
 ## MANDATORY PRE-GENERATION STEPS
 
-**CRITICAL:** Before generating ANY GitLab CI/CD pipeline, you MUST complete these steps:
+**CRITICAL:** Before generating any complete GitLab CI/CD pipeline, complete these steps.
 
-### Step 1: Load Reference Files (REQUIRED)
+### Step 1: Classify Complexity (REQUIRED)
 
-You MUST use the **Read tool** to load reference files before generating. This is NOT optional.
+| Mode | Use When | Minimum Confirmation |
+|------|----------|----------------------|
+| **Lightweight** | Simple single-file pipeline, common stages/jobs, no advanced GitLab features, no sensitive deploy/security customization | Lightweight confirmation |
+| **Full** | Multi-environment deploys, includes/templates, advanced `rules` logic, security scanning customization, compliance-sensitive workflows, or any unclear/risky request | Full confirmation |
 
+When uncertain, default to **Full** mode.
+
+### Step 2: Load References by Tier (REQUIRED)
+
+Use an open/read action to load references before generation.
+
+**Tier 1 (Required for all requests):**
+1. `references/best-practices.md` - baseline security, performance, naming
+2. `references/common-patterns.md` - starting pattern selection
+3. Matching template from `assets/templates/`:
+   - Docker pipelines -> `assets/templates/docker-build.yml`
+   - Kubernetes deployments -> `assets/templates/kubernetes-deploy.yml`
+   - Multi-project pipelines -> `assets/templates/multi-project.yml`
+   - Basic pipelines -> `assets/templates/basic-pipeline.yml`
+
+**Tier 2 (Required for Full mode; optional for Lightweight mode):**
+1. `references/gitlab-ci-reference.md` - keyword/syntax edge cases
+2. `references/security-guidelines.md` - security-sensitive controls
+
+**Tier 3 (Conditional external docs lookup):**
+- Use only when local references do not cover requested features or version-specific behavior.
+- Follow the lookup flow in "Handling GitLab CI/CD Documentation Lookup."
+
+**If a required local reference or template is unavailable:**
+- Report the exact missing path.
+- Continue with available references and mark assumptions explicitly.
+- Do not claim production-ready confidence until missing critical inputs are resolved.
+
+### Step 3: Confirm Understanding (EXPLICIT OUTPUT REQUIRED)
+
+#### Lightweight Confirmation Mode
+
+Use for simple requests only.
+
+**Required format:**
+```markdown
+## Reference Analysis Complete (Lightweight)
+
+**Pattern:** [Pattern name] from common-patterns.md
+**Template:** [Template file]
+**Key standards to enforce:**
+- [2-3 concrete standards]
 ```
-ALWAYS read ALL FOUR reference files BEFORE generating:
-1. references/best-practices.md - For security, performance, and naming patterns
-2. references/common-patterns.md - For standard pipeline patterns to use as foundation
-3. references/gitlab-ci-reference.md - For syntax reference and keyword details
-4. references/security-guidelines.md - For security-sensitive configurations
+
+**Example:**
+```markdown
+## Reference Analysis Complete (Lightweight)
+
+**Pattern:** Basic Build-Test-Deploy from common-patterns.md
+**Template:** assets/templates/basic-pipeline.yml
+**Key standards to enforce:**
+- Pin runtime image versions (no `:latest`)
+- Add explicit job timeouts
+- Use `rules` instead of deprecated `only`/`except`
 ```
 
-**Additionally, read the appropriate template for the pipeline type:**
-- Docker pipelines → `assets/templates/docker-build.yml`
-- Kubernetes deployments → `assets/templates/kubernetes-deploy.yml`
-- Multi-project pipelines → `assets/templates/multi-project.yml`
-- Basic pipelines → `assets/templates/basic-pipeline.yml`
+#### Full Confirmation Mode
 
-### Step 2: Confirm Understanding (EXPLICIT OUTPUT REQUIRED)
+Use for complex or security-sensitive requests.
 
-After reading references, you MUST output an explicit confirmation statement. This is NOT optional.
-
-**Required confirmation format:**
-```
-## Reference Analysis Complete
+**Required format:**
+```markdown
+## Reference Analysis Complete (Full)
 
 **Pipeline Pattern Identified:** [Pattern name] from common-patterns.md
 - [Brief description of why this pattern fits]
@@ -54,31 +130,31 @@ After reading references, you MUST output an explicit confirmation statement. Th
 - [What will be customized from this template]
 ```
 
-**Example confirmation statement:**
-```
-## Reference Analysis Complete
+**Example:**
+```markdown
+## Reference Analysis Complete (Full)
 
 **Pipeline Pattern Identified:** Docker Build + Kubernetes Deployment from common-patterns.md
 - User needs containerized deployment to K8s clusters with staging/production environments
 
 **Best Practices to Apply:**
-- Pin all Docker images to specific versions (not :latest)
+- Pin all Docker images to specific versions (not `:latest`)
 - Use caching for pip dependencies
 - Implement DAG optimization with `needs` keyword
 - Set explicit timeout on all jobs (15-20 minutes)
-- Use resource_group for deployment jobs
+- Use `resource_group` for deployment jobs
 
 **Security Guidelines:**
 - Use masked CI/CD variables for secrets (KUBE_CONTEXT, registry credentials)
 - Include container scanning with Trivy
 - Never expose secrets in logs
 
-**Template Foundation:** docker-build.yml + kubernetes-deploy.yml
-- Combining Docker build pattern with K8s kubectl deployment
-- Adding Python-specific test jobs
+**Template Foundation:** assets/templates/docker-build.yml + assets/templates/kubernetes-deploy.yml
+- Combine Docker build pattern with K8s kubectl deployment
+- Add Python-specific test jobs
 ```
 
-**If you skip this confirmation step, the generated pipeline may miss critical patterns documented in reference files.**
+**Skipping confirmation is not allowed for complete pipeline generation.**
 
 ---
 
@@ -430,7 +506,7 @@ deploy-staging:
 
 ### 6. Handling GitLab CI/CD Documentation Lookup
 
-When generating pipelines that use specific GitLab features, templates, or require latest documentation:
+Use this flow only when local references do not cover requested features or version-sensitive behavior.
 
 **Detection:**
 - User mentions specific GitLab features (e.g., "Auto DevOps", "SAST", "dependency scanning")
@@ -443,32 +519,38 @@ When generating pipelines that use specific GitLab features, templates, or requi
    - Extract the GitLab feature or template name
    - Determine if version-specific information is needed
 
-2. **Search for current documentation using WebSearch:**
-   ```
-   Search query pattern: "GitLab CI/CD [feature] documentation 2025"
-   Examples:
-   - "GitLab CI/CD SAST template documentation"
-   - "GitLab Auto DevOps configuration"
-   - "GitLab dependency scanning latest"
-   ```
+2. **Check local references first (Tier 1/Tier 2):**
+   - `references/common-patterns.md`
+   - `references/gitlab-ci-reference.md`
+   - `references/security-guidelines.md`
 
-3. **Analyze search results for:**
+3. **Use Context7 first when external lookup is needed:**
+   - Resolve library: `mcp__context7__resolve-library-id`
+   - Query docs: `mcp__context7__query-docs`
+   - Prefer GitLab official/library docs over secondary sources
+
+4. **Fallback to web search when Context7 is unavailable or insufficient:**
+   - Use `web.search_query`
+   - Query pattern: `"GitLab CI/CD [feature] documentation"`
+   - Prefer results from `docs.gitlab.com`
+
+5. **Open and extract from specific docs pages when needed:**
+   - Use `web.open` for selected documentation pages
+   - Capture required syntax, variables, and version constraints
+
+6. **Analyze discovered documentation for:**
    - Current recommended approach
    - Required variables and configuration
    - Template include syntax
    - Best practices and security recommendations
    - Example usage
 
-4. **If Context7 MCP is available:**
-   - Try to resolve library ID using `mcp__context7__resolve-library-id`
-   - Fetch documentation using `mcp__context7__get-library-docs`
-   - This provides structured documentation
+7. **If network tools are unavailable (offline/constrained environment):**
+   - Continue using local references only
+   - State that external version verification could not be performed
+   - Add a version-assumption note in the final output
 
-5. **If specific documentation pages needed:**
-   - Use WebFetch to retrieve from docs.gitlab.com
-   - Extract relevant configuration examples
-
-6. **Generate pipeline using discovered information:**
+8. **Generate pipeline using discovered information:**
    - Use correct template include syntax
    - Configure required variables
    - Add security best practices
@@ -503,12 +585,31 @@ variables:
 
 ### Validation Process
 
-1. **After generating any pipeline configuration**, immediately invoke the `devops-skills:gitlab-ci-validator` skill:
+1. **Primary validation path:** after generating a complete pipeline, invoke the `devops-skills:gitlab-ci-validator` skill:
    ```
    Skill: devops-skills:gitlab-ci-validator
    ```
 
-2. **The devops-skills:gitlab-ci-validator skill will:**
+2. **Script fallback path (if validator skill cannot be invoked):**
+   ```bash
+   # From repository root
+   bash devops-skills-plugin/skills/gitlab-ci-validator/scripts/validate_gitlab_ci.sh .gitlab-ci.yml
+   ```
+   ```bash
+   # From skills/gitlab-ci-generator directory
+   bash ../gitlab-ci-validator/scripts/validate_gitlab_ci.sh .gitlab-ci.yml
+   ```
+   - If the script is not executable:
+     ```bash
+     chmod +x devops-skills-plugin/skills/gitlab-ci-validator/scripts/validate_gitlab_ci.sh
+     ```
+
+3. **Manual fallback path (only if both primary and script paths are unavailable):**
+   - Run manual checks for YAML validity, stage/job references, and obvious secret exposure.
+   - Mark output as `Validation status: Manual fallback (not fully verified)`.
+   - Do not claim production-ready status if Critical/High risk cannot be confidently ruled out.
+
+4. **The validator skill/script checks:**
    - Validate YAML syntax
    - Check GitLab CI/CD schema compliance
    - Verify job references and dependencies
@@ -516,7 +617,7 @@ variables:
    - Perform security scanning
    - Report any errors, warnings, or issues
 
-3. **Analyze validation results and take action based on severity:**
+5. **Analyze validation results and take action based on severity:**
 
    | Severity | Action Required |
    |----------|-----------------|
@@ -526,7 +627,7 @@ variables:
    | **LOW** | MAY fix or acknowledge. Inform user of recommendations. |
    | **SUGGESTIONS** | Review and apply if beneficial. No fix required. |
 
-4. **Fix-and-Revalidate Loop (MANDATORY for Critical/High issues):**
+6. **Fix-and-Revalidate Loop (MANDATORY for Critical/High issues):**
    ```
    While validation has CRITICAL or HIGH issues:
      1. Edit the generated file to fix the issue
@@ -534,21 +635,26 @@ variables:
      3. Repeat until no CRITICAL or HIGH issues remain
    ```
 
-5. **Before presenting to user, ensure:**
+7. **Before presenting to user, ensure:**
    - Zero CRITICAL issues
    - Zero HIGH issues
    - MEDIUM issues either fixed OR explained why they're acceptable
    - LOW issues and suggestions acknowledged
 
-6. **When presenting the validated configuration:**
+8. **When presenting the validated configuration:**
    - State validation status clearly
+   - State validation path used (skill, script fallback, or manual fallback)
    - List any remaining MEDIUM/LOW issues with explanations
+   - Include template/version freshness notes
    - Provide usage instructions
    - Mention any trade-offs made
+
+**Critical/High gate is strict and never optional for production-ready claims.**
 
 ### Validation Pass Criteria
 
 **Pipeline is READY to present when:**
+- ✅ Validation path executed (validator skill or script fallback)
 - ✅ Syntax validation: PASSED
 - ✅ Security scan: No CRITICAL or HIGH issues
 - ✅ Best practices: Reviewed (warnings acceptable with explanation)
@@ -558,6 +664,7 @@ variables:
 - ❌ Any CRITICAL security issues exist
 - ❌ Any HIGH security issues exist
 - ❌ Job references are broken
+- ❌ Only manual fallback was used and Critical/High risks cannot be ruled out
 
 ### When to Skip Validation
 
@@ -631,6 +738,32 @@ When the validator provides suggestions, you MUST briefly acknowledge them and e
 | `no-dependency-proxy` | Apply for production | Consider using `$CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX` to avoid Docker Hub rate limits. Requires GitLab Premium. |
 | `environment-no-url` for rollback | Skip | Rollback jobs don't deploy new versions, so a URL would be misleading. |
 | `missing-coverage` for lint job | Skip | Linting doesn't produce coverage data. This is a false positive. |
+```
+
+### Template and Version Notes (REQUIRED OUTPUT)
+
+After validation results, include a concise freshness note for templates and documentation assumptions.
+
+**Required format:**
+```markdown
+## Template and Version Notes
+
+- **Template base:** [assets/templates/<file>.yml]
+- **Template customization scope:** [what changed from template]
+- **Version/doc basis:** [Context7, docs.gitlab.com, or local references only]
+- **Freshness note:** [exact date checked, or "external lookup unavailable"]
+- **Version-sensitive assumptions:** [if any]
+```
+
+**Example:**
+```markdown
+## Template and Version Notes
+
+- **Template base:** assets/templates/docker-build.yml
+- **Template customization scope:** Added unit-test stage and environment-specific deploy rules
+- **Version/doc basis:** docs.gitlab.com include-template docs + local references
+- **Freshness note:** Verified template syntax on 2026-02-28
+- **Version-sensitive assumptions:** Uses `Jobs/SAST.gitlab-ci.yml` template path
 ```
 
 ### Usage Instructions Template (REQUIRED OUTPUT)
@@ -760,29 +893,29 @@ Reference `references/best-practices.md` for comprehensive guidelines. Key princ
 
 ## Resources
 
-### References (Load as Needed)
+### References (Tiered Loading)
 
-- `references/best-practices.md` - Comprehensive GitLab CI/CD best practices
+- `references/best-practices.md` (**Tier 1: required for all**) - Comprehensive GitLab CI/CD best practices
   - Security patterns, performance optimization
   - Pipeline design, configuration organization
   - Common patterns and anti-patterns
   - **Use this:** When implementing any GitLab CI/CD resource
 
-- `references/common-patterns.md` - Frequently used pipeline patterns
+- `references/common-patterns.md` (**Tier 1: required for all**) - Frequently used pipeline patterns
   - Basic CI pipeline patterns
   - Docker build and push patterns
   - Deployment patterns (K8s, cloud platforms)
   - Multi-project and parent-child patterns
   - **Use this:** When selecting which pattern to use
 
-- `references/gitlab-ci-reference.md` - GitLab CI/CD YAML syntax reference
+- `references/gitlab-ci-reference.md` (**Tier 2: required for Full mode**) - GitLab CI/CD YAML syntax reference
   - Complete keyword reference
   - Job configuration options
   - Rules and conditional execution
   - Variables and environments
   - **Use this:** For syntax and keyword details
 
-- `references/security-guidelines.md` - Security best practices
+- `references/security-guidelines.md` (**Tier 2: required for Full mode**) - Security best practices
   - Secrets management
   - Image security
   - Script security
@@ -936,10 +1069,10 @@ test:
 
 ### If GitLab documentation is not found:
 
-1. Try alternative search queries
-2. Check docs.gitlab.com directly
-3. Look for GitLab CI/CD templates in GitLab repository
-4. Ask user if they have specific version requirements
+1. Try Context7 first: `mcp__context7__resolve-library-id` -> `mcp__context7__query-docs`
+2. If needed, run `web.search_query` scoped to `docs.gitlab.com`
+3. Open specific pages with `web.open` and extract only required syntax/variables
+4. If offline, continue with local references and add version-assumption notes
 
 ---
 
@@ -947,13 +1080,14 @@ test:
 
 **MANDATORY:** Before presenting ANY generated pipeline to the user, verify ALL items:
 
-### Reference Files Loaded (ALL FOUR REQUIRED)
+### Mode and References
+- [ ] Complexity mode selected (`Lightweight` or `Full`)
 - [ ] Read `references/best-practices.md` before generating
 - [ ] Read `references/common-patterns.md` before generating
-- [ ] Read `references/gitlab-ci-reference.md` for syntax reference
-- [ ] Read `references/security-guidelines.md` for security patterns
 - [ ] Read appropriate template from `assets/templates/` for the pipeline type
-- [ ] **Output explicit confirmation statement** (Step 2 format)
+- [ ] For **Full** mode: read `references/gitlab-ci-reference.md`
+- [ ] For **Full** mode: read `references/security-guidelines.md`
+- [ ] **Output explicit confirmation statement** matching selected mode
 
 ### Generation Standards Applied
 - [ ] All Docker images pinned to specific versions (no `:latest`)
@@ -968,18 +1102,21 @@ test:
 - [ ] Secrets use masked CI/CD variables (not hardcoded)
 
 ### Validation Completed
-- [ ] Invoked `devops-skills:gitlab-ci-validator` skill
+- [ ] Validation executed via `devops-skills:gitlab-ci-validator` or script fallback
 - [ ] Zero CRITICAL issues
 - [ ] Zero HIGH issues
 - [ ] **MEDIUM issues addressed** (fixed OR explained in output using required format)
 - [ ] **LOW issues acknowledged** (listed in output)
 - [ ] **Suggestions reviewed** (using required format)
 - [ ] Re-validated after any fixes
+- [ ] If only manual fallback was available: output marked as not fully verified
 
 ### Presentation Ready
 - [ ] Validation status stated clearly
+- [ ] Validation path stated clearly (skill, script fallback, or manual fallback)
 - [ ] **MEDIUM/LOW issues explained** (with table format)
 - [ ] **Suggestions review provided** (with table format)
+- [ ] **Template and version notes provided** (with required format)
 - [ ] **Usage instructions provided** (with required sections)
 - [ ] Key sections explained
 
@@ -987,14 +1124,39 @@ test:
 
 ### Required Output Sections
 
-Your final response MUST include these sections in order:
+Use the smallest valid output profile for the selected mode.
 
-1. **Reference Analysis Complete** (from Step 2)
+**Full mode (complete/complex pipeline):**
+1. **Reference Analysis Complete** (from Step 3)
 2. **Generated Pipeline** (the `.gitlab-ci.yml` content)
 3. **Validation Results Summary** (pass/fail status)
 4. **Validation Issues Addressed** (MEDIUM issues table)
 5. **Validator Suggestions Review** (suggestions table)
-6. **Usage Instructions** (variables, setup, behavior)
+6. **Template and Version Notes** (template base + freshness/version assumptions)
+7. **Usage Instructions** (variables, setup, behavior)
+
+**Lightweight mode (complete/simple pipeline):**
+1. **Reference Analysis Complete (Lightweight)**
+2. **Generated Pipeline**
+3. **Validation Results Summary**
+4. **Template and Version Notes**
+5. **Usage Instructions**
+- Add **Validation Issues Addressed** only when MEDIUM issues exist.
+- Add **Validator Suggestions Review** only when suggestions are present.
+
+**Targeted mode (review/Q&A/snippet/focused fix):**
+- Provide only the directly requested artifact/answer and a concise rationale.
+- Include validation/fallback disclosure if validation was not run.
+- Do not force full pipeline-generation sections.
+
+## Done Criteria
+
+This skill execution is done when:
+- Simple requests use **Lightweight mode** without unnecessary Tier 2 loading.
+- Complex requests use **Full mode** with Tier 2 references and complete confirmation.
+- Validation enforces strict Critical/High gates before production-ready claims.
+- Output includes template/version freshness notes plus usage instructions.
+- Any fallback path is explicit and does not hide verification gaps.
 
 ---
 
@@ -1002,19 +1164,21 @@ Your final response MUST include these sections in order:
 
 Always follow this sequence when generating GitLab CI/CD pipelines:
 
-1. **Load References** - MUST read ALL FOUR reference files first:
+1. **Classify Complexity** - choose `Lightweight` or `Full` mode.
+2. **Load References** - use tiered loading:
    - `references/best-practices.md`
    - `references/common-patterns.md`
-   - `references/gitlab-ci-reference.md`
-   - `references/security-guidelines.md`
    - Plus the appropriate template from `assets/templates/`
-2. **Understand** - Clarify user requirements, stages, and jobs needed
-3. **Generate** - Use templates and follow standards (security, caching, naming, explicit timeout on ALL jobs)
-4. **Search** - For specific features, use WebSearch or Context7 for current docs
-5. **Validate** - ALWAYS use devops-skills:gitlab-ci-validator skill
-6. **Fix** - Resolve ALL Critical/High issues, address Medium issues
-7. **Verify Checklist** - Confirm all pre-delivery checklist items
-8. **Present** - Deliver validated, production-ready pipeline with usage instructions
+   - For `Full` mode, also load:
+     - `references/gitlab-ci-reference.md`
+     - `references/security-guidelines.md`
+3. **Confirm** - Output Lightweight or Full reference analysis.
+4. **Generate** - Use templates and follow standards (security, caching, naming, explicit timeout on ALL jobs).
+5. **Lookup Docs When Needed** - Context7 first, then `web.search_query`/`web.open`, with offline fallback notes when constrained.
+6. **Validate** - Use `devops-skills:gitlab-ci-validator`, script fallback if needed.
+7. **Fix** - Resolve all Critical/High issues, address Medium issues.
+8. **Verify Checklist** - Confirm all pre-delivery checklist items.
+9. **Present** - Deliver output with validation summary, template/version notes, and usage instructions.
 
 Generate GitLab CI/CD pipelines that are:
 - ✅ Secure with pinned images and proper secrets handling

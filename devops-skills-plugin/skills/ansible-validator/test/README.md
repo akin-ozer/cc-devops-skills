@@ -89,6 +89,9 @@ ansible-lint -c ../assets/.ansible-lint playbooks/good-playbook.yml  # if ansibl
 ### Role Testing
 
 ```bash
+# Preflight tool/runtime readiness
+bash ../scripts/setup_tools.sh
+
 # Comprehensive role validation
 bash ../scripts/validate_role.sh roles/geerlingguy.mysql
 
@@ -128,7 +131,12 @@ molecule test
 3. Run the full test suite
 4. Clean up the temporary environment automatically
 
-No permanent installation required!
+No permanent installation required.
+
+Exit codes:
+- `0` = Molecule tests completed successfully
+- `1` = Molecule tests ran but role/test stages failed
+- `2` = Molecule blocked by runtime/dependency environment (for example Docker/Podman unavailable)
 
 ## Expected Validation Results
 

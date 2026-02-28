@@ -19,7 +19,9 @@ A minimal Terraform project structure with:
 To use a template, copy its directory to your project location:
 
 ```bash
-cp -r .claude/skills/terraform-generator/assets/minimal-project/ ./my-terraform-project/
+# Run from repository root
+SKILL_DIR="devops-skills-plugin/skills/terraform-generator"
+cp -r "${SKILL_DIR}/assets/minimal-project/" ./my-terraform-project/
 cd my-terraform-project
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your values
@@ -30,6 +32,7 @@ terraform init
 
 All templates are designed to be starting points. You should:
 1. Update the provider configuration in `versions.tf`
+   - Use major-version pinning (`~>`) and verify exact current versions when required.
 2. Add your resources to `main.tf`
 3. Update variables in `variables.tf` as needed
 4. Configure outputs in `outputs.tf`

@@ -1,9 +1,10 @@
 # Main Terraform configuration file
 # Add your resources here
 
-# Using terraform_data instead of deprecated null_resource (Terraform 1.4+)
+# Stable terraform_data example (Terraform 1.4+) without perpetual drift
 resource "terraform_data" "example" {
-  triggers_replace = {
-    timestamp = timestamp()
+  input = {
+    environment  = var.environment
+    project_name = var.project_name
   }
 }

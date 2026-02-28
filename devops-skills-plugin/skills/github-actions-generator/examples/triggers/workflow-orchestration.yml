@@ -120,6 +120,7 @@ permissions:
   security-events: write
   contents: read
   actions: read
+  issues: write  # Required for PR comments via issues.createComment
 
 jobs:
   security-scan:
@@ -346,7 +347,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write  # Required for repos.createCommitComment
   actions: read
 
 jobs:

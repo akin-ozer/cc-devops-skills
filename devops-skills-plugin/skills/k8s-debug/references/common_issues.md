@@ -1,5 +1,17 @@
 # Common Kubernetes Issues and Troubleshooting
 
+## How to Use This Reference
+
+Use this file as a symptom-to-fix lookup after collecting diagnostics.
+
+Suggested sequence:
+1. Match the observed symptom with the closest issue heading.
+2. Run the listed `Debugging Steps` commands and confirm you can reproduce the failure.
+3. Apply the least disruptive fix from `Solutions`.
+4. Re-run verification commands and confirm the symptom is gone.
+
+If you need an end-to-end decision flow instead of a known symptom lookup, use `./references/troubleshooting_workflow.md`.
+
 ## Pod Issues
 
 ### CrashLoopBackOff
@@ -344,3 +356,14 @@ kubectl get events -n <namespace> --sort-by='.lastTimestamp'
 - Verify readiness probes are passing
 - Check deployment strategy settings
 - Rollback if needed: `kubectl rollout undo deployment/<deployment-name> -n <namespace>`
+
+---
+
+## Issue Resolution Done Criteria
+
+Mark troubleshooting complete only when all are true:
+- [ ] Symptom was matched to one issue section in this file.
+- [ ] At least one command from `Debugging Steps` produced evidence for the diagnosis.
+- [ ] Fix was applied and verified with follow-up `kubectl get/describe/logs` checks.
+- [ ] No new critical warning events appeared after the fix window.
+- [ ] Any disruptive command used (restart/rollback/force delete) was justified in notes.

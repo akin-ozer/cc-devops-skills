@@ -23,6 +23,13 @@ class GroovySyntax:
             return f"'{value}'"
 
     @staticmethod
+    def single_quoted_literal(value: str) -> str:
+        """Return a safe single-quoted Groovy literal."""
+        text = '' if value is None else str(value)
+        escaped = text.replace('\\', '\\\\').replace("'", "\\'")
+        return f"'{escaped}'"
+
+    @staticmethod
     def format_list(items: List[str]) -> str:
         """Format a list in Groovy syntax"""
         formatted_items = [GroovySyntax.format_string(item) for item in items]
@@ -410,6 +417,21 @@ class ValidationHelpers:
             return False
         # Allow alphanumeric, spaces, hyphens, underscores
         return bool(re.match(r'^[a-zA-Z0-9\s\-_]+$', name))
+
+    @staticmethod
+    def normalize_stage_name(name: str, fallback: str = 'Custom Stage') -> str:
+        """Normalize and validate a stage display name."""
+        value = '' if name is None else str(name)
+        normalized = re.sub(r'[^a-zA-Z0-9\s\-_]', ' ', value).strip()
+        normalized = re.sub(r'\s+', ' ', normalized)
+
+        if not normalized:
+            normalized = fallback
+
+        if not ValidationHelpers.validate_stage_name(normalized):
+            raise ValueError(f"Invalid stage name after normalization: {name!r}")
+
+        return normalized
 
     @staticmethod
     def validate_agent_type(agent_type: str) -> bool:

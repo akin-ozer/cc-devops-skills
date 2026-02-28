@@ -10,10 +10,10 @@ This reference document provides best practices, common patterns, and anti-patte
 
 ```
 infrastructure/
-├── terragrunt.hcl              # Root Terragrunt config
+├── root.hcl                    # Root Terragrunt config (Terragrunt 0.93+)
 ├── common.hcl                  # Shared configuration
 ├── prod/
-│   ├── terragrunt.hcl         # Environment-level config
+│   ├── env.hcl                # Environment-level config
 │   ├── vpc/
 │   │   └── terragrunt.hcl     # Module-specific config
 │   ├── database/
@@ -42,7 +42,7 @@ infrastructure/
 
 ✅ **Good Practice:**
 ```hcl
-# Root terragrunt.hcl
+# Root root.hcl (Terragrunt 0.93+)
 remote_state {
   backend = "s3"
   config = {
@@ -56,7 +56,7 @@ remote_state {
 
 # Child terragrunt.hcl
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 ```
 
@@ -393,6 +393,10 @@ EOF
 remote_state {
   backend = "s3"
   config = {
+    # Preferred in recent Terraform versions (S3 native lock file)
+    use_lockfile = true
+
+    # Legacy locking for backwards compatibility only
     dynamodb_table = "terraform-locks"
   }
 }

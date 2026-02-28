@@ -9,6 +9,15 @@ description: Comprehensive toolkit for generating best practice Terragrunt confi
 
 Generate production-ready Terragrunt configurations following current best practices, naming conventions, and security standards. All generated configurations are automatically validated.
 
+## Trigger Phrases
+
+Use this skill when the user asks for:
+- A new `root.hcl`, `terragrunt.hcl`, or `terragrunt.stack.hcl`
+- Multi-environment Terragrunt layouts (`dev/staging/prod`)
+- Terragrunt dependency wiring (`dependency` or `dependencies` blocks)
+- Terragrunt module source setup (local, Git, Terraform Registry via `tfr:///`)
+- Stack catalog unit generation under `catalog/units/*`
+
 **Terragrunt 2025 Features Supported:**
 - [Stacks](https://terragrunt.gruntwork.io/docs/features/stacks/) - Infrastructure blueprints with `terragrunt.stack.hcl` (GA since v0.78.0)
 - [Feature Flags](https://terragrunt.gruntwork.io/docs/features/feature-flags/) - Runtime control via `feature` blocks
@@ -24,6 +33,8 @@ Generate production-ready Terragrunt configurations following current best pract
 |----------|-----------|----------------|
 | **Modern** | `root.hcl` | `find_in_parent_folders("root.hcl")` |
 | **Legacy** | `terragrunt.hcl` | `find_in_parent_folders()` |
+
+**Include standard:** Default to `find_in_parent_folders("root.hcl")` in all new examples and generated configs. Use `find_in_parent_folders()` only when explicitly targeting a legacy root file named `terragrunt.hcl`.
 
 ## Architecture Patterns
 
@@ -129,7 +140,7 @@ locals {
 }
 ```
 
-### Pre-Generation Pattern Checklist
+### Architecture Pattern Selection Checklist (Canonical)
 
 > **MANDATORY:** Before writing any files, you MUST complete this checklist and OUTPUT it to the user with checkmarks filled in. This is not optional.
 
@@ -155,6 +166,34 @@ locals {
 [x] Verified: No file references a path that doesn't exist from its location
 ```
 
+## Quick Variable Definition Examples
+
+Use these starter files for Pattern B and account/region-aware setups.
+
+**env.hcl**
+```hcl
+locals {
+  environment = "dev"
+  aws_region  = "us-east-1"
+  project     = "platform"
+}
+```
+
+**account.hcl**
+```hcl
+locals {
+  account_id   = "123456789012"
+  account_name = "shared-services"
+}
+```
+
+**region.hcl**
+```hcl
+locals {
+  aws_region = "us-east-1"
+}
+```
+
 ## When to Use
 
 - Creating new Terragrunt projects or configurations
@@ -178,7 +217,7 @@ Create root-level `root.hcl` or `terragrunt.hcl` with remote state, provider con
 
 **Key placeholders to replace:**
 - `[BUCKET_NAME]`, `[AWS_REGION]`, `[DYNAMODB_TABLE]`
-- `[TERRAFORM_VERSION]`, `[PROVIDER_NAME]`, `[PROVIDER_VERSION]`
+- `[TERRAFORM_VERSION]`, `[PROVIDER_NAME]`, `[PROVIDER_SOURCE]`, `[PROVIDER_VERSION]`
 - `[ENVIRONMENT]`, `[PROJECT_NAME]`
 
 **Root.hcl Design Principles:**
@@ -212,6 +251,22 @@ Self-contained modules without root dependency.
 > ```
 
 **Template:** `assets/templates/module/terragrunt.hcl`
+
+### Canonical Placeholder Replacement Map
+
+Use this map for every generated output:
+
+| Placeholder | Meaning | Example Replacement | Notes |
+|-------------|---------|---------------------|-------|
+| `[AWS_REGION]` | AWS region | `us-east-1` | Canonical region placeholder in all templates |
+| `[ENVIRONMENT]` | Environment name | `dev` | Keep lowercase for directory naming |
+| `[PROJECT_NAME]` | Project/application name | `payments-platform` | Use the same value in tags and names |
+| `[BUCKET_NAME]` | Remote state S3 bucket | `acme-tfstate-prod` | Bucket must exist before first apply |
+| `[DYNAMODB_TABLE]` | State lock table | `acme-terraform-locks` | Table must exist before first apply |
+| `[PROVIDER_SOURCE]` | Terraform provider source | `hashicorp/aws` | Use fully qualified source |
+| `[TERRAFORM_VERSION]` | Required Terraform/OpenTofu version | `1.8.5` | Keep compatible with module constraints |
+
+**Legacy alias normalization:** If you see `[REGION]` in older examples, treat it as `[AWS_REGION]` and replace it before validation.
 
 ### 4. Generate Multi-Environment Infrastructure
 Complete directory structures for dev/staging/prod.
@@ -248,6 +303,8 @@ Infrastructure blueprints using `terragrunt.stack.hcl`.
 **Template:** `assets/templates/stack/terragrunt.stack.hcl`
 **Catalog Template:** `assets/templates/catalog/terragrunt.hcl`
 **Patterns:** `references/common-patterns.md` → Stacks Patterns
+
+**Stack path rule:** Keep `no_dot_terragrunt_stack` mode consistent across dependent units. Do not mix direct-path and `.terragrunt-stack` generation in the same dependency chain.
 
 **Commands:**
 ```bash
@@ -351,24 +408,18 @@ When generating configs with custom providers:
 | Single environment | Pattern B | Environment-aware |
 | Centralized env vars | Pattern C | Environment-agnostic |
 
-**Verify:**
-```
-[ ] Pattern identified: ____
-[ ] Root.hcl will be: [ ] environment-agnostic  [ ] environment-aware
-[ ] env.hcl will be located in: ____
-[ ] Child modules will read env.hcl via: ____
-```
+Complete the **Architecture Pattern Selection Checklist (Canonical)** above and include it in output before file generation.
 
 ### Step 3: Read Required Templates
 > **MANDATORY:** Read the relevant template file(s) BEFORE generating each configuration type.
 
-| Configuration Type | Template to Read |
-|-------------------|------------------|
-| Root configuration | `assets/templates/root/terragrunt.hcl` |
-| Child module | `assets/templates/child/terragrunt.hcl` |
-| Standalone module | `assets/templates/module/terragrunt.hcl` |
-| Stack file | `assets/templates/stack/terragrunt.stack.hcl` |
-| Catalog unit | `assets/templates/catalog/terragrunt.hcl` |
+| Configuration Type | Template to Read | Purpose |
+|-------------------|------------------|---------|
+| Root configuration | `assets/templates/root/terragrunt.hcl` | Shared state backend, providers, and common inputs |
+| Child module | `assets/templates/child/terragrunt.hcl` | Environment module wired to root include |
+| Standalone module | `assets/templates/module/terragrunt.hcl` | Independent Terragrunt module without root include |
+| Stack file | `assets/templates/stack/terragrunt.stack.hcl` | Blueprint that generates multiple units |
+| Catalog unit | `assets/templates/catalog/terragrunt.hcl` | Reusable unit template consumed by stacks |
 
 **Also read:**
 - `references/common-patterns.md` - Primary source for generation patterns
@@ -394,7 +445,7 @@ When generating configs with custom providers:
    - **Inline checks (during generation):**
      - [ ] `include` block uses `find_in_parent_folders("root.hcl")`
      - [ ] `read_terragrunt_config(find_in_parent_folders("env.hcl"))` present
-     - [ ] `terraform.source` uses valid syntax (tfr:///, git::, or relative path)
+     - [ ] `terraform.source` uses valid syntax (`tfr:///`, `git::`, or relative path)
 
 4. **Generate dependent modules (RDS, EKS, etc.)**
    - **Inline checks (during generation):**
@@ -411,7 +462,7 @@ When generating configs with custom providers:
    terragrunt dag graph                 # Dependency graph validation
    ```
 
-   - Invoke `devops-skills:terragrunt-validator` skill for comprehensive validation
+   - Invoke `Skill(devops-skills:terragrunt-validator)` for comprehensive validation
 
 ### Step 5: Fix and Re-Validate
 If validation fails:
@@ -449,7 +500,7 @@ After all files are generated:
 
 1. **Invoke validation skill:**
    ```
-   Invoke: devops-skills:terragrunt-validator skill
+   Invoke: Skill(devops-skills:terragrunt-validator)
    ```
 
 2. **If validation fails:**
@@ -460,6 +511,29 @@ After all files are generated:
 3. **If validation succeeds:** Present configurations with usage instructions
 
 **Skip validation only for:** Partial snippets, documentation examples, or explicit user request
+
+### Validation Fallbacks (Environment Constraints)
+
+If the normal validation path is unavailable, use this fallback order and report what was skipped:
+
+1. If `terragrunt` is unavailable:
+   - Run static checks:
+     ```bash
+     rg -n "\[[A-Z0-9_]+\]" .
+     rg -n "find_in_parent_folders\\(\"env\\.hcl\"\\)" .
+     ```
+   - Report that runtime Terragrunt validation is pending.
+2. If validator skill execution is unavailable:
+   - Run direct Terragrunt checks instead:
+     ```bash
+     terragrunt hcl fmt --check
+     terragrunt dag graph
+     ```
+3. If `tree` is unavailable for presentation:
+   - Use:
+     ```bash
+     find . -maxdepth 4 -type f | sort
+     ```
 
 ## Presentation Requirements
 
@@ -518,7 +592,25 @@ terragrunt run --all apply
 terragrunt run --all destroy
 ```
 
-### 4. Environment-Specific Notes (MANDATORY)
+### 4. Placeholder Replacement and Secrets Check (MANDATORY)
+
+> **You MUST include this section.** Copy the template below and fill in the actual values:
+
+```markdown
+## Placeholder and Secrets Check
+
+### Placeholder Replacement
+- [ ] All placeholders (`[AWS_REGION]`, `[BUCKET_NAME]`, `[DYNAMODB_TABLE]`, etc.) replaced with real values
+- [ ] No legacy placeholder aliases left (for example `[REGION]`)
+- [ ] `terraform.source` values point to real module sources and pinned versions
+
+### Secrets Safety
+- [ ] No plaintext credentials or access keys in `terragrunt.hcl`, `root.hcl`, `env.hcl`, `account.hcl`, or `region.hcl`
+- [ ] Sensitive values sourced via environment variables, secret managers, or CI variables
+- [ ] Example values kept non-sensitive and clearly marked as placeholders
+```
+
+### 5. Environment-Specific Notes (MANDATORY)
 
 > **You MUST include this section.** Copy the template below and fill in the actual values:
 
@@ -543,12 +635,12 @@ terragrunt run --all destroy
 | prod/rds | `exclude { actions = ["destroy"] }` | Blocks destroy commands |
 ```
 
-### 5. Next Steps (Optional)
+### 6. Next Steps (Optional)
 Suggest what the user might want to do next (add more modules, customize configurations, etc.)
 
 ## Best Practices
 
-Reference `../devops-skills:terragrunt-validator/references/best_practices.md` for comprehensive guidelines.
+Reference `../terragrunt-validator/references/best_practices.md` for comprehensive guidelines.
 
 **Key principles:**
 - Use `include` blocks to inherit root configuration (DRY)
@@ -583,20 +675,20 @@ Reference `../devops-skills:terragrunt-validator/references/best_practices.md` f
 
 ### Templates - MUST Read Before Generating
 
-| Configuration Type | Template File | When to Read |
-|-------------------|---------------|--------------|
-| Root configuration | `assets/templates/root/terragrunt.hcl` | Before generating any root.hcl |
-| Child module | `assets/templates/child/terragrunt.hcl` | Before generating any child module |
-| Standalone module | `assets/templates/module/terragrunt.hcl` | Before generating standalone modules |
-| Stack file | `assets/templates/stack/terragrunt.stack.hcl` | Before generating stacks |
-| Catalog unit | `assets/templates/catalog/terragrunt.hcl` | Before generating catalog units |
+| Configuration Type | Template File | Purpose | When to Read |
+|-------------------|---------------|---------|--------------|
+| Root configuration | `assets/templates/root/terragrunt.hcl` | Shared backend, provider, and common inputs | Before generating any root.hcl |
+| Child module | `assets/templates/child/terragrunt.hcl` | Module include, source, and optional dependency scaffolding | Before generating any child module |
+| Standalone module | `assets/templates/module/terragrunt.hcl` | Module config without root inheritance | Before generating standalone modules |
+| Stack file | `assets/templates/stack/terragrunt.stack.hcl` | Stack blueprint and unit generation | Before generating stacks |
+| Catalog unit | `assets/templates/catalog/terragrunt.hcl` | Reusable unit consumed by stack definitions | Before generating catalog units |
 
 ### References
 
-| Reference | Content | When to Read |
-|-----------|---------|--------------|
-| `references/common-patterns.md` | All generation patterns with examples | Always, before generating |
-| `../devops-skills:terragrunt-validator/references/best_practices.md` | Comprehensive best practices | Always, before generating |
+| Reference | Content | Purpose | When to Read |
+|-----------|---------|---------|--------------|
+| `references/common-patterns.md` | All generation patterns with examples | Pick a compatible pattern before writing files | Always, before generating |
+| `../terragrunt-validator/references/best_practices.md` | Comprehensive best practices | Final quality and safety checks | Always, before generating |
 
 ### Official Documentation
 - [Terragrunt Docs](https://terragrunt.gruntwork.io/docs/)
@@ -707,7 +799,7 @@ dev/
 Before generating, READ these files in order:
 
 1. [ ] `references/common-patterns.md` - Understand available patterns
-2. [ ] `../devops-skills:terragrunt-validator/references/best_practices.md` - Know the rules
+2. [ ] `../terragrunt-validator/references/best_practices.md` - Know the rules
 3. [ ] Relevant template(s) from `assets/templates/` - Structural reference
 
 ### Architecture Decision Tree
@@ -726,5 +818,16 @@ Q: Multiple environments (dev/staging/prod)?
 
 1. Format check: `terragrunt hcl fmt --check`
 2. Input validation: `terragrunt hcl validate --inputs`
-3. Full validation: Invoke `devops-skills:terragrunt-validator` skill
+3. Full validation: Invoke `Skill(devops-skills:terragrunt-validator)`
 4. Fix errors → Re-validate → Repeat until clean
+
+## Done Criteria
+
+This skill execution is complete only when ALL are true:
+
+- One architecture checklist is completed and shown (the canonical checklist in this file)
+- Generated files consistently use modern root include syntax unless legacy was explicitly requested
+- Registry sources use canonical `tfr:///NAMESPACE/NAME/PROVIDER?version=X.Y.Z` format
+- Dependency blocks are added only where actually needed (not left as unresolved placeholders)
+- All placeholders are replaced and secrets checks are reported in output
+- Validation succeeded, or fallback checks ran with explicit limitations documented

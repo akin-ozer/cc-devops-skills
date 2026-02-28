@@ -9,21 +9,53 @@ description: Comprehensive toolkit for validating, linting, testing, and analyzi
 
 This skill provides a comprehensive validation and analysis workflow for Helm charts, combining Helm-native linting, template rendering, YAML validation, schema validation, CRD documentation lookup, and security best practices checking.
 
-**IMPORTANT: This is a READ-ONLY validator.** It analyzes charts and proposes improvements but does NOT modify any files. All proposed changes are listed in the final summary for the user to review and apply manually or via the helm-generator skill.
+**IMPORTANT: This validator is read-only by default.** It analyzes charts and proposes improvements. Only modify files when the user explicitly asks to apply fixes.
 
-## When to Use This Skill
+## Trigger Cases
 
-Invoke this skill when:
-- Validating Helm charts before packaging or deployment
-- Debugging Helm template rendering errors
-- Testing chart templates with different values
-- Working with Custom Resource Definitions (CRDs) that need documentation
-- Implementing or refactoring Helm template helpers (`_helpers.tpl`)
-- Performing dry-run tests to catch admission controller errors
-- Ensuring charts follow Helm and Kubernetes best practices
-- Automating repetitive template patterns with Helm functions
-- The user asks to "validate", "lint", "check", "test", or "improve" Helm charts
-- Creating or optimizing template functions like `include`, `tpl`, `required`, etc.
+Use this skill when one or more of these top cases apply:
+- The user asks to validate, lint, check, test, or troubleshoot a Helm chart
+- Helm templates fail to render, lint, or produce valid Kubernetes YAML
+- A pre-deployment quality gate is needed (schema, dry-run, security checks)
+- CRD resources are present and their spec fields must be verified against docs
+- The user wants a severity-based validation report with proposed remediations
+
+Trigger phrase examples:
+- "Validate this Helm chart before release"
+- "Why does `helm template` fail?"
+- "Check this chart for Kubernetes and security issues"
+
+Out of scope by default:
+- New chart scaffolding or broad chart generation (use `helm-generator`)
+
+## Role Boundaries
+
+- This skill validates and reports; it does not silently rewrite user files.
+- It can propose concrete patches and apply them only when the user explicitly requests fixes.
+- If execution constraints block a stage, it must continue with reachable stages and document the skip reason.
+
+## Execution Model
+
+1. Run stages in order (1 through 10).
+2. Keep going after stage-level failures to collect complete findings, unless rendering fails and no manifests exist.
+3. If Stage 4 produces no manifests, mark Stages 5 to 9 as blocked and continue to Stage 10 reporting.
+4. Treat Stage 8 as environment-dependent optional; treat Stage 9 and Stage 10 as mandatory when manifests exist.
+5. For every skipped stage, record the exact tool/environment reason in the final summary table.
+
+## Quick Execution Modes
+
+### Mode A: Local Validation (no cluster required)
+```bash
+bash scripts/setup_tools.sh
+bash scripts/validate_chart_structure.sh <chart-directory>
+helm lint <chart-directory> --strict
+helm template <release-name> <chart-directory> --values <values-file> --debug --output-dir ./rendered
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) -exec yamllint -c assets/.yamllint {} +
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) -exec kubeconform -summary -verbose {} +
+```
+
+### Mode B: Full Validation (cluster available)
+Run Mode A plus Stage 8 dry-run commands in this document.
 
 ## Validation & Testing Workflow
 
@@ -43,7 +75,17 @@ Required tools:
 - **kubeconform**: Kubernetes schema validation with CRD support
 - **kubectl**: Cluster dry-run testing (optional but recommended)
 
-If tools are missing, provide installation instructions from the script output and ask the user if they want to install them.
+Fallback policy for unavailable tools or environment constraints:
+
+| Condition | Action | Stage status |
+|-----------|--------|--------------|
+| `helm` missing | Run Stage 2 only, then report Stages 3 to 9 as skipped/blocked | ⚠️ Warning |
+| `yamllint` missing | Use `yq` syntax checks if available; otherwise skip Stage 5 | ⚠️ Warning |
+| `kubeconform` missing | Skip Stage 7 and rely on Stage 6 CRD/manual checks | ⚠️ Warning |
+| `kubectl` missing or no kube-context | Skip Stage 8, continue with remaining stages | ⚠️ Warning |
+| No internet access for CRD docs | Use local CRD manifests and kubeconform output, mark doc lookup incomplete | ⚠️ Warning |
+
+If tools are missing, provide installation instructions from `scripts/setup_tools.sh` output and continue with the fallback path above.
 
 ### Stage 2: Helm Chart Structure Validation
 
@@ -97,8 +139,9 @@ helm lint <chart-directory> --strict
 **Auto-fix approach:**
 - For template errors, identify the problematic template file
 - Show the user the specific line causing issues
-- Propose fixes using the Edit tool
-- Re-run `helm lint` after fixes
+- Propose a patch/diff for the fix
+- Apply fixes only if the user explicitly asks
+- Re-run `helm lint` after fixes are applied
 
 ### Stage 4: Template Rendering
 
@@ -139,7 +182,8 @@ helm template <release-name> <chart-directory> \
 Validate YAML syntax and formatting of rendered templates:
 
 ```bash
-yamllint -c assets/.yamllint ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) \
+  -exec yamllint -c assets/.yamllint {} +
 ```
 
 **Common issues caught:**
@@ -161,10 +205,14 @@ Before schema validation, detect if the chart contains or renders Custom Resourc
 
 ```bash
 # Check crds/ directory
-bash scripts/detect_crd_wrapper.sh <chart-directory>/crds/*.yaml
+if [ -d <chart-directory>/crds ]; then
+  find <chart-directory>/crds -type f \( -name "*.yaml" -o -name "*.yml" \) \
+    -exec bash scripts/detect_crd_wrapper.sh {} +
+fi
 
 # Check rendered templates
-bash scripts/detect_crd_wrapper.sh ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) \
+  -exec bash scripts/detect_crd_wrapper.sh {} +
 ```
 
 The script outputs JSON with resource information:
@@ -190,13 +238,12 @@ The script outputs JSON with resource information:
             "prometheus-operator" for monitoring.coreos.com CRDs
             "istio" for networking.istio.io CRDs
 
-   Then use mcp__context7__get-library-docs with:
-   - context7CompatibleLibraryID from resolve step
-   - topic: The CRD kind and relevant features (e.g., "Certificate spec")
-   - tokens: 5000 (adjust based on need)
+   Then use mcp__context7__query-docs with:
+   - libraryId from resolve step
+   - query: The CRD kind and relevant features (e.g., "Certificate spec required fields")
    ```
 
-2. **Fallback to WebSearch if context7 fails:**
+2. **Fallback to `web.search_query` (web search) if Context7 fails:**
    ```
    Search query pattern:
    "<kind>" "<group>" kubernetes CRD "<version>" documentation spec
@@ -220,12 +267,13 @@ The script outputs JSON with resource information:
 Validate rendered templates against Kubernetes schemas:
 
 ```bash
-kubeconform \
-  -schema-location default \
-  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-  -summary \
-  -verbose \
-  ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) -exec \
+  kubeconform \
+    -schema-location default \
+    -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+    -summary \
+    -verbose \
+    {} +
 ```
 
 **Options to consider:**
@@ -243,6 +291,11 @@ kubeconform \
 
 **For CRDs:** If kubeconform reports "no schema found", this is expected. Use the documentation from Stage 6 to manually validate the spec fields.
 
+**Stage 7 success criteria (explicit):**
+- ✅ Passed: `kubeconform` exits `0`, and no invalid resources are reported.
+- ⚠️ Warning: only CRD schema-missing findings remain and Stage 6 documentation/manual verification is completed.
+- ❌ Failed: any non-CRD schema violation, parse error, or unresolved required-field/type error.
+
 ### Stage 8: Cluster Dry-Run (if available)
 
 If kubectl is configured and cluster access is available, perform a server-side dry-run:
@@ -250,16 +303,18 @@ If kubectl is configured and cluster access is available, perform a server-side 
 ```bash
 # Test installation
 helm install <release-name> <chart-directory> \
-  --dry-run \
+  --dry-run=server \
   --debug \
   --values <values-file>
 
 # Test upgrade
 helm upgrade <release-name> <chart-directory> \
-  --dry-run \
+  --dry-run=server \
   --debug \
   --values <values-file>
 ```
+
+If the Helm version does not support `--dry-run=server`, use `--dry-run` and document that only client-side Helm simulation was executed.
 
 **This catches:**
 - Admission controller rejections
@@ -280,6 +335,11 @@ helm upgrade <release-name> <chart-directory> \
 helm diff upgrade <release-name> <chart-directory>
 ```
 This shows what would change, helping catch unintended modifications. (Requires helm-diff plugin)
+
+**Stage 8 success criteria (explicit):**
+- ✅ Passed: dry-run install and upgrade commands exit `0` with no admission/policy errors.
+- ⚠️ Warning: stage skipped because `kubectl`/cluster context/access is unavailable, or only client-side fallback was possible.
+- ❌ Failed: dry-run commands return non-zero due to admission webhooks, policy violations, namespace/quota errors, or reference errors.
 
 ### Stage 9: Security Best Practices Check (MANDATORY)
 
@@ -326,20 +386,23 @@ This shows what would change, helping catch unintended modifications. (Requires 
 **How to check:** Read the rendered deployment YAML files and grep for these patterns:
 ```bash
 # Check for securityContext
-grep -l "securityContext" ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) \
+  -exec grep -l "securityContext" {} +
 
 # Check for resources
-grep -l "resources:" ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) \
+  -exec grep -l "resources:" {} +
 
 # Check for latest tag
-grep "image:.*:latest" ./rendered/*.yaml
+find ./rendered -type f \( -name "*.yaml" -o -name "*.yml" \) \
+  -exec grep "image:.*:latest" {} +
 ```
 
 ### Stage 10: Final Report (MANDATORY)
 
 **IMPORTANT:** This stage is MANDATORY even if all validations pass. You MUST complete ALL of the following actions.
 
-**This is a READ-ONLY validator. Do NOT modify any files. List all proposed changes in the summary.**
+**Default behavior is read-only.** Do not modify files unless the user explicitly asks you to apply fixes.
 
 #### Step 1: Load Reference Files (MANDATORY when warnings exist)
 
@@ -475,6 +538,15 @@ Provide a final summary:
 2. Apply changes manually or use helm-generator skill
 3. Re-run validation to confirm fixes
 ```
+
+## Workflow Done Criteria
+
+Validation is complete only when all of the following are true:
+- A Stage 1 to Stage 10 status table is present with `✅ Passed`, `⚠️ Warning`, `❌ Failed`, or `⏭️ Skipped` for each stage.
+- Every skipped stage includes a concrete tool or environment reason.
+- Stage 7 and Stage 8 are evaluated against their explicit success criteria above.
+- Severity totals are reported (`Errors`, `Warnings`, `Info`) with proposed remediation actions.
+- Role boundary is respected: no file edits unless explicitly requested by the user.
 
 ## Helm Templating Automation & Best Practices
 
@@ -944,7 +1016,7 @@ When presenting validation results and fixes:
 4. **Group related issues** (e.g., all missing helper issues together)
 5. **Use file:line references** when available
 6. **Show confidence level** for auto-fixes (high confidence = syntax, low = logic changes)
-7. **Always provide a summary after applying fixes** including:
+7. **Always provide a summary after proposing fixes** (and after applying fixes when explicitly requested) including:
    - What was changed and why
    - File and line references for each fix
    - Total count of issues resolved
@@ -1044,14 +1116,14 @@ helm test <release-name>
 - Wrapper script that handles Python dependency management
 - Automatically creates temporary venv if PyYAML is not available
 - Calls detect_crd.py to parse YAML files
-- Usage: `bash scripts/detect_crd_wrapper.sh <file.yaml>`
+- Usage: `bash scripts/detect_crd_wrapper.sh <file.yaml> [file2.yaml ...]`
 
 **detect_crd.py**
 - Parses YAML files to identify Custom Resource Definitions
 - Extracts kind, apiVersion, group, and version information
 - Outputs JSON for programmatic processing
 - Requires PyYAML (handled automatically by wrapper script)
-- Can be called directly: `python3 scripts/detect_crd.py <file.yaml>`
+- Can be called directly: `python3 scripts/detect_crd.py <file.yaml> [file2.yaml ...]`
 
 **generate_helpers.sh**
 - Generates standard Helm helpers (_helpers.tpl) for a chart

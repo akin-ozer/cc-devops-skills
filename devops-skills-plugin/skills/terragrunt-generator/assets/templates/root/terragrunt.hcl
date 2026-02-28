@@ -51,7 +51,7 @@ terraform {
 }
 
 provider "[PROVIDER_NAME]" {
-  region = "[REGION]"
+  region = "[AWS_REGION]"
 
   # Optional: Default tags applied to all resources
   default_tags {
@@ -69,7 +69,7 @@ EOF
 inputs = {
   # Environment configuration
   environment = "[ENVIRONMENT]"
-  region      = "[REGION]"
+  region      = "[AWS_REGION]"
   project     = "[PROJECT_NAME]"
 
   # Tagging strategy

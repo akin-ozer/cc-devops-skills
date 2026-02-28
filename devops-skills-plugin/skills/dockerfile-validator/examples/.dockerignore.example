@@ -1,89 +1,34 @@
-# .dockerignore example
-# Excludes files from the Docker build context for faster builds and smaller images
-
-# Version control
+# VCS
 .git
 .gitignore
-.gitattributes
 
-# CI/CD
-.github
-.gitlab-ci.yml
-.travis.yml
-Jenkinsfile
-
-# Documentation
-README.md
-CHANGELOG.md
-LICENSE
-docs/
-*.md
-
-# IDE and editor files
-.vscode
-.idea
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Environment and secrets
+# Local environment and secrets
 .env
 .env.*
-*.key
 *.pem
-*.p12
-secrets/
+*.key
 
-# Testing
-tests/
-test/
-spec/
-*.test
-coverage/
-.coverage
-htmlcov/
-
-# Build artifacts (vary by language)
-# Node.js
+# Build and dependency artifacts
 node_modules/
-npm-debug.log
-yarn-error.log
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-*.egg-info/
 dist/
 build/
-
-# Go
-*.exe
-*.test
-vendor/
-
-# Java
 target/
-*.class
-*.jar
-*.war
+venv/
+.venv/
+__pycache__/
+*.pyc
 
-# Logs
-logs/
+# Logs and temp files
 *.log
+*.tmp
+tmp/
 
-# Docker files (don't include in context)
+# Tooling and editor files
+.idea/
+.vscode/
+.DS_Store
+
+# Docker-related files not needed in image
 Dockerfile*
 docker-compose*.yml
 .dockerignore
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# OS files
-Thumbs.db
-.DS_Store

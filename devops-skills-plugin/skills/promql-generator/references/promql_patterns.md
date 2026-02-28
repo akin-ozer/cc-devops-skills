@@ -561,13 +561,13 @@ metric - metric offset 1w
 
 ```promql
 # Only show data during business hours (9 AM - 5 PM)
-metric and hour() >= 9 and hour() < 17
+metric * scalar((hour() >= bool 9) * (hour() < bool 17))
 
 # Only show data on weekdays (Monday-Friday)
-metric and day_of_week() > 0 and day_of_week() < 6
+metric * scalar((day_of_week() >= bool 1) * (day_of_week() <= bool 5))
 
 # Weekend metrics
-metric and (day_of_week() == 0 or day_of_week() == 6)
+metric * scalar((day_of_week() == bool 0) + (day_of_week() == bool 6))
 ```
 
 ### Trend Analysis

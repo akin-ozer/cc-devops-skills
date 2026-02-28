@@ -2,6 +2,8 @@
 Common Jenkins pipeline patterns and templates
 """
 
+from syntax_helpers import GroovySyntax, ValidationHelpers
+
 
 class PipelinePatterns:
     """Common pipeline pattern templates"""
@@ -153,16 +155,20 @@ class StageTemplates:
     @staticmethod
     def checkout_stage(scm_url=None, branch='main', credentials=None):
         """Generate checkout stage"""
+        branch_pattern_literal = GroovySyntax.single_quoted_literal(f'*/{branch}')
+        branch_literal = GroovySyntax.single_quoted_literal(branch)
         if scm_url:
+            scm_url_literal = GroovySyntax.single_quoted_literal(scm_url)
             if credentials:
+                credentials_literal = GroovySyntax.single_quoted_literal(credentials)
                 return f"""
         stage('Checkout') {{
             steps {{
                 checkout scmGit(
-                    branches: [[name: '*/{branch}']],
+                    branches: [[name: {branch_pattern_literal}]],
                     userRemoteConfigs: [[
-                        url: '{scm_url}',
-                        credentialsId: '{credentials}'
+                        url: {scm_url_literal},
+                        credentialsId: {credentials_literal}
                     ]]
                 )
             }}
@@ -171,7 +177,7 @@ class StageTemplates:
                 return f"""
         stage('Checkout') {{
             steps {{
-                git branch: '{branch}', url: '{scm_url}'
+                git branch: {branch_literal}, url: {scm_url_literal}
             }}
         }}"""
         else:
@@ -185,24 +191,27 @@ class StageTemplates:
     @staticmethod
     def build_stage(build_cmd):
         """Generate build stage"""
+        build_cmd_literal = GroovySyntax.single_quoted_literal(build_cmd)
         return f"""
         stage('Build') {{
             steps {{
-                sh '{build_cmd}'
+                sh {build_cmd_literal}
             }}
         }}"""
 
     @staticmethod
     def test_stage(test_cmd, test_results='**/test-results/*.xml'):
         """Generate test stage with reporting"""
+        test_cmd_literal = GroovySyntax.single_quoted_literal(test_cmd)
+        test_results_literal = GroovySyntax.single_quoted_literal(test_results)
         return f"""
         stage('Test') {{
             steps {{
-                sh '{test_cmd}'
+                sh {test_cmd_literal}
             }}
             post {{
                 always {{
-                    junit '{test_results}'
+                    junit {test_results_literal}
                 }}
             }}
         }}"""
@@ -210,34 +219,45 @@ class StageTemplates:
     @staticmethod
     def deploy_stage(environment, deploy_cmd, approval=False, approvers='admin'):
         """Generate deployment stage with optional approval"""
+        stage_name = ValidationHelpers.normalize_stage_name(
+            f"Deploy to {str(environment).strip().title()}"
+        )
+        stage_name_literal = GroovySyntax.single_quoted_literal(stage_name)
+        deploy_message_literal = GroovySyntax.single_quoted_literal(
+            f"Deploy to {str(environment).strip()}?"
+        )
+        approvers_literal = GroovySyntax.single_quoted_literal(approvers)
+        deploy_cmd_literal = GroovySyntax.single_quoted_literal(deploy_cmd)
         if approval:
             return f"""
-        stage('Deploy to {environment.capitalize()}') {{
+        stage({stage_name_literal}) {{
             input {{
-                message 'Deploy to {environment}?'
+                message {deploy_message_literal}
                 ok 'Deploy'
-                submitter '{approvers}'
+                submitter {approvers_literal}
             }}
             steps {{
-                sh '{deploy_cmd}'
+                sh {deploy_cmd_literal}
             }}
         }}"""
         else:
             return f"""
-        stage('Deploy to {environment.capitalize()}') {{
+        stage({stage_name_literal}) {{
             steps {{
-                sh '{deploy_cmd}'
+                sh {deploy_cmd_literal}
             }}
         }}"""
 
     @staticmethod
     def docker_build_stage(image_name, dockerfile='Dockerfile'):
         """Generate Docker build stage"""
+        image_literal = GroovySyntax.single_quoted_literal(f'{image_name}:${{BUILD_NUMBER}}')
+        build_args_literal = GroovySyntax.single_quoted_literal(f'-f {dockerfile} .')
         return f"""
         stage('Docker Build') {{
             steps {{
                 script {{
-                    docker.build('{image_name}:${{BUILD_NUMBER}}', '-f {dockerfile} .')
+                    docker.build({image_literal}, {build_args_literal})
                 }}
             }}
         }}"""
@@ -245,14 +265,17 @@ class StageTemplates:
     @staticmethod
     def docker_push_stage(image_name, registry=None, credentials=None):
         """Generate Docker push stage"""
+        image_literal = GroovySyntax.single_quoted_literal(f'{image_name}:${{BUILD_NUMBER}}')
         if registry and credentials:
+            registry_literal = GroovySyntax.single_quoted_literal(registry)
+            credentials_literal = GroovySyntax.single_quoted_literal(credentials)
             return f"""
         stage('Docker Push') {{
             steps {{
                 script {{
-                    docker.withRegistry('{registry}', '{credentials}') {{
-                        docker.image('{image_name}:${{BUILD_NUMBER}}').push()
-                        docker.image('{image_name}:${{BUILD_NUMBER}}').push('latest')
+                    docker.withRegistry({registry_literal}, {credentials_literal}) {{
+                        docker.image({image_literal}).push()
+                        docker.image({image_literal}).push('latest')
                     }}
                 }}
             }}
@@ -262,27 +285,32 @@ class StageTemplates:
         stage('Docker Push') {{
             steps {{
                 script {{
-                    docker.image('{image_name}:${{BUILD_NUMBER}}').push()
-                    docker.image('{image_name}:${{BUILD_NUMBER}}').push('latest')
+                    docker.image({image_literal}).push()
+                    docker.image({image_literal}).push('latest')
                 }}
             }}
         }}"""
 
     @staticmethod
-    def parallel_test_stage(test_types=['unit', 'integration']):
+    def parallel_test_stage(test_types=['unit', 'integration'], fail_fast=True):
         """Generate parallel test stages"""
         parallel_stages = []
         for test_type in test_types:
+            stage_name = ValidationHelpers.normalize_stage_name(f'{test_type} Tests')
+            stage_name_literal = GroovySyntax.single_quoted_literal(stage_name)
+            test_cmd_literal = GroovySyntax.single_quoted_literal(f'npm run test:{test_type}')
             parallel_stages.append(f"""
-                stage('{test_type.capitalize()} Tests') {{
+                stage({stage_name_literal}) {{
                     steps {{
-                        sh 'npm run test:{test_type}'
+                        sh {test_cmd_literal}
                     }}
                 }}""")
 
         stages_str = '\n'.join(parallel_stages)
+        fail_fast_line = "            failFast true\n" if fail_fast else ""
         return f"""
         stage('Parallel Tests') {{
+{fail_fast_line}
             parallel {{
 {stages_str}
             }}
@@ -304,9 +332,10 @@ class PostConditions:
         }""")
 
         if archive_artifacts:
+            artifacts_literal = GroovySyntax.single_quoted_literal(archive_artifacts)
             post_blocks.append(f"""
         success {{
-            archiveArtifacts artifacts: '{archive_artifacts}', fingerprint: true
+            archiveArtifacts artifacts: {artifacts_literal}, fingerprint: true
         }}""")
 
         post_blocks.append("""
@@ -321,37 +350,57 @@ class PostConditions:
     }}"""
 
     @staticmethod
-    def notification_post(email=None, slack=None):
-        """Post conditions with notifications"""
+    def notification_post(email=None, slack=None, archive_artifacts=None, cleanup=True):
+        """Post conditions with notifications and optional artifact archiving."""
         post_blocks = []
+        success_steps = []
+        failure_steps = []
+
+        if archive_artifacts:
+            artifacts_literal = GroovySyntax.single_quoted_literal(archive_artifacts)
+            success_steps.append(
+                f"            archiveArtifacts artifacts: {artifacts_literal}, fingerprint: true"
+            )
 
         if email:
-            post_blocks.append(f"""
-        success {{
-            emailext(
-                subject: "Build Succeeded: ${{env.JOB_NAME}} #${{env.BUILD_NUMBER}}",
-                body: "Check console output at ${{env.BUILD_URL}}",
-                to: '{email}'
-            )
-        }}
-        failure {{
-            emailext(
-                subject: "Build Failed: ${{env.JOB_NAME}} #${{env.BUILD_NUMBER}}",
-                body: "Check console output at ${{env.BUILD_URL}}",
-                to: '{email}'
-            )
-        }}""")
+            email_literal = GroovySyntax.single_quoted_literal(email)
+            success_steps.extend([
+                "            emailext(",
+                "                subject: \"Build Succeeded: ${env.JOB_NAME} #${env.BUILD_NUMBER}\",",
+                "                body: \"Check console output at ${env.BUILD_URL}\",",
+                f"                to: {email_literal}",
+                "            )",
+            ])
+            failure_steps.extend([
+                "            emailext(",
+                "                subject: \"Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}\",",
+                "                body: \"Check console output at ${env.BUILD_URL}\",",
+                f"                to: {email_literal}",
+                "            )",
+            ])
 
         if slack:
-            post_blocks.append(f"""
-        success {{
-            slackSend(color: 'good', message: "Build ${{env.BUILD_NUMBER}} succeeded", channel: '{slack}')
-        }}
-        failure {{
-            slackSend(color: 'danger', message: "Build ${{env.BUILD_NUMBER}} failed", channel: '{slack}')
-        }}""")
+            slack_literal = GroovySyntax.single_quoted_literal(slack)
+            success_steps.append(
+                f"            slackSend(color: 'good', message: \"Build ${{env.BUILD_NUMBER}} succeeded\", channel: {slack_literal})"
+            )
+            failure_steps.append(
+                f"            slackSend(color: 'danger', message: \"Build ${{env.BUILD_NUMBER}} failed\", channel: {slack_literal})"
+            )
 
-        post_blocks.append("""
+        if success_steps:
+            post_blocks.append("        success {\n" + "\n".join(success_steps) + "\n        }")
+
+        if failure_steps:
+            post_blocks.append("        failure {\n" + "\n".join(failure_steps) + "\n        }")
+        else:
+            post_blocks.append("""
+        failure {
+            echo 'Pipeline failed!'
+        }""")
+
+        if cleanup:
+            post_blocks.append("""
         always {
             deleteDir()
         }""")
