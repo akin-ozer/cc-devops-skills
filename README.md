@@ -11,22 +11,22 @@ This repository ships **31 skills**:
 
 The goal is simple: make infra and pipeline work faster without skipping correctness checks.
 
-## quick install
+## Quick Install
 
-### Claude Code plugin marketplace
+### Claude Code Plugin Marketplace
 
 ```bash
 /plugin marketplace add akin-ozer/cc-devops-skills
 /plugin install devops-skills@akin-ozer
 ```
 
-### Codex desktop
+### Codex Desktop
 
 ```bash
 $skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
 ```
 
-### team rollout
+### Team Rollout
 
 Add this to project-level `.claude/settings.json`:
 
@@ -43,7 +43,7 @@ Add this to project-level `.claude/settings.json`:
 }
 ```
 
-## how people use this repo
+## How people use this repo
 
 Most workflows are generator + validator loops.
 
@@ -64,18 +64,16 @@ Validate ./infra/vpc with terraform-validator and list only high-severity findin
 Use k8s-debug to diagnose pods stuck in Pending in namespace payments.
 ```
 
-If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generator`.
-
-## what makes these skills useful
+## What makes these skills useful
 
 - **Local-first validation pipelines**: many validator skills run shell/Python checks directly from their `scripts/` folders.
 - **Tool-aware workflows**: validators integrate with real tools like `terraform`, `tflint`, `checkov`, `helm`, `kubeconform`, `actionlint`, and `act`.
 - **CRD/provider documentation lookup**: Kubernetes/Helm/Terraform/Terragrunt/Ansible flows include explicit doc lookup paths for custom resources.
 - **Fallback behavior is defined**: when a tool is missing, many skills degrade gracefully and tell you exactly what was skipped.
 
-## skill catalog (31)
+## Skill catalog (31)
 
-### infrastructure as code (6)
+### Infrastructure as code (6)
 
 | Skill | Primary use |
 |---|---|
@@ -86,7 +84,7 @@ If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generato
 | `terragrunt-generator` | Scaffold Terragrunt root/child/stack layouts |
 | `terragrunt-validator` | Validate Terragrunt HCL, stacks, and module wiring |
 
-### ci/cd pipelines (8)
+### CI/CD pipelines (8)
 
 | Skill | Primary use |
 |---|---|
@@ -99,7 +97,7 @@ If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generato
 | `jenkinsfile-generator` | Generate declarative/scripted Jenkinsfiles |
 | `jenkinsfile-validator` | Validate Jenkinsfiles and shared-library pipeline code |
 
-### containers and kubernetes (7)
+### Containers and Kubernetes (7)
 
 | Skill | Primary use |
 |---|---|
@@ -111,7 +109,7 @@ If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generato
 | `k8s-yaml-validator` | Validate/lint/dry-run Kubernetes YAML |
 | `k8s-debug` | Troubleshoot runtime cluster failures |
 
-### observability and logging (6)
+### Observability and Logging (6)
 
 | Skill | Primary use |
 |---|---|
@@ -122,7 +120,7 @@ If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generato
 | `promql-generator` | Generate PromQL queries, recording rules, and alerts |
 | `promql-validator` | Validate and optimize PromQL queries/alerts |
 
-### scripting and build (4)
+### Scripting and Build (4)
 
 | Skill | Primary use |
 |---|---|
@@ -131,7 +129,7 @@ If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generato
 | `makefile-generator` | Generate Makefiles with reusable targets |
 | `makefile-validator` | Validate Makefile correctness and anti-patterns |
 
-## validator internals (examples)
+## Validator Internals (examples)
 
 These are real execution patterns inside the skill instructions and scripts:
 
@@ -145,16 +143,16 @@ These are real execution patterns inside the skill instructions and scripts:
 | `ansible-validator` | syntax/lint/check-mode + role tests + security checks |
 | `dockerfile-validator` | scripted lint/security path with fallback scanning modes |
 
-## requirements
+## Requirements
 
 You do not need every tool for every skill. Install the tools for the domains you use.
 
-### baseline
+### Baseline
 
 - `bash`
 - `python3` (3.8+ recommended; 3.9+ for some security tooling)
 
-### common toolchain by domain
+### Common Toolchain by Domain
 
 | Domain | Common tools |
 |---|---|
@@ -165,7 +163,7 @@ You do not need every tool for every skill. Install the tools for the domains yo
 | Shell scripting | `shellcheck` |
 | Prometheus | `promtool` |
 
-### quick install (macOS example)
+### Quick Install (macOS example)
 
 ```bash
 brew install terraform tflint terragrunt helm kubeconform kubectl hadolint
@@ -174,7 +172,7 @@ pipx install ansible ansible-lint checkov yamllint molecule
 helm plugin install https://github.com/databus23/helm-diff
 ```
 
-## repo layout
+## Repo Layout
 
 ```text
 cc-devops-skills/
@@ -192,7 +190,7 @@ cc-devops-skills/
             └── tests/ (or test/)
 ```
 
-## contributing
+## Contributing
 
 Contributions are welcome for:
 - new skills in adjacent DevOps domains
@@ -200,6 +198,6 @@ Contributions are welcome for:
 - test fixtures and regression tests
 - improved docs/examples for real production scenarios
 
-## license
+## License
 
 Apache-2.0
