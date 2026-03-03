@@ -164,10 +164,21 @@ check_module() {
     local results=""
 
     if [ "$SCAN_TYPE" = "file" ]; then
-        # Match module at start of line with optional leading whitespace and dash
-        results=$(grep -n -E "^\s*-?\s*${module}:" "$TARGET_ABS" 2>/dev/null | grep -v "${fqcn}" || true)
+        # Pattern 1: module starts the task item (has a leading dash)
+        #   e.g. "    - apt:" or "    - shell: cmd"
+        local r1
+        r1=$(grep -n -E "^\s*-\s+${module}:" "$TARGET_ABS" 2>/dev/null | grep -v "${fqcn}" || true)
+        # Pattern 2: module key alone on its line (no value = dict form, after name:)
+        #   e.g. "      apt:" — but NOT "      group: root" (parameter with a value)
+        local r2
+        r2=$(grep -n -E "^\s+${module}:\s*(#.*)?$" "$TARGET_ABS" 2>/dev/null | grep -v "${fqcn}" || true)
+        results=$(printf '%s\n%s' "$r1" "$r2" | grep -v "^$" | sort -u || true)
     else
-        results=$(grep -r -n -E "^\s*-?\s*${module}:" "$TARGET_ABS" --include="*.yml" --include="*.yaml" 2>/dev/null | grep -v ".git/" | grep -v "${fqcn}" || true)
+        local r1
+        r1=$(grep -r -n -E "^\s*-\s+${module}:" "$TARGET_ABS" --include="*.yml" --include="*.yaml" 2>/dev/null | grep -v ".git/" | grep -v "${fqcn}" || true)
+        local r2
+        r2=$(grep -r -n -E "^\s+${module}:\s*(#.*)?$" "$TARGET_ABS" --include="*.yml" --include="*.yaml" 2>/dev/null | grep -v ".git/" | grep -v "${fqcn}" || true)
+        results=$(printf '%s\n%s' "$r1" "$r2" | grep -v "^$" | sort -u || true)
     fi
 
     if [ -n "$results" ]; then

@@ -172,13 +172,14 @@ check_credential_management() {
     local good_practices=0
     local bad_practices=0
 
-    # Check for withCredentials usage (good)
-    if grep -q 'withCredentials' "$file"; then
+    # Check for withCredentials usage (good) — strip comments to avoid false positives
+    # where 'withCredentials' appears only in a comment explaining best practices.
+    if get_code_without_comments "$file" | grep -q 'withCredentials'; then
         ((good_practices++))
     fi
 
-    # Check for credentials() function (good)
-    if grep -q 'credentials(' "$file"; then
+    # Check for credentials() function (good) — strip comments for the same reason.
+    if get_code_without_comments "$file" | grep -q 'credentials('; then
         ((good_practices++))
     fi
 
@@ -397,8 +398,9 @@ check_security_practices() {
         log_error "Security" "Hardcoded credentials detected"
     fi
 
-    # Good: Using credentials manager
-    if grep -qE '(withCredentials|credentials\()' "$file"; then
+    # Good: Using credentials manager — strip comments so a comment that merely
+    # mentions 'withCredentials' doesn't count as actual usage.
+    if get_code_without_comments "$file" | grep -qE '(withCredentials|credentials\()'; then
         ((security_score++))
     fi
 

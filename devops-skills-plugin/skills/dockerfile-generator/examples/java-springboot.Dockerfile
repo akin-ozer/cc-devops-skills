@@ -23,6 +23,7 @@ FROM eclipse-temurin:21-jre-jammy AS production
 WORKDIR /app
 
 # Install healthcheck dependency and create non-root user
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -u 1001 appuser

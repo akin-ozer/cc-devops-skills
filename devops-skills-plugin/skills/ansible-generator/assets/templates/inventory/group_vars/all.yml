@@ -20,5 +20,5 @@ ntp_timezone: UTC
 
 # Security settings
 security_ssh_port: 22
-security_ssh_password_authentication: no
-security_ssh_permit_root_login: no
+security_ssh_password_authentication: false
+security_ssh_permit_root_login: false

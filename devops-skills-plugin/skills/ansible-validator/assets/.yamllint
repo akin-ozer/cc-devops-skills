@@ -56,13 +56,11 @@ rules:
     allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
     check-keys: yes
 
-  # Document start - Optional for Ansible
-  document-start:
-    present: no
+  # Document start - Disable check; ansible-lint production profile enforces ---
+  document-start: disable
 
   # Document end - Not required
-  document-end:
-    present: no
+  document-end: disable
 
   # Key duplicates - Error on duplicates
   key-duplicates: {}
@@ -83,6 +81,7 @@ rules:
 # Ignore certain paths
 ignore: |
   .git/
+  .github/
   venv/
   .venv/
   __pycache__/

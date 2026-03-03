@@ -31,6 +31,9 @@ COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 # Copy application from builder
 COPY --chown=nodejs:nodejs . .
 
+# Set production environment
+ENV NODE_ENV=production
+
 # Switch to non-root user
 USER nodejs
 

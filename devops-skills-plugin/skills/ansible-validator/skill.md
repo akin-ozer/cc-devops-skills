@@ -983,6 +983,19 @@ Detects:
 
 Provides specific migration recommendations with FQCN alternatives.
 
+**validate_inventory.sh** - Validates Ansible inventory files and directories. Checks YAML syntax, resolves host/group hierarchy, and flags common structural issues such as plaintext credentials and missing `ansible_connection=local` for localhost entries. Automatically installs ansible in a temporary venv if not available.
+
+Usage:
+```bash
+bash scripts/validate_inventory.sh <inventory-file|inventory-directory>
+```
+
+Validation stages:
+1. YAML syntax check (yamllint) on all inventory YAML files
+2. Inventory parse — `ansible-inventory --list` to verify host/group resolution
+3. Host graph — `ansible-inventory --graph` to display group hierarchy
+4. Structural checks — plaintext passwords, localhost connection settings, group_vars/host_vars presence
+
 ### references/
 
 **security_checklist.md** - Comprehensive security validation checklist for Ansible playbooks covering secrets management, privilege escalation, file permissions, and command injection.

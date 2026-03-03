@@ -465,6 +465,19 @@ class BestPracticesChecker:
                     if 'steps' in job:
                         process_steps(job['steps'], f"job '{job_name}'")
 
+                    # Deployment strategy phase steps
+                    if 'strategy' in job and isinstance(job['strategy'], dict):
+                        for strategy_type in ['runOnce', 'rolling', 'canary']:
+                            if strategy_type in job['strategy']:
+                                strategy = job['strategy'][strategy_type]
+                                if isinstance(strategy, dict):
+                                    for phase in ['preDeploy', 'deploy', 'routeTraffic', 'postRouteTraffic', 'on']:
+                                        if phase in strategy:
+                                            phase_data = strategy[phase]
+                                            if isinstance(phase_data, dict) and 'steps' in phase_data:
+                                                process_steps(phase_data['steps'],
+                                                              f"job '{job_name}' {strategy_type}.{phase}")
+
         # Steps in stages
         if 'stages' in self.config:
             for stage in self.config['stages']:
@@ -474,6 +487,19 @@ class BestPracticesChecker:
                             job_name = job.get('job') or job.get('deployment', 'unknown')
                             if 'steps' in job:
                                 process_steps(job['steps'], f"job '{job_name}'")
+
+                            # Deployment strategy phase steps
+                            if 'strategy' in job and isinstance(job['strategy'], dict):
+                                for strategy_type in ['runOnce', 'rolling', 'canary']:
+                                    if strategy_type in job['strategy']:
+                                        strategy = job['strategy'][strategy_type]
+                                        if isinstance(strategy, dict):
+                                            for phase in ['preDeploy', 'deploy', 'routeTraffic', 'postRouteTraffic', 'on']:
+                                                if phase in strategy:
+                                                    phase_data = strategy[phase]
+                                                    if isinstance(phase_data, dict) and 'steps' in phase_data:
+                                                        process_steps(phase_data['steps'],
+                                                                      f"job '{job_name}' {strategy_type}.{phase}")
 
 
 def main():

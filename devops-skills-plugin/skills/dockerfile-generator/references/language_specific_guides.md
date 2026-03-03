@@ -92,6 +92,7 @@ CMD ["node", "server.js"]
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim AS builder
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
@@ -102,7 +103,9 @@ WORKDIR /app
 RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
-ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 USER appuser
 EXPOSE 8000
 CMD ["python", "app.py"]
@@ -114,6 +117,7 @@ CMD ["python", "app.py"]
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim AS builder
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
@@ -124,7 +128,9 @@ WORKDIR /app
 RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
-ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 USER appuser
 EXPOSE 8000
 HEALTHCHECK CMD python -c "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')" || exit 1
@@ -137,6 +143,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim AS builder
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc postgresql-client libpq-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -145,6 +152,7 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels -r requirements.txt
 
 FROM python:3.12-slim
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client libpq-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -153,6 +161,8 @@ RUN pip install --no-cache /wheels/* && rm -rf /wheels
 RUN useradd -m -u 1001 appuser
 COPY --chown=appuser:appuser . .
 RUN python manage.py collectstatic --noinput
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 USER appuser
 EXPOSE 8000
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "project.wsgi:application"]
@@ -162,7 +172,8 @@ CMD ["gunicorn", "--bind", "0.0.0.0:8000", "project.wsgi:application"]
 - Use `pip install --no-cache-dir` to reduce image size
 - Install build dependencies in builder stage only
 - Use wheels for compiled dependencies
-- Set `PYTHONUNBUFFERED=1` for real-time logs
+- Set `PYTHONUNBUFFERED=1` for real-time container logs (stdout/stderr flushed immediately)
+- Set `PYTHONDONTWRITEBYTECODE=1` to skip `.pyc` files in the image
 - Use `--user` flag for pip install (non-root)
 
 ## Go
@@ -200,6 +211,9 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /main .
 
+# gcr.io/distroless/static-debian12 IS a specific tag; hadolint DL3006 is a
+# false positive for non-Docker-Hub registries.
+# hadolint ignore=DL3006
 FROM gcr.io/distroless/static-debian12
 COPY --from=builder /main /main
 USER nonroot:nonroot

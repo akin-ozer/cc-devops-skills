@@ -101,4 +101,69 @@ if [[ $rc -ne 1 ]]; then
   exit 1
 fi
 
+# 5) Module type classification: github.com/* and bitbucket.org/* must be 'git',
+#    hg:: prefix must be 'mercurial', and a bare registry path must remain 'registry'.
+cat > "$TMP_DIR/modules.tf" <<'TF'
+module "github_mod"   { source = "github.com/hashicorp/example" }
+module "bb_mod"       { source = "bitbucket.org/acme/mymodule" }
+module "hg_mod"       { source = "hg::https://example.com/vpc.hg" }
+module "registry_mod" { source = "hashicorp/consul/aws"  version = "0.1.0" }
+module "local_mod"    { source = "./modules/vpc" }
+TF
+bash "$SCRIPTS_DIR/extract_tf_info_wrapper.sh" "$TMP_DIR/modules.tf" > "$TMP_DIR/modules.json"
+python3 - "$TMP_DIR/modules.json" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding='utf-8'))
+by_name = {m['name']: m['type'] for m in payload['modules']}
+errors = []
+expected = {
+    'github_mod':   'git',
+    'bb_mod':       'git',
+    'hg_mod':       'mercurial',
+    'registry_mod': 'registry',
+    'local_mod':    'local',
+}
+for name, want in expected.items():
+    got = by_name.get(name)
+    if got != want:
+        errors.append(f'{name}: want {want!r}, got {got!r}')
+if errors:
+    raise SystemExit('FAIL: wrong module types: ' + '; '.join(errors))
+PY
+
+# 6) Ephemeral resource blocks (Terraform 1.10+) must be extracted and their
+#    provider inferred for the docs lookup set.
+cat > "$TMP_DIR/ephemeral.tf" <<'TF'
+terraform {
+  required_providers {
+    aws = { source = "hashicorp/aws" }
+  }
+}
+ephemeral "random_password" "db_pass" {
+  length  = 20
+  special = true
+}
+resource "aws_db_instance" "main" {
+  engine         = "mysql"
+  instance_class = "db.t3.micro"
+}
+TF
+bash "$SCRIPTS_DIR/extract_tf_info_wrapper.sh" "$TMP_DIR/ephemeral.tf" > "$TMP_DIR/ephemeral.json"
+python3 - "$TMP_DIR/ephemeral.json" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding='utf-8'))
+# Ephemeral resources must be present in the output
+ephemerals = payload.get('ephemeral_resources', [])
+if not any(e['type'] == 'random_password' for e in ephemerals):
+    raise SystemExit('FAIL: random_password not found in ephemeral_resources')
+# The random provider must appear in the docs lookup set (implicit detection)
+providers = set(payload.get('provider_analysis', {}).get('all_provider_names_for_docs', []))
+if 'random' not in providers:
+    raise SystemExit(f'FAIL: random provider missing from docs set; got {sorted(providers)}')
+# Implicit providers must record detected_from = 'ephemeral'
+implicit = payload.get('implicit_providers', [])
+if not any(p['name'] == 'random' and p['detected_from'] == 'ephemeral' for p in implicit):
+    raise SystemExit('FAIL: random not recorded as ephemeral implicit provider')
+PY
+
 echo "PASS: terraform-validator regression tests"

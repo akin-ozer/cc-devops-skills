@@ -45,7 +45,7 @@ build-docker-dind:
 
   script:
     # Build Docker image with cache
-    - echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+    - 'echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"'
     - docker build
         --cache-from ${IMAGE_NAME}:latest
         --tag ${IMAGE_NAME}:${IMAGE_TAG}

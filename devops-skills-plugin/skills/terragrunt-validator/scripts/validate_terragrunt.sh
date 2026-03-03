@@ -259,24 +259,41 @@ validate_inputs() {
     fi
 }
 
-# Validate Terragrunt configuration
+# Validate Terragrunt configuration syntax
+# Uses 'terragrunt hcl validate' which checks HCL structure without requiring
+# Terraform providers or remote credentials.  This is distinct from format_check()
+# (whitespace/indentation) and validate_inputs() (variable alignment).
 validate_terragrunt() {
     print_header "Terragrunt Configuration Check"
 
     cd "$TARGET_DIR"
 
-    # Check if terragrunt.hcl files exist
-    if ! find . -name "*.hcl" -type f | grep -q .; then
+    # Check if .hcl files exist (exclude cache dirs to avoid false positives)
+    if ! find . -name "*.hcl" -type f ! -path "*/.terragrunt-cache/*" | grep -q .; then
         print_error "No .hcl files found in $TARGET_DIR"
         return 1
     fi
 
-    # Basic syntax check - HCL format check also validates syntax
-    if terragrunt hcl fmt --check > /dev/null 2>&1 || terragrunt hcl format --check > /dev/null 2>&1; then
-        print_success "Terragrunt configuration syntax is valid"
+    local output
+    if output=$(terragrunt hcl validate 2>&1); then
+        print_success "Terragrunt HCL syntax is valid"
     else
-        # If format check fails, it could be format issues (non-fatal)
-        print_warning "Configuration files exist but may need formatting"
+        local hcl_exit=$?
+        # Command not found (127) or unknown command means pre-0.93 Terragrunt.
+        # Fall back to format check as a best-effort proxy — it at least catches
+        # structural HCL errors even though it is not a pure syntax validator.
+        if [[ $hcl_exit -eq 127 ]] || echo "$output" | grep -q "unknown command"; then
+            print_warning "terragrunt hcl validate not available (requires 0.93+), using format check as proxy"
+            if terragrunt hcl fmt --check > /dev/null 2>&1 || terragrunt hcl format --check > /dev/null 2>&1; then
+                print_success "Terragrunt configuration syntax appears valid (format check passed)"
+            else
+                print_warning "Configuration files may have formatting or syntax issues"
+            fi
+        else
+            print_error "Terragrunt HCL syntax validation failed"
+            echo "$output" | head -20
+            return 1
+        fi
     fi
 }
 

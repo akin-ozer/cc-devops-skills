@@ -69,7 +69,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download build artifacts from CI
         uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
@@ -109,7 +109,7 @@ jobs:
 
     steps:
       - name: Checkout PR code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
@@ -255,7 +255,7 @@ jobs:
           echo "environment=${{ github.event.client_payload.environment }}" >> $GITHUB_OUTPUT
 
       - name: Checkout specific version
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ steps.payload.outputs.version }}
 
@@ -476,7 +476,7 @@ jobs:
 
       # Step 4: Checkout PR code
       - name: Checkout PR code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ steps.pr.outputs.ref }}
           repository: ${{ steps.pr.outputs.repo }}
@@ -573,7 +573,7 @@ if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"]'), git
 ```yaml
 steps:
   - name: Check team membership
-    uses: actions/github-script@v7
+    uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
     with:
       script: |
         const teams = ['deployment-team', 'admin-team'];
@@ -784,7 +784,7 @@ jobs:
     steps:
       # SAFE: Don't checkout PR code
       - name: Comment on PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             await github.rest.issues.createComment({

@@ -109,9 +109,8 @@ echo "-----------------------------------"
 
 # Prepare checkov command based on scan type
 if [ "$SCAN_TYPE" = "file" ]; then
-    # For single file, scan the directory containing it
-    SCAN_DIR=$(dirname "$PLAYBOOK_ABS")
-    CHECKOV_ARGS=("-d" "$SCAN_DIR" "--framework" "ansible" "--compact" "--quiet")
+    # Use -f for single file to avoid scanning sibling files in the same directory
+    CHECKOV_ARGS=("-f" "$PLAYBOOK_ABS" "--framework" "ansible" "--compact" "--quiet")
 else
     # For directory, scan it directly
     CHECKOV_ARGS=("-d" "$PLAYBOOK_ABS" "--framework" "ansible" "--compact" "--quiet")
@@ -126,10 +125,12 @@ fi
 
 # Parse checkov output
 if echo "$CHECKOV_OUTPUT" | grep -q "Passed checks:"; then
-    # Extract statistics (macOS compatible - using awk instead of grep -P)
-    PASSED=$(echo "$CHECKOV_OUTPUT" | grep "Passed checks:" | awk -F': ' '{print $2}' | awk -F',' '{print $1}' || echo "0")
-    FAILED=$(echo "$CHECKOV_OUTPUT" | grep "Failed checks:" | awk -F': ' '{print $2}' | awk -F',' '{print $1}' || echo "0")
-    SKIPPED=$(echo "$CHECKOV_OUTPUT" | grep "Skipped checks:" | awk -F': ' '{print $2}' | awk -F',' '{print $1}' || echo "0")
+    # Extract individual counters from the single-line summary:
+    # "Passed checks: 4, Failed checks: 2, Skipped checks: 0"
+    # Strip everything before each label, then strip comma-and-remainder.
+    PASSED=$(echo "$CHECKOV_OUTPUT" | awk '/Passed checks:/{gsub(/.*Passed checks: /,""); gsub(/,.*/,""); print}' || echo "0")
+    FAILED=$(echo "$CHECKOV_OUTPUT" | awk '/Failed checks:/{gsub(/.*Failed checks: /,""); gsub(/,.*/,""); print}' || echo "0")
+    SKIPPED=$(echo "$CHECKOV_OUTPUT" | awk '/Skipped checks:/{gsub(/.*Skipped checks: /,""); gsub(/[^0-9].*/,""); print}' || echo "0")
 
     echo -e "Security Scan Results:"
     echo -e "  ${COLOR_GREEN}Passed:${COLOR_RESET}  $PASSED checks"

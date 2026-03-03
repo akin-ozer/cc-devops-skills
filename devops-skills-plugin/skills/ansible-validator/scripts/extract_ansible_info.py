@@ -28,12 +28,15 @@ class AnsibleInfoExtractor:
     BUILTIN_MODULES = {
         'debug', 'set_fact', 'assert', 'fail', 'include', 'include_tasks',
         'include_vars', 'import_tasks', 'import_playbook', 'add_host',
-        'group_by', 'pause', 'wait_for', 'meta', 'command', 'shell',
-        'script', 'raw', 'copy', 'file', 'template', 'lineinfile',
-        'blockinfile', 'replace', 'fetch', 'stat', 'get_url', 'uri',
-        'apt', 'yum', 'dnf', 'package', 'service', 'systemd', 'user',
-        'group', 'authorized_key', 'cron', 'git', 'pip', 'setup',
-        'gather_facts', 'ping', 'reboot', 'include_role', 'import_role'
+        'group_by', 'pause', 'wait_for', 'wait_for_connection', 'meta',
+        'command', 'shell', 'script', 'raw', 'copy', 'file', 'template',
+        'lineinfile', 'blockinfile', 'replace', 'fetch', 'stat', 'slurp',
+        'get_url', 'uri', 'apt', 'yum', 'dnf', 'package', 'service',
+        'systemd', 'user', 'group', 'authorized_key', 'cron', 'git', 'pip',
+        'setup', 'gather_facts', 'ping', 'reboot', 'include_role',
+        'import_role', 'hostname', 'sysctl', 'mount', 'unarchive', 'archive',
+        'find', 'known_hosts', 'iptables', 'firewalld', 'selinux',
+        'seboolean', 'at', 'acl', 'synchronize',
     }
 
     def __init__(self, path: str):
@@ -109,13 +112,20 @@ class AnsibleInfoExtractor:
             if not content:
                 return
 
-            # Check if it's a playbook
             if isinstance(content, list):
-                for play in content:
-                    if isinstance(play, dict):
-                        self._extract_from_play(play)
+                # Distinguish a playbook (list of plays with 'hosts') from a
+                # task file (list of task dicts without 'hosts').
+                first = content[0] if content else {}
+                if isinstance(first, dict) and 'hosts' in first:
+                    # It's a playbook
+                    for play in content:
+                        if isinstance(play, dict):
+                            self._extract_from_play(play)
+                else:
+                    # It's a task file (tasks/main.yml, handlers/main.yml, etc.)
+                    self._extract_from_task_list(content)
 
-            # Check if it's a task file
+            # Check if it's a task file expressed as a dict
             elif isinstance(content, dict):
                 self._extract_from_tasks(content)
 
@@ -212,15 +222,14 @@ class AnsibleInfoExtractor:
                     parts = key.split('.')
                     if len(parts) >= 3:
                         collection = f"{parts[0]}.{parts[1]}"
-                        module = parts[2]
                         self.collections.add(collection)
                         self.modules.add(key)
                     elif len(parts) == 2:
-                        # Could be collection.module
+                        # Could be collection.module (two-part FQCN)
                         self.modules.add(key)
                 else:
-                    # It's a short module name
-                    if key not in self.BUILTIN_MODULES and not key.startswith('_'):
+                    # It's a short module name — track all of them, builtin or not
+                    if not key.startswith('_'):
                         self.modules.add(key)
 
     def _extract_from_roles(self, roles):
@@ -239,14 +248,26 @@ class AnsibleInfoExtractor:
                         collection = f"{parts[0]}.{parts[1]}"
                         self.collections.add(collection)
 
+    def _is_builtin(self, module_name: str) -> bool:
+        """Return True for both short-name and FQCN ansible.builtin modules."""
+        if module_name in self.BUILTIN_MODULES:
+            return True
+        # ansible.builtin.apt / ansible.legacy.apt
+        if '.' in module_name:
+            prefix = '.'.join(module_name.split('.')[:2])
+            short = module_name.split('.')[-1]
+            if prefix in ('ansible.builtin', 'ansible.legacy'):
+                return short in self.BUILTIN_MODULES
+        return False
+
     def _build_result(self) -> Dict[str, Any]:
         """Build the result dictionary"""
         return {
             "modules": sorted(list(self.modules)),
             "collections": sorted(list(self.collections)),
             "collection_versions": self.collection_versions,
-            "builtin_modules": sorted([m for m in self.modules if m in self.BUILTIN_MODULES]),
-            "custom_modules": sorted([m for m in self.modules if m not in self.BUILTIN_MODULES]),
+            "builtin_modules": sorted([m for m in self.modules if self._is_builtin(m)]),
+            "custom_modules": sorted([m for m in self.modules if not self._is_builtin(m)]),
             "errors": self.errors
         }
 

@@ -159,8 +159,8 @@ Each role should have:
     state: present
   when: ansible_os_family == "Debian"
 
-- name: Install on RedHat-based systems
-  ansible.builtin.yum:
+- name: Install on RedHat-based systems (RHEL 8+)
+  ansible.builtin.dnf:
     name: nginx
     state: present
   when: ansible_os_family == "RedHat"
@@ -223,7 +223,7 @@ Each role should have:
     src: app_config.j2
     dest: /etc/app/config.yml
     mode: '0644'
-    backup: yes
+    backup: true
 ```
 
 ```jinja2
@@ -668,7 +668,7 @@ export {{ key | upper }}="{{ value }}"
 ---
 - name: Deploy web application
   hosts: webservers
-  become: yes
+  become: true
   vars:
     app_version: "1.2.3"
     app_port: 8080
@@ -676,7 +676,7 @@ export {{ key | upper }}="{{ value }}"
   pre_tasks:
     - name: Update package cache
       ansible.builtin.apt:
-        update_cache: yes
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
@@ -712,7 +712,7 @@ ansible-playbook playbook.yml --check
 # Task that always runs in check mode
 - name: Get service status
   ansible.builtin.command: systemctl status nginx
-  check_mode: no
+  check_mode: false
   changed_when: false
 ```
 
@@ -741,7 +741,7 @@ ansible-playbook playbook.yml --check --diff
 # Disable fact gathering when not needed
 - name: Quick task
   hosts: all
-  gather_facts: no
+  gather_facts: false
   tasks:
     - name: Ping hosts
       ansible.builtin.ping:
@@ -749,7 +749,7 @@ ansible-playbook playbook.yml --check --diff
 # Gather specific facts
 - name: Gather minimal facts
   hosts: all
-  gather_facts: yes
+  gather_facts: true
   gather_subset:
     - '!all'
     - '!min'

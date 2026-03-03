@@ -308,13 +308,13 @@ deploy:
 ### Artifact Sharing
 ```yaml
 # Upload
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
   with:
     name: build-${{ github.sha }}
     path: dist/
 
 # Download (in dependent job)
-- uses: actions/download-artifact@v4
+- uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
   with:
     name: build-${{ github.sha }}
 ```

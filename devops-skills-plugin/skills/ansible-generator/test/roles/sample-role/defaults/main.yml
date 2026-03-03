@@ -1,0 +1,26 @@
+---
+# Role: sample-role
+# Default variables (lowest priority — override freely in playbooks or group_vars)
+
+# Package and service
+sample_role_package_name: curl
+sample_role_service_name: sample-service
+
+# User and group (the service runs as)
+sample_role_user: root
+sample_role_group: root
+
+# Directories
+sample_role_config_dir: /etc/sample-service
+sample_role_data_dir: /var/lib/sample-service
+sample_role_log_dir: /var/log/sample-service
+
+# Service configuration
+sample_role_port: 8080
+sample_role_bind_address: 127.0.0.1
+sample_role_max_connections: 100
+
+# Feature flags
+sample_role_enable_ssl: false
+sample_role_enable_monitoring: true
+sample_role_enable_backup: true

@@ -144,10 +144,51 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
         previous_log_message = f"{stdout}\n{stderr}".lower()
         if code == 0:
             print_output(stdout, stderr)
-        elif "previous terminated container" in previous_log_message:
+        elif (
+            "previous terminated container" in previous_log_message
+            or "is not terminated" in previous_log_message
+        ):
             print("INFO: No previous terminated container logs available.")
         else:
             print_output(stdout, stderr)
+
+    # Init container logs — only emitted when the pod has init containers.
+    # Init container failures are a primary cause of Init:CrashLoopBackOff and
+    # Init:0/N pending states; their logs must be visible in diagnostic output.
+    stdout, stderr, code = run_kubectl(
+        ["get", "pod", pod_name, "-n", namespace, "-o", "jsonpath={.spec.initContainers[*].name}"]
+    )
+    if code != 0:
+        print_section("INIT CONTAINER LOGS")
+        print_output(stdout, stderr)
+        print("INFO: Skipping init container logs because init container names could not be queried.")
+    else:
+        init_containers = stdout.strip().split()
+        if init_containers:
+            print_section("INIT CONTAINER LOGS")
+            for container in init_containers:
+                print(f"\n### Init Container: {container} ###")
+                stdout, stderr, _ = run_kubectl(
+                    ["logs", pod_name, "-n", namespace, "-c", container, "--tail=100"],
+                    timeout=45,
+                )
+                print_output(stdout, stderr)
+
+                print(f"\n### Previous init container logs for: {container} ###")
+                stdout, stderr, code = run_kubectl(
+                    ["logs", pod_name, "-n", namespace, "-c", container, "--previous", "--tail=50"],
+                    timeout=45,
+                )
+                previous_log_message = f"{stdout}\n{stderr}".lower()
+                if code == 0:
+                    print_output(stdout, stderr)
+                elif (
+                    "previous terminated container" in previous_log_message
+                    or "is not terminated" in previous_log_message
+                ):
+                    print("INFO: No previous terminated init container logs available.")
+                else:
+                    print_output(stdout, stderr)
 
     # Resource usage
     print_section("RESOURCE USAGE")

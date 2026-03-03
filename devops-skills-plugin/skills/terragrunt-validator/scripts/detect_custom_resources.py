@@ -173,26 +173,27 @@ class ResourceDetector:
 
     def extract_modules(self, content: str, filepath: str) -> None:
         """Extract module configurations from HCL content."""
-        # Pattern for module blocks
-        module_pattern = r'module\s+"([^"]+)"\s*{(.*?)}'
-        matches = re.finditer(module_pattern, content, re.MULTILINE | re.DOTALL)
-
-        for match in matches:
+        # Use balanced-brace extraction (same approach as _extract_required_providers) so
+        # that module blocks with nested objects before the source attribute are handled
+        # correctly.  The old non-greedy regex stopped at the first closing brace it saw,
+        # which caused it to miss the source when any nested block appeared first.
+        module_start_pattern = r'module\s+"([^"]+)"\s*\{'
+        for match in re.finditer(module_start_pattern, content, re.MULTILINE):
             module_name = match.group(1)
-            module_content = match.group(2)
+            # match.end() points to the character after '{'; step back to land on '{'.
+            start_pos = match.end() - 1
+            block_content = self._extract_balanced_braces(content, start_pos)
+            if not block_content:
+                continue
 
-            # Extract source
-            source_match = re.search(r'source\s*=\s*"([^"]+)"', module_content)
+            source_match = re.search(r'source\s*=\s*"([^"]+)"', block_content)
             if not source_match:
                 continue
 
             source = source_match.group(1)
-
-            # Extract version if available
-            version_match = re.search(r'version\s*=\s*"([^"]+)"', module_content)
+            version_match = re.search(r'version\s*=\s*"([^"]+)"', block_content)
             version = version_match.group(1) if version_match else "latest"
 
-            # Categorize the module
             module_info = {
                 'name': module_name,
                 'source': source,
@@ -201,15 +202,27 @@ class ResourceDetector:
                 'type': self._categorize_module_source(source)
             }
 
-            # Only add if it's a custom or remote module (not local relative paths to same repo)
+            # Only add if it's a custom or remote module (not local relative paths)
             if module_info['type'] in ['git', 'registry', 'http', 'custom']:
                 self.custom_modules[source].append(module_info)
 
-        # Also check for Terragrunt-style terraform blocks
+        # Also check for Terragrunt-style terraform blocks.
         # Format: terraform { source = "tfr://..." }
-        terragrunt_module_pattern = r'terraform\s*{[^}]*source\s*=\s*"([^"]+)"'
-        for match in re.finditer(terragrunt_module_pattern, content, re.MULTILINE | re.DOTALL):
-            source = match.group(1)
+        # Use balanced-brace extraction here too so that terraform blocks with nested
+        # extra_arguments or hook sub-blocks are parsed correctly regardless of attribute
+        # order (e.g., root.hcl terraform blocks that have no source should be skipped).
+        tf_start_pattern = r'terraform\s*\{'
+        for match in re.finditer(tf_start_pattern, content, re.MULTILINE):
+            start_pos = match.end() - 1
+            block_content = self._extract_balanced_braces(content, start_pos)
+            if not block_content:
+                continue
+
+            source_match = re.search(r'source\s*=\s*"([^"]+)"', block_content)
+            if not source_match:
+                continue
+
+            source = source_match.group(1)
 
             # Parse version from source string (e.g., tfr:///.../module?version=1.0.0)
             version = "latest"

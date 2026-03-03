@@ -1,0 +1,10 @@
+apiVersion: v2
+name: test-workload-chart
+description: >
+  Test chart with intentional Stage 9 security violations.
+  Used to verify that the helm-validator skill correctly detects:
+  missing pod/container securityContext, missing resource limits,
+  missing liveness/readiness probes, and :latest image tag.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

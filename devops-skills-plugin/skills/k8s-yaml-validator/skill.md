@@ -223,6 +223,26 @@ kubeconform \
 
 **For CRDs:** If kubeconform reports "no schema found", this is expected. Use the documentation from Stage 3 to manually validate the spec fields.
 
+**kubeconform line number behavior — two distinct cases:**
+
+kubeconform does NOT report file-absolute line numbers. You must translate:
+
+1. **Parse errors** (e.g. `error converting YAML to JSON: yaml: line N`):
+   - `N` is **document-relative** (line N within that document's content).
+   - Convert to file-absolute: `file_line = doc_start_line + N - 1`
+   - `doc_start_line` comes from the `start_line` field in `detect_crd_wrapper.sh` output.
+   - Example: document starts at file line 4, kubeconform says `yaml: line 5` →
+     file-absolute line = 4 + 5 − 1 = **line 8** (matches yamllint output).
+
+2. **Schema validation errors** (e.g. `got string, want integer`):
+   - kubeconform reports **JSON path only**, no line number.
+   - Example: `at '/spec/template/spec/containers/0/ports/0/containerPort': got string, want integer`
+   - To find the line: search the YAML file for the field name (e.g. `containerPort`) within
+     the relevant document section, using file-absolute line numbers from the surrounding context.
+
+Always present line numbers as file-absolute in the validation report even when translating
+from kubeconform's document-relative output.
+
 ### Stage 5: Cluster Dry-Run (if available)
 
 **IMPORTANT: Always try server-side dry-run first.** Server-side validation catches more issues than client-side because it runs through admission controllers and webhooks.
@@ -460,7 +480,7 @@ When a multi-document YAML file has some valid and some invalid documents:
 
 **Example scenario:**
 A file with 3 documents where document 1 has a syntax error:
-- Document 1 (Deployment): Syntax error at line 6
+- Document 1 (Deployment): Syntax error at line 8
 - Document 2 (Service): Valid
 - Document 3 (Certificate CRD): Valid
 
@@ -473,7 +493,7 @@ A file with 3 documents where document 1 has a syntax error:
 ```
 | Document | Resource | Parsing | Validation |
 |----------|----------|---------|------------|
-| 1 | Deployment | ❌ Syntax error (line 6) | Skipped |
+| 1 | Deployment | ❌ Syntax error (line 8) | Skipped |
 | 2 | Service | ✅ Parsed | ✅ Valid |
 | 3 | Certificate | ✅ Parsed | ✅ Valid |
 ```
@@ -590,7 +610,8 @@ The `test/` directory contains example files to exercise all validation paths. U
 |-----------|---------|-------------------|
 | `deployment-test.yaml` | Valid standard K8s resource | All stages pass, no errors |
 | `certificate-crd-test.yaml` | Valid CRD resource | CRD detected, Context7 lookup performed, no errors |
-| `comprehensive-test.yaml` | Multi-resource with intentional errors | Syntax error detected, partial parsing works, CRD found |
+| `comprehensive-test.yaml` | Multi-resource with intentional YAML syntax error | Syntax error detected, partial parsing works, CRD found |
+| `schema-errors-test.yaml` | Valid YAML with intentional schema type errors | yamllint passes; kubeconform fails with 2 JSON-path errors (replicas, containerPort) |
 
 ### Validation Paths to Test
 
@@ -653,7 +674,24 @@ python3 scripts/count_yaml_documents.py test/comprehensive-test.yaml
 bash scripts/detect_crd_wrapper.sh test/comprehensive-test.yaml
 ```
 
-5. **No Cluster Access Path**
+5. **Schema Validation Error Path (type mismatches)**
+   - File: `schema-errors-test.yaml`
+   - Expected: yamllint passes (valid YAML), kubeconform fails with 2 JSON-path schema errors
+   - Note: kubeconform reports JSON paths, not line numbers — locate fields manually in the YAML
+   - Commands:
+```bash
+cd "$SKILL_DIR"
+python3 scripts/count_yaml_documents.py test/schema-errors-test.yaml
+yamllint -c assets/.yamllint test/schema-errors-test.yaml
+bash scripts/detect_crd_wrapper.sh test/schema-errors-test.yaml
+kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -ignore-missing-schemas -summary -verbose \
+  test/schema-errors-test.yaml
+```
+
+6. **No Cluster Access Path**
    - Any valid file with no kubectl cluster configured
    - Expected: Server-side dry-run fails; client-side fallback is attempted and may still fail if API discovery is unavailable
    - Commands:
@@ -663,9 +701,9 @@ KUBECONFIG=/tmp/nonexistent-kubeconfig kubectl apply --dry-run=server -f test/de
 KUBECONFIG=/tmp/nonexistent-kubeconfig kubectl apply --dry-run=client --validate=false -f test/deployment-test.yaml
 ```
 
-6. **Missing Tools Path**
+7. **Missing Tools Path**
    - Test by temporarily removing a tool from PATH
-   - Expected: setup_tools.sh reports missing, validation continues with available tools
+   - Expected: setup_tools.sh reports missing tools and prints install instructions, validation continues with available tools
    - Commands:
 ```bash
 cd "$SKILL_DIR"

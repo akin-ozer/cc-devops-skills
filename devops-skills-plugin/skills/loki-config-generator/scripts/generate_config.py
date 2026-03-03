@@ -646,6 +646,10 @@ common:
         config += self._generate_compactor_config()
         config += self._generate_ingester_config()
 
+        # Limits dry-run distributor config (Loki 3.5+)
+        if kwargs.get("limits_dry_run", False):
+            config += self._generate_distributor_dry_run_config()
+
         return config
 
     def _generate_simple_scalable(self, storage: str, **kwargs) -> str:
@@ -671,6 +675,11 @@ common:
         storage_kwargs["zone_awareness"] = zone_awareness
 
         # Use Thanos storage if requested (Loki 3.4+)
+        if thanos_storage and storage == "filesystem":
+            print(
+                "Warning: --thanos-storage is not supported with filesystem storage and will be ignored.",
+                file=sys.stderr,
+            )
         if thanos_storage and storage != "filesystem":
             if storage == "s3":
                 config += self._generate_thanos_s3_storage(**storage_kwargs)
@@ -713,6 +722,24 @@ query_range:
   cache_results: true
 """
 
+        # Ruler configuration
+        if kwargs.get("ruler_enabled", False):
+            ruler_storage_type = storage if storage in ["s3", "gcs", "azure"] else "s3"
+            config += self._generate_ruler_config(
+                storage_type=ruler_storage_type,
+                bucket=kwargs.get("ruler_bucket") or "loki-ruler-bucket",
+                alertmanager_url=kwargs.get("alertmanager_url") or "http://alertmanager:9093",
+                enable_remote_write=kwargs.get("ruler_remote_write", False),
+                remote_write_url=kwargs.get("ruler_remote_write_url") or "http://prometheus:9090/api/v1/write",
+                region=kwargs.get("region", "us-east-1"),
+                thanos_storage=thanos_storage,
+                ring_store="memberlist",
+            )
+
+        # Limits dry-run distributor config (Loki 3.5+)
+        if kwargs.get("limits_dry_run", False):
+            config += self._generate_distributor_dry_run_config()
+
         return config
 
     def _generate_microservices(self, storage: str, **kwargs) -> str:
@@ -737,6 +764,11 @@ query_range:
 
         # For microservices, use consul for coordination.
         # Thanos storage is supported for cloud backends in Loki 3.4+.
+        if thanos_storage and storage == "filesystem":
+            print(
+                "Warning: --thanos-storage is not supported with filesystem storage and will be ignored.",
+                file=sys.stderr,
+            )
         if thanos_storage and storage != "filesystem":
             if storage == "s3":
                 config += self._generate_thanos_s3_storage(**storage_kwargs)
@@ -803,6 +835,21 @@ query_scheduler:
 index_gateway:
   mode: ring
 """
+
+        # Ruler configuration
+        if kwargs.get("ruler_enabled", False):
+            ruler_storage_type = storage if storage in ["s3", "gcs", "azure"] else "s3"
+            config += self._generate_ruler_config(
+                storage_type=ruler_storage_type,
+                bucket=kwargs.get("ruler_bucket") or "loki-ruler-bucket",
+                alertmanager_url=kwargs.get("alertmanager_url") or "http://alertmanager:9093",
+                enable_remote_write=kwargs.get("ruler_remote_write", False),
+                remote_write_url=kwargs.get("ruler_remote_write_url") or "http://prometheus:9090/api/v1/write",
+                region=kwargs.get("region", "us-east-1"),
+                thanos_storage=thanos_storage,
+                ring_store="consul",
+                consul_host=kwargs.get("consul_host", "consul:8500"),
+            )
 
         return config
 
@@ -1000,25 +1047,6 @@ def main():
             ruler_remote_write=args.ruler_remote_write,
             ruler_remote_write_url=args.ruler_remote_write_url,
         )
-
-        # Add ruler configuration if enabled
-        if args.ruler and args.mode != "monolithic":
-            storage_type = args.storage if args.storage in ["s3", "gcs", "azure"] else "s3"
-            ring_store = "consul" if args.mode == "microservices" else "memberlist"
-            config += generator._generate_ruler_config(
-                storage_type=storage_type,
-                bucket=args.ruler_bucket or "loki-ruler-bucket",
-                alertmanager_url=args.alertmanager_url,
-                enable_remote_write=args.ruler_remote_write,
-                remote_write_url=args.ruler_remote_write_url,
-                region=args.region,
-                thanos_storage=args.thanos_storage,
-                ring_store=ring_store,
-            )
-
-        # Add dry-run mode for limits if enabled (Loki 3.5+)
-        if args.limits_dry_run and args.mode != "microservices":
-            config += generator._generate_distributor_dry_run_config()
 
         # Write to file
         with open(args.output, "w") as f:

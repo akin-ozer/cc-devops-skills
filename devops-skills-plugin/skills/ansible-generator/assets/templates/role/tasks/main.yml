@@ -37,7 +37,7 @@
     mode: '0644'
     owner: "{{ [role_name]_user }}"
     group: "{{ [role_name]_group }}"
-    backup: yes
+    backup: true
     validate: "[validation_command] %s"
   notify: Restart [service_name]
   tags:
@@ -47,6 +47,6 @@
   ansible.builtin.service:
     name: "{{ [role_name]_service_name }}"
     state: started
-    enabled: yes
+    enabled: true
   tags:
     - service

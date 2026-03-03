@@ -39,10 +39,10 @@ rules:
     forbid-in-block-mappings: false
     forbid-in-flow-mappings: false
 
-  # K8s uses hyphens in resource names
+  # Detect duplicate keys in mappings (uses default: error level)
   key-duplicates: {}
 
-  # Allow trailing spaces in comments
+  # Enforce no trailing whitespace (uses default: error level)
   trailing-spaces: {}
 
   # Be strict about new lines at end of file

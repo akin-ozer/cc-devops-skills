@@ -15,6 +15,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/main .
 
 # Production stage (using distroless for minimal image)
+# gcr.io/distroless/static-debian12 IS a specific tag; hadolint DL3006 is a
+# false positive for non-Docker-Hub registries.
+# hadolint ignore=DL3006
 FROM gcr.io/distroless/static-debian12 AS production
 WORKDIR /
 

@@ -54,8 +54,8 @@ unit "vpc" {
   # Values passed to the unit (accessible via `values` object in the unit's terragrunt.hcl)
   # These are written to terragrunt.values.hcl alongside the generated terragrunt.hcl
   values = merge(local.common_values, {
-    vpc_name = "${local.stack_name}-vpc"
-    cidr     = "[VPC_CIDR]" # e.g., "10.0.0.0/16"
+    name = "${local.stack_name}-vpc"
+    cidr = "[VPC_CIDR]"  # e.g., "10.0.0.0/16"
   })
 
   # Generate directly in path/ instead of .terragrunt-stack/path/
@@ -72,9 +72,9 @@ unit "database" {
   no_dot_terragrunt_stack = local.use_direct_paths
 
   values = merge(local.common_values, {
-    db_name = "${local.stack_name}-db"
-    engine  = "[DB_ENGINE]"  # e.g., "postgres", "mysql"
-    version = "[DB_VERSION]" # e.g., "15", "8.0"
+    name    = "${local.stack_name}-db"
+    engine  = "[DB_ENGINE]"   # e.g., "postgres", "mysql"
+    version = "[DB_VERSION]"  # e.g., "15", "8.0"
 
     # Reference to VPC unit for dependency resolution.
     # Keep all units on the same no_dot_terragrunt_stack mode so ../vpc resolves.
@@ -90,9 +90,9 @@ unit "app" {
   no_dot_terragrunt_stack = local.use_direct_paths
 
   values = merge(local.common_values, {
-    app_name      = "${local.stack_name}-app"
-    instance_type = "[INSTANCE_TYPE]" # e.g., "t3.medium"
-    desired_count = [DESIRED_COUNT]   # e.g., 2
+    name          = "${local.stack_name}-app"
+    instance_type = "[INSTANCE_TYPE]"  # e.g., "t3.medium"
+    desired_count = 2                  # Replace with actual desired count
 
     # Dependencies on other units
     vpc_path      = "../vpc"

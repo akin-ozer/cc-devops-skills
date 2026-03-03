@@ -1,0 +1,18 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+NOTE: This chart is intentionally missing security best practices.
+It is designed for testing the helm-validator skill's Stage 9
+(Security Best Practices Check). Do NOT deploy this to production.
+
+Expected Stage 9 findings:
+  - Missing pod-level securityContext (runAsNonRoot, runAsUser, fsGroup)
+  - Missing container-level securityContext (allowPrivilegeEscalation, capabilities.drop)
+  - Missing resource limits and requests
+  - Missing liveness and readiness probes
+  - Using :latest image tag
+
+To learn more about the release, try:
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}

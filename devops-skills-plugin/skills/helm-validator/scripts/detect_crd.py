@@ -47,7 +47,22 @@ def parse_yaml_file(file_path):
     """Parse a YAML file that may contain multiple documents."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            return list(yaml.safe_load_all(f))
+            content = f.read()
+
+        # Detect unrendered Helm templates before attempting YAML parse.
+        # Go template directives ({{ ... }}) produce invalid YAML that causes
+        # confusing PyYAML errors instead of an actionable message.
+        if "{{" in content:
+            print(
+                f"Error: {file_path} appears to be an unrendered Helm template "
+                f"(contains Go template directives '{{{{ ... }}}}'). "
+                f"Run 'helm template <release> <chart> --output-dir ./rendered' "
+                f"first, then pass the rendered files to this script.",
+                file=sys.stderr,
+            )
+            return None
+
+        return list(yaml.safe_load_all(content))
     except Exception as e:
         print(f"Error parsing YAML file {file_path}: {e}", file=sys.stderr)
         return None
@@ -77,9 +92,21 @@ def extract_resource_info(doc):
     if not kind or not api_version:
         return None
 
-    # Extract group from apiVersion (e.g., "cert-manager.io/v1" -> "cert-manager.io")
-    group = api_version.split("/")[0] if "/" in api_version else "core"
-    version = api_version.split("/")[-1]
+    # Extract group and version from apiVersion.
+    # Three canonical forms:
+    #   "v1"              → core group (no group prefix, Kubernetes built-in)
+    #   "apps/v1"         → group "apps", version "v1"
+    #   "cert-manager.io/v1" → group "cert-manager.io", version "v1"
+    if "/" in api_version:
+        group, version = api_version.split("/", 1)
+    elif api_version == "v1":
+        group = "core"
+        version = "v1"
+    else:
+        # Non-standard: no slash, not "v1". Use the full apiVersion string as
+        # the group so the output is consistent with isCRD=True.
+        group = api_version
+        version = api_version
 
     is_crd = not is_standard_k8s_resource(api_version)
 

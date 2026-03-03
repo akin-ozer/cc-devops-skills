@@ -30,7 +30,7 @@ analyze_errors() {
         | sort \
         | uniq -c \
         | sort -rn \
-        | awk '{printf "  %-40s %6d\n", $2, $1}'
+        | awk '{count=$1; $1=""; sub(/^ /,""); printf "  %-40s %6d\n", $0, count}'
 
     echo ""
     echo "Total errors: $(grep -c "ERROR" "${log_file}" 2>/dev/null || true)"

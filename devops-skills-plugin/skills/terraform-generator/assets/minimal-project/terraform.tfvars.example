@@ -5,7 +5,7 @@ environment  = "dev"
 project_name = "my-project"
 
 tags = {
-  ManagedBy   = "Terraform"
-  Owner       = "team@example.com"
-  CostCenter  = "engineering"
+  ManagedBy  = "Terraform"
+  Owner      = "team@example.com"
+  CostCenter = "engineering"
 }

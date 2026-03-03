@@ -541,11 +541,11 @@ include "root" {
 }
 
 locals {
-  # Fetch current git branch
-  git_branch = run_cmd("--terragrunt-quiet", "git", "rev-parse", "--abbrev-ref", "HEAD")
+  # Fetch current git branch (--quiet suppresses Terragrunt banner output)
+  git_branch = run_cmd("--quiet", "git", "rev-parse", "--abbrev-ref", "HEAD")
 
   # Fetch AWS account ID
-  account_id = run_cmd("--terragrunt-quiet", "aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text")
+  account_id = run_cmd("--quiet", "aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text")
 
   # Read JSON configuration
   config = jsondecode(file("${get_terragrunt_dir()}/config.json"))
@@ -739,6 +739,9 @@ unit "database" {
 
 **Use when:** Creating reusable unit templates for stacks
 
+The `name` key is the standard generic resource name key passed from the stack's unit
+`values` block. Unit-specific keys (e.g., `cidr`, `engine`) are passed alongside it.
+
 ```hcl
 # catalog/units/vpc/terragrunt.hcl
 include "root" {
@@ -750,7 +753,8 @@ terraform {
 }
 
 inputs = {
-  name = values.vpc_name
+  # `values.name` is the standard generic resource name key set in the stack definition.
+  name = values.name
   cidr = values.cidr
 
   azs             = ["${values.aws_region}a", "${values.aws_region}b"]

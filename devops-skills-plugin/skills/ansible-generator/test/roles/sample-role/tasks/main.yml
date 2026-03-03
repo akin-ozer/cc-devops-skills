@@ -1,0 +1,64 @@
+---
+# Role: sample-role
+# Tasks: Main task list
+# Required variables: none (all have defaults)
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+  tags:
+    - always
+
+- name: Ensure sample package is installed (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: "{{ sample_role_package_name }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+  tags:
+    - install
+    - packages
+
+- name: Ensure sample package is installed (RHEL 8+)
+  ansible.builtin.dnf:
+    name: "{{ sample_role_package_name }}"
+    state: present
+  when: ansible_os_family == "RedHat"
+  tags:
+    - install
+    - packages
+
+- name: Create required directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ sample_role_user }}"
+    group: "{{ sample_role_group }}"
+  loop:
+    - "{{ sample_role_config_dir }}"
+    - "{{ sample_role_data_dir }}"
+    - "{{ sample_role_log_dir }}"
+  tags:
+    - configure
+    - directories
+
+- name: Deploy configuration file
+  ansible.builtin.template:
+    src: config.j2
+    dest: "{{ sample_role_config_dir }}/config.yml"
+    mode: '0644'
+    owner: "{{ sample_role_user }}"
+    group: "{{ sample_role_group }}"
+    backup: true
+  notify: Restart sample-service
+  tags:
+    - configure
+
+- name: Ensure service is started and enabled
+  ansible.builtin.service:
+    name: "{{ sample_role_service_name }}"
+    state: started
+    enabled: true
+  tags:
+    - service

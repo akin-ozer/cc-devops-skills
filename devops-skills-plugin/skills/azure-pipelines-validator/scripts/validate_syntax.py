@@ -264,8 +264,8 @@ class AzurePipelinesValidator:
             return
 
         if isinstance(pool, dict):
-            # Must have either name or vmImage
-            if 'name' not in pool and 'vmImage' not in pool:
+            # Must have either name or vmImage (demands-only is valid: uses default pool)
+            if 'name' not in pool and 'vmImage' not in pool and 'demands' not in pool:
                 self.errors.append(ValidationError(
                     'error', self._get_line('pool'),
                     "Pool must specify 'name' or 'vmImage'",
@@ -278,9 +278,38 @@ class AzurePipelinesValidator:
                 'pool-invalid-type'
             ))
 
+    def _collect_stage_names(self, stages: Any):
+        """Pre-collect stage names to support forward references in dependsOn."""
+        if not isinstance(stages, list):
+            return
+        for stage in stages:
+            if isinstance(stage, dict):
+                if 'stage' in stage:
+                    self.defined_stages.add(stage['stage'])
+                payload = self._extract_conditional_block(stage)
+                if payload is not None:
+                    items = payload if isinstance(payload, list) else [payload]
+                    self._collect_stage_names(items)
+
+    def _collect_job_names(self, jobs: Any):
+        """Pre-collect job names to support forward references in dependsOn."""
+        if not isinstance(jobs, list):
+            return
+        for job in jobs:
+            if isinstance(job, dict):
+                if 'job' in job:
+                    self.defined_jobs.add(job['job'])
+                elif 'deployment' in job:
+                    self.defined_jobs.add(job['deployment'])
+                payload = self._extract_conditional_block(job)
+                if payload is not None:
+                    items = payload if isinstance(payload, list) else [payload]
+                    self._collect_job_names(items)
+
     def _validate_stages(self):
         """Validate stages configuration"""
         stages = self.config.get('stages', [])
+        self._collect_stage_names(stages)
         self._validate_stage_list(stages)
 
     def _validate_stage_list(self, stages: Any):
@@ -351,6 +380,9 @@ class AzurePipelinesValidator:
                 'jobs-not-list'
             ))
             return
+
+        # Pre-collect all job names so forward dependsOn references are resolved.
+        self._collect_job_names(jobs)
 
         for idx, job in enumerate(jobs):
             if not isinstance(job, dict):

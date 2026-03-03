@@ -202,6 +202,31 @@ run_shellcheck() {
     fi
 }
 
+# Grep for a pattern in a file, excluding comment-only lines.
+# A comment-only line is one whose first non-whitespace character is '#'.
+# Returns 0 with output when non-comment matches exist; 1 with no output otherwise.
+# Usage: grep_code [-E] 'pattern' file
+grep_code() {
+    local ext_flag=""
+    if [[ "${1:-}" == "-E" ]]; then
+        ext_flag="-E"
+        shift
+    fi
+    local output
+    output=$(grep -n ${ext_flag:+$ext_flag} "$1" "$2" 2>/dev/null | awk '
+    {
+        colon = index($0, ":")
+        content = substr($0, colon + 1)
+        if (content !~ /^[[:space:]]*#/) print $0
+    }')
+    if [[ -n "$output" ]]; then
+        echo "$output"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Run custom security and optimization checks
 run_custom_checks() {
     local file="$1"
@@ -212,52 +237,52 @@ run_custom_checks() {
     local found_issues=0
 
     # Security: Check for eval with variables
-    if grep -E -n 'eval.*\$' "$file" >/dev/null 2>&1; then
+    if grep_code -E 'eval.*\$' "$file" >/dev/null 2>&1; then
         print_warning "Potential command injection: eval with variable found"
-        grep -E -n 'eval.*\$' "$file" | sed 's/^/  Line /'
+        grep_code -E 'eval.*\$' "$file" | sed 's/^/  Line /'
         found_issues=1
     fi
 
     # Security: Check for unsafe use of rm -rf
-    if grep -E -n '(rm -(rf|fr).*\$|rm -(rf|fr) /)' "$file" >/dev/null 2>&1; then
+    if grep_code -E '(rm -(rf|fr).*\$|rm -(rf|fr) /)' "$file" >/dev/null 2>&1; then
         print_warning "Dangerous rm -rf usage detected"
-        grep -E -n '(rm -(rf|fr).*\$|rm -(rf|fr) /)' "$file" | sed 's/^/  Line /'
+        grep_code -E '(rm -(rf|fr).*\$|rm -(rf|fr) /)' "$file" | sed 's/^/  Line /'
         found_issues=1
     fi
 
     # Performance: Useless use of cat (UUOC)
     # Match: cat <filename> | grep/awk/sed
     # Use [^|]+ to match one or more non-pipe characters (the filename)
-    if grep -E -n 'cat[[:space:]]+[^|]+[[:space:]]*\|[[:space:]]*(grep|awk|sed)' "$file" >/dev/null 2>&1; then
+    if grep_code -E 'cat[[:space:]]+[^|]+[[:space:]]*\|[[:space:]]*(grep|awk|sed)' "$file" >/dev/null 2>&1; then
         print_info "Useless use of cat detected. Consider using redirection instead:"
-        grep -E -n 'cat[[:space:]]+[^|]+[[:space:]]*\|[[:space:]]*(grep|awk|sed)' "$file" | sed 's/^/  Line /'
+        grep_code -E 'cat[[:space:]]+[^|]+[[:space:]]*\|[[:space:]]*(grep|awk|sed)' "$file" | sed 's/^/  Line /'
         found_issues=1
     fi
 
     # Portability: Bash-specific features in sh scripts
     if [[ "$shell_type" == "sh" ]]; then
         # Check for [[ ]] (bash-specific)
-        if grep -n "\[\[" "$file" >/dev/null 2>&1; then
+        if grep_code "\[\[" "$file" >/dev/null 2>&1; then
             print_error "Bash-specific [[ ]] found in sh script. Use [ ] instead"
-            grep -n "\[\[" "$file" | sed 's/^/  Line /'
+            grep_code "\[\[" "$file" | sed 's/^/  Line /'
             found_issues=1
         fi
 
         # Check for arrays (bash-specific)
-        if grep -E -n '(declare -a|array=\()' "$file" >/dev/null 2>&1; then
+        if grep_code -E '(declare -a|array=\()' "$file" >/dev/null 2>&1; then
             print_error "Bash-specific arrays found in sh script"
-            grep -E -n '(declare -a|array=\()' "$file" | sed 's/^/  Line /'
+            grep_code -E '(declare -a|array=\()' "$file" | sed 's/^/  Line /'
             found_issues=1
         fi
 
-        # Check for function keyword (bash-specific)
+        # Check for function keyword (bash-specific) — anchored at ^ so comment lines are safe
         if grep -E -n '^function[[:space:]]' "$file" >/dev/null 2>&1; then
             print_warning "Bash-specific 'function' keyword in sh script"
             grep -E -n '^function[[:space:]]' "$file" | sed 's/^/  Line /'
             found_issues=1
         fi
 
-        # Check for source command (bash-specific, use . instead)
+        # Check for source command (bash-specific, use . instead) — anchored at ^ so comment lines are safe
         if grep -E -n '^source[[:space:]]' "$file" >/dev/null 2>&1; then
             print_warning "Bash-specific 'source' command in sh script. Use '.' instead"
             grep -E -n '^source[[:space:]]' "$file" | sed 's/^/  Line /'
@@ -272,9 +297,9 @@ run_custom_checks() {
     fi
 
     # Check for missing quotes around variables in dangerous contexts
-    if grep -E -n '\$[A-Za-z_][A-Za-z0-9_]*[[:space:]]*>' "$file" >/dev/null 2>&1; then
+    if grep_code -E '\$[A-Za-z_][A-Za-z0-9_]*[[:space:]]*>' "$file" >/dev/null 2>&1; then
         print_warning "Unquoted variables in redirection context"
-        grep -E -n '\$[A-Za-z_][A-Za-z0-9_]*[[:space:]]*>' "$file" | sed 's/^/  Line /'
+        grep_code -E '\$[A-Za-z_][A-Za-z0-9_]*[[:space:]]*>' "$file" | sed 's/^/  Line /'
         found_issues=1
     fi
 

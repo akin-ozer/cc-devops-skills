@@ -296,7 +296,7 @@ class StageTemplates:
         """Generate parallel test stages"""
         parallel_stages = []
         for test_type in test_types:
-            stage_name = ValidationHelpers.normalize_stage_name(f'{test_type} Tests')
+            stage_name = ValidationHelpers.normalize_stage_name(f'{test_type.title()} Tests')
             stage_name_literal = GroovySyntax.single_quoted_literal(stage_name)
             test_cmd_literal = GroovySyntax.single_quoted_literal(f'npm run test:{test_type}')
             parallel_stages.append(f"""

@@ -58,6 +58,7 @@ class TerraformParser:
         self.variables: list[dict[str, Any]] = []
         self.outputs: list[dict[str, Any]] = []
         self.locals: list[dict[str, Any]] = []
+        self.ephemeral_resources: list[dict[str, Any]] = []
         self.terraform_settings: dict[str, Any] = {}
         self.implicit_providers: list[dict[str, Any]] = []
         self.all_providers_for_docs: list[dict[str, Any]] = []
@@ -84,6 +85,7 @@ class TerraformParser:
             self._extract_variables(parsed, filepath)
             self._extract_outputs(parsed, filepath)
             self._extract_locals(parsed, filepath)
+            self._extract_ephemeral_resources(parsed, filepath)
 
         except (UnexpectedToken, UnexpectedCharacters) as e:
             error = {
@@ -219,20 +221,38 @@ class TerraformParser:
                         })
 
     def _determine_module_type(self, source: str) -> str:
-        """Determine module type from source string."""
+        """Determine module type from source string.
+
+        Terraform module source types:
+          local         - ./path or ../path
+          git           - git:: prefix, git@ SSH, github.com/* shorthand,
+                          bitbucket.org/* shorthand, any domain/org/repo pattern
+          mercurial     - hg:: prefix
+          cloud_storage - s3:: or gcs:: prefix
+          http          - https:// or http:// (zip archives)
+          registry      - namespace/module/provider (no dots in first segment)
+          unknown       - anything else
+        """
         if source.startswith('./') or source.startswith('../'):
             return 'local'
-        elif source.startswith('git::') or source.startswith('git@'):
+        if source.startswith('git::') or source.startswith('git@'):
             return 'git'
-        elif source.startswith('s3::') or source.startswith('gcs::'):
+        if source.startswith('hg::'):
+            return 'mercurial'
+        if source.startswith('s3::') or source.startswith('gcs::'):
             return 'cloud_storage'
-        elif source.startswith('https://') or source.startswith('http://'):
+        if source.startswith('https://') or source.startswith('http://'):
             return 'http'
-        elif '/' in source and not source.startswith('.'):
-            # Likely terraform registry format: namespace/name/provider
+        if '/' in source:
+            # Registry format is namespace/module/provider — the first segment
+            # is a plain namespace with no dots (e.g. "hashicorp").
+            # Domain-based Git shorthands (github.com/org/repo,
+            # bitbucket.org/org/repo) have a dot in the first segment.
+            first_segment = source.split('/')[0]
+            if '.' in first_segment:
+                return 'git'
             return 'registry'
-        else:
-            return 'unknown'
+        return 'unknown'
 
     def _extract_resources(self, parsed: dict, filepath: str) -> None:
         """Extract resource blocks."""
@@ -349,6 +369,32 @@ class TerraformParser:
                         'file': filepath
                     })
 
+    def _extract_ephemeral_resources(self, parsed: dict, filepath: str) -> None:
+        """Extract ephemeral resource blocks (Terraform 1.10+).
+
+        Ephemeral resources hold temporary values that are never stored in state
+        (e.g. passwords, API tokens). Their type prefix identifies the provider
+        exactly as regular resource types do, so they must be included in
+        implicit provider detection.
+
+        HCL structure mirrors resource blocks:
+            ephemeral "<type>" "<name>" { ... }
+        which python-hcl2 yields as:
+            {'ephemeral': [{'<type>': {'<name>': {...}}}]}
+        """
+        ephemeral_blocks = parsed.get('ephemeral', [])
+
+        for block in ephemeral_blocks:
+            if isinstance(block, dict):
+                for ephemeral_type, instances in block.items():
+                    if isinstance(instances, dict):
+                        for ephemeral_name in instances:
+                            self.ephemeral_resources.append({
+                                'type': ephemeral_type,
+                                'name': ephemeral_name,
+                                'file': filepath
+                            })
+
     def _infer_provider_from_type(self, block_type: str, tf_type: str) -> str | None:
         """Infer provider name from Terraform resource/data type."""
         if not tf_type:
@@ -408,6 +454,19 @@ class TerraformParser:
                 'file': str(data_source.get('file', ''))
             })
 
+        for ephemeral in self.ephemeral_resources:
+            ephemeral_type = ephemeral.get('type', '')
+            name = self._infer_provider_from_type('ephemeral', ephemeral_type)
+            if not name or name in explicit_provider_names or name in seen_implicit_names:
+                continue
+            seen_implicit_names.add(name)
+            implicit.append({
+                'name': name,
+                'detected_from': 'ephemeral',
+                'type': ephemeral_type,
+                'file': str(ephemeral.get('file', ''))
+            })
+
         self.implicit_providers = implicit
 
         all_provider_names = sorted(explicit_provider_names | seen_implicit_names)
@@ -443,6 +502,7 @@ class TerraformParser:
             'modules': self.modules,
             'resources': self.resources,
             'data_sources': self.data_sources,
+            'ephemeral_resources': self.ephemeral_resources,
             'variables': self.variables,
             'outputs': self.outputs,
             'locals': self.locals,
@@ -460,6 +520,7 @@ class TerraformParser:
                 'module_count': len(self.modules),
                 'resource_count': len(self.resources),
                 'data_source_count': len(self.data_sources),
+                'ephemeral_resource_count': len(self.ephemeral_resources),
                 'variable_count': len(self.variables),
                 'output_count': len(self.outputs),
                 'local_count': len(self.locals),

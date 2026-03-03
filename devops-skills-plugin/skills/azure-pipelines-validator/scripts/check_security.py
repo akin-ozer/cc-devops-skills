@@ -169,6 +169,25 @@ class SecurityScanner:
                                     "Use Azure DevOps variable groups with secret variables or Azure Key Vault"
                                 ))
                             break
+        elif isinstance(variables, list):
+            for var in variables:
+                if isinstance(var, dict) and 'name' in var and 'value' in var:
+                    var_name = var['name']
+                    var_value = str(var['value'])
+                    check_str = f"{var_name}: {var_value}"
+                    for pattern, rule in self.SECRET_PATTERNS:
+                        if pattern.search(check_str):
+                            line_num = self._get_line(var_name)
+                            finding_key = (line_num, rule)
+                            if finding_key not in self.reported_secrets:
+                                self.reported_secrets.add(finding_key)
+                                self.issues.append(SecurityIssue(
+                                    'high', line_num,
+                                    f"Variable '{var_name}' may contain hardcoded secret",
+                                    rule,
+                                    "Use Azure DevOps variable groups with secret variables or Azure Key Vault"
+                                ))
+                            break
 
         # Check in raw content (scripts, etc.) - skip lines already reported
         lines = self.raw_content.split('\n')
@@ -177,12 +196,12 @@ class SecurityScanner:
             if '#' in line:
                 line = line[:line.index('#')]
 
-            # Skip if it's a variable reference like $(secretVar)
-            if re.search(r'\$\([^)]+\)', line):
-                continue
+            # Normalize out variable references before pattern matching so that
+            # mixed lines like "password=hardcoded $(Build.Id)" are still caught.
+            normalized_line = re.sub(r'\$\([^)]+\)', '', line)
 
             for pattern, rule in self.SECRET_PATTERNS:
-                if pattern.search(line):
+                if pattern.search(normalized_line):
                     # Check if this line+rule was already reported
                     finding_key = (line_num, rule)
                     if finding_key not in self.reported_secrets:

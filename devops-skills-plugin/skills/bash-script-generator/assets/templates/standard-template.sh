@@ -14,7 +14,7 @@ readonly VERSION="1.0.0"
 
 VERBOSE=false
 DRY_RUN=false
-LOG_LEVEL="INFO"
+LOG_LEVEL=1  # 0=DEBUG 1=INFO 2=WARN 3=ERROR
 
 usage() {
     cat << EOF
@@ -42,15 +42,10 @@ log() {
     echo "[${level}] $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
 }
 
-log_info() { log "INFO" "$@"; }
-log_warn() { log "WARN" "$@"; }
+log_debug() { if [[ ${LOG_LEVEL} -le 0 ]]; then log "DEBUG" "$@"; fi; }
+log_info()  { if [[ ${LOG_LEVEL} -le 1 ]]; then log "INFO"  "$@"; fi; }
+log_warn()  { if [[ ${LOG_LEVEL} -le 2 ]]; then log "WARN"  "$@"; fi; }
 log_error() { log "ERROR" "$@"; }
-log_debug() {
-    if [[ "${LOG_LEVEL}" == "DEBUG" ]]; then
-        log "DEBUG" "$@"
-    fi
-    return 0
-}
 
 die() {
     log_error "$@"
@@ -77,7 +72,7 @@ parse_args() {
         case "$1" in
             -h|--help) usage; exit 0 ;;
             -v|--verbose) VERBOSE=true; shift ;;
-            -d|--debug) LOG_LEVEL="DEBUG"; VERBOSE=true; shift ;;
+            -d|--debug) LOG_LEVEL=0; VERBOSE=true; shift ;;
             -n|--dry-run) DRY_RUN=true; shift ;;
             -*) die "Unknown option: $1" ;;
             *) break ;;

@@ -140,7 +140,7 @@ jobs:
       name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
       url: ${{ github.ref_name == 'main' && 'https://example.com' || 'https://staging.example.com' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
         env:
           API_KEY: ${{ secrets.API_KEY }}  # Environment-specific secret
@@ -178,7 +178,7 @@ jobs:
         NODE_ENV: production
       options: --cpus 2 --memory 4g
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: npm ci
       - run: npm run build
 ```
@@ -212,7 +212,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run tests
         env:
           DATABASE_URL: postgres://postgres:postgres@postgres:5432/test
@@ -336,7 +336,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run tests
         id: test
@@ -375,7 +375,7 @@ jobs:
       url: https://staging.example.com
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Deploy
         run: ./deploy.sh staging
@@ -396,7 +396,7 @@ jobs:
       url: https://example.com
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Deploy
         run: ./deploy.sh production

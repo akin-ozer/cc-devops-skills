@@ -5,6 +5,7 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
@@ -28,8 +29,10 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Update PATH
-ENV PATH=/home/appuser/.local/bin:$PATH
+# Update PATH and set Python production env vars
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Switch to non-root user
 USER appuser

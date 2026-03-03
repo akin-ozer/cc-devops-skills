@@ -578,6 +578,38 @@
     "affinity": {
       "description": "Affinity rules",
       "type": "object"
+    },
+    "configMap": {
+      "description": "ConfigMap template toggle and data, used by checksum annotations",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable ConfigMap generation and checksum annotation",
+          "type": "boolean"
+        },
+        "data": {
+          "description": "Key-value pairs to populate the ConfigMap",
+          "type": "object"
+        }
+      }
+    },
+    "secret": {
+      "description": "Secret template toggle and data, used by checksum annotations",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable Secret generation and checksum annotation",
+          "type": "boolean"
+        },
+        "type": {
+          "description": "Kubernetes Secret type (e.g. Opaque, kubernetes.io/tls)",
+          "type": "string"
+        },
+        "stringData": {
+          "description": "Plain-text key-value pairs stored as Secret stringData",
+          "type": "object"
+        }
+      }
     }
   }
 }

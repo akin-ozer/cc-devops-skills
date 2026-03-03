@@ -202,8 +202,8 @@ topk(10,
 # Suspicious activity (unauthorized access attempts)
 {app="api"} | json | (status_code == 401 or status_code == 403)
 
-# Access from external IPs
-{app="api"} | json !ip("10.0.0.0/8") !ip("172.16.0.0/12") !ip("192.168.0.0/16")
+# Access from external IPs (requires a parsed label that holds the IP, e.g. source_ip)
+{app="api"} | json | source_ip != ip("10.0.0.0/8") | source_ip != ip("172.16.0.0/12") | source_ip != ip("192.168.0.0/16")
 
 # SQL injection attempts
 {app="api"} |~ "union.*select|select.*from.*where"
@@ -391,11 +391,12 @@ approx_topk(10,
   sum by (endpoint) (rate({app="api"}[5m]))
 )
 
-# Vector matching for percentage
+# Percentage per status code of total traffic
+# NOTE: LogQL does NOT support on()/group_left() vector matching (that is PromQL only).
+# Align label sets via aggregation so both sides reduce to the same dimensions.
 sum by (status_code) (rate({app="api"} | json [5m]))
 /
-on(instance) group_left
-sum by (instance) (rate({app="api"}[5m]))
+sum (rate({app="api"}[5m]))
 
 ## === STRUCTURED METADATA (Loki 3.x) ===
 
@@ -428,10 +429,11 @@ sum by (instance) (rate({app="api"}[5m]))
 # Accelerated with OR conditions
 {app="api"} | detected_level="error" or detected_level="warn" | json
 
-## === APPROX_TOPK (Probabilistic Top-K) ===
+## === APPROX_TOPK (Probabilistic Top-K) — Loki 3.3+ only ===
 
 # Faster alternative to topk for high-cardinality data
 # Returns approximate results, great for large datasets
+# REQUIRES: Loki 3.3 or newer — do NOT use when version is unknown or < 3.3
 
 # Approximate top 10 endpoints by request rate
 approx_topk(10,

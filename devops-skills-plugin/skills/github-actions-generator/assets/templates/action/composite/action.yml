@@ -43,7 +43,7 @@ runs:
 
     # Step 2: Setup
     - name: [SETUP_STEP_NAME]
-      uses: [SETUP_ACTION]@[SHA] # [VERSION]
+      uses: "[SETUP_ACTION]@[SHA]" # [VERSION]
       with:
         [SETUP_INPUT]: ${{ inputs.[input-name] }}
 

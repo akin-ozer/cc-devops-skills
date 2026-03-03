@@ -11,8 +11,8 @@
 
 - name: [Play description]
   hosts: [TARGET_HOSTS]
-  become: [yes/no]
-  gather_facts: [yes/no]
+  become: [true/false]
+  gather_facts: [true/false]
 
   vars:
     # Define play-level variables
@@ -21,15 +21,15 @@
   pre_tasks:
     - name: Update package cache (Debian/Ubuntu)
       ansible.builtin.apt:
-        update_cache: yes
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
       tags:
         - always
 
-    - name: Update package cache (RHEL/CentOS)
-      ansible.builtin.yum:
-        update_cache: yes
+    - name: Update package cache (RHEL/CentOS 8+)
+      ansible.builtin.dnf:
+        update_cache: true
       when: ansible_os_family == "RedHat"
       tags:
         - always

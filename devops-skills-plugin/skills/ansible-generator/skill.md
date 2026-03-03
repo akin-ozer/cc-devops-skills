@@ -58,8 +58,9 @@ Before drafting content, extract the following from local references/templates.
 #### Required templates by output type
 
 - Playbook: `assets/templates/playbook/basic_playbook.yml`
-- Role: `assets/templates/role/` (including `meta/argument_specs.yml`)
-- Inventory: `assets/templates/inventory/`
+- Role: `assets/templates/role/` (including `meta/argument_specs.yml` and `molecule/default/` for test scaffolding)
+- Inventory (INI): `assets/templates/inventory/hosts`
+- Inventory (YAML): `assets/templates/inventory/hosts.yml`
 - Project config: `assets/templates/project/ansible.cfg`, `assets/templates/project/requirements.yml`, `assets/templates/project/.ansible-lint`
 
 #### Extraction checks
@@ -108,6 +109,7 @@ Use the matrix below to keep validation deterministic and non-blocking.
 - Keep defaults in `defaults/main.yml`; keep higher-priority role vars in `vars/main.yml`.
 - Include OS-specific vars (`vars/Debian.yml`, `vars/RedHat.yml`) when relevant.
 - Add `meta/argument_specs.yml` for variable validation.
+- Include `molecule/default/` scaffold (from `assets/templates/role/molecule/`) for production-ready roles.
 
 ### Task Files
 
@@ -119,7 +121,7 @@ Use the matrix below to keep validation deterministic and non-blocking.
 
 - Build logical host groups and optional group hierarchies.
 - Use variable layering intentionally: `group_vars/all.yml` -> group -> host.
-- Prefer simple format for simple topology; use richer hierarchy for complex topology.
+- Default to INI format (`hosts`) for simple topologies; use YAML format (`hosts.yml`) when the user requests it or when the hierarchy is complex.
 
 ### Project Configuration
 

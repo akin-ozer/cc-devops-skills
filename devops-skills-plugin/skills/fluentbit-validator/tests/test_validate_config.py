@@ -387,5 +387,246 @@ class ValidatorTestCase(unittest.TestCase):
         self.assertNotIn("Info", proc.stdout)
 
 
+    # -------------------------------------------------------------------------
+    # Regression tests for Bug 1: case-insensitive param key lookups
+    # -------------------------------------------------------------------------
+
+    def test_security_detects_tls_uppercase(self):
+        """TLS Off written with uppercase key must still trigger a security warning."""
+        _, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name es
+                Match *
+                Host es.example.com
+                TLS Off
+                Retry_Limit 3
+            """,
+            check="security",
+        )
+        self.assertTrue(
+            any("TLS disabled" in w for w in summary["warnings"]),
+            "Expected TLS warning for uppercase 'TLS Off'",
+        )
+
+    def test_security_detects_credential_lowercase_key(self):
+        """Hardcoded credential written with lowercase key must still be detected."""
+        _, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name es
+                Match *
+                Host es.example.com
+                http_passwd mysecret
+                Retry_Limit 3
+            """,
+            check="security",
+        )
+        self.assertTrue(
+            any("HTTP_Passwd" in w for w in summary["warnings"]),
+            "Expected credential warning for lowercase 'http_passwd'",
+        )
+
+    def test_s3_output_accepts_capitalized_params(self):
+        """S3 output with Bucket/Region (capitalized) must not produce false errors."""
+        rc, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name s3
+                Match *
+                Bucket my-bucket
+                Region us-east-1
+                Retry_Limit 3
+            """,
+            check="sections",
+        )
+        self.assertFalse(
+            any("missing required parameter 'bucket'" in e for e in summary["errors"]),
+            "Capitalized 'Bucket' should be accepted for S3 output",
+        )
+        self.assertFalse(
+            any("missing required parameter 'region'" in e for e in summary["errors"]),
+            "Capitalized 'Region' should be accepted for S3 output",
+        )
+
+    def test_cloudwatch_accepts_capitalized_log_group_name(self):
+        """CloudWatch with Log_Group_Name (capitalized) must not produce a false error."""
+        _, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name cloudwatch_logs
+                Match *
+                region us-east-1
+                Log_Group_Name /my/log/group
+                Retry_Limit 3
+            """,
+            check="sections",
+        )
+        self.assertFalse(
+            any("missing required parameter 'log_group_name'" in e for e in summary["errors"]),
+            "Capitalized 'Log_Group_Name' should be accepted for CloudWatch output",
+        )
+
+    # -------------------------------------------------------------------------
+    # Regression test for Bug 2: duplicate TLS warnings for OpenTelemetry
+    # -------------------------------------------------------------------------
+
+    def test_opentelemetry_no_duplicate_tls_warnings(self):
+        """TLS Off on an OpenTelemetry output must produce exactly one TLS warning."""
+        _, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 5
+                HTTP_Server On
+                storage.metrics on
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+                Mem_Buf_Limit 50MB
+                DB /tmp/flb.db
+            [OUTPUT]
+                Name opentelemetry
+                Match *
+                Host otel-collector.example.com
+                tls Off
+                Retry_Limit 3
+            """,
+            check="all",
+        )
+        tls_warnings = [w for w in summary["warnings"] if "TLS disabled" in w]
+        self.assertEqual(
+            len(tls_warnings),
+            1,
+            f"Expected exactly one TLS warning, got {len(tls_warnings)}: {tls_warnings}",
+        )
+
+    # -------------------------------------------------------------------------
+    # Regression test for Bug 3: Flush float false positive error
+    # -------------------------------------------------------------------------
+
+    def test_flush_float_is_not_an_error(self):
+        """Flush 0.5 (valid sub-second float) must not produce an error."""
+        rc, summary = self.run_validator(
+            """
+            [SERVICE]
+                Flush 0.5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name stdout
+                Match *
+            """,
+            check="sections",
+        )
+        self.assertFalse(
+            any("Flush must be a number" in e for e in summary["errors"]),
+            "Flush 0.5 should not raise a parse error",
+        )
+        self.assertTrue(
+            any("Flush interval < 1 second" in w for w in summary["warnings"]),
+            "Flush 0.5 should produce a sub-second performance warning",
+        )
+
+    # -------------------------------------------------------------------------
+    # Regression tests for Gap 1: @INCLUDE and @SET directives
+    # -------------------------------------------------------------------------
+
+    def test_include_directive_does_not_error(self):
+        """@INCLUDE directive must not produce a parse error."""
+        _, summary = self.run_validator(
+            """
+            @INCLUDE /etc/fluent-bit/parsers.conf
+
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name stdout
+                Match *
+            """,
+            check="structure",
+        )
+        self.assertFalse(
+            any("outside of a section" in e for e in summary["errors"]),
+            "@INCLUDE should not be reported as 'Parameter outside of a section'",
+        )
+
+    def test_set_directive_does_not_error(self):
+        """@SET directive must not produce a parse error."""
+        _, summary = self.run_validator(
+            """
+            @SET my_path=/var/log/*.log
+
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name stdout
+                Match *
+            """,
+            check="structure",
+        )
+        self.assertFalse(
+            any("outside of a section" in e for e in summary["errors"]),
+            "@SET should not be reported as 'Parameter outside of a section'",
+        )
+
+    def test_include_directive_emits_recommendation(self):
+        """@INCLUDE directive must produce a recommendation to validate the included file."""
+        _, summary = self.run_validator(
+            """
+            @INCLUDE parsers.conf
+
+            [SERVICE]
+                Flush 5
+            [INPUT]
+                Name tail
+                Path /var/log/*.log
+                Tag app.logs
+            [OUTPUT]
+                Name stdout
+                Match *
+            """,
+            check="structure",
+        )
+        self.assertTrue(
+            any("@INCLUDE" in r and "parsers.conf" in r for r in summary["recommendations"]),
+            "Expected a recommendation about the @INCLUDE directive",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

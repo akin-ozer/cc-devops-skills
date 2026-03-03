@@ -182,6 +182,11 @@ detect_pipeline_type() {
         echo "declarative"
     elif grep -q 'node\s*[({]' "$file"; then
         echo "scripted"
+    # Declarative-specific keywords that appear even in malformed pipelines missing
+    # the outer 'pipeline {}' block (e.g. stages { ... }, agent, environment, post).
+    # 'stages {' is exclusive to Declarative syntax - scripted pipelines never use it.
+    elif grep -qE '^\s*stages\s*\{' "$file"; then
+        echo "declarative"
     else
         echo "unknown"
     fi

@@ -144,7 +144,7 @@
   ansible.builtin.copy:
     src: /tmp/source.txt
     dest: /opt/destination.txt
-    remote_src: yes
+    remote_src: true
 ```
 
 #### ansible.builtin.template
@@ -166,7 +166,7 @@
   ansible.builtin.fetch:
     src: /var/log/app/error.log
     dest: /tmp/logs/{{ inventory_hostname }}/
-    flat: yes
+    flat: true
 ```
 
 #### ansible.builtin.lineinfile
@@ -244,7 +244,7 @@
 - name: Mask service
   ansible.builtin.systemd:
     name: apache2
-    masked: yes
+    masked: true
 ```
 
 ### User and Group Management
@@ -259,7 +259,7 @@
     groups: docker,sudo
     shell: /bin/bash
     home: /home/appuser
-    createhome: yes
+    createhome: true
     state: present
 
 - name: Set user password
@@ -352,7 +352,7 @@
     repo: https://github.com/user/repo.git
     dest: /opt/app
     version: main
-    force: yes
+    force: true
 
 - name: Clone specific branch/tag
   ansible.builtin.git:
@@ -365,7 +365,7 @@
     repo: git@github.com:user/repo.git
     dest: /opt/app
     key_file: /home/deploy/.ssh/id_rsa
-    accept_hostkey: yes
+    accept_hostkey: true
 ```
 
 ### Archive Operations
@@ -383,13 +383,13 @@
   ansible.builtin.unarchive:
     src: /tmp/app.tar.gz
     dest: /opt/
-    remote_src: yes
+    remote_src: true
 
 - name: Download and extract
   ansible.builtin.unarchive:
     src: https://example.com/app.tar.gz
     dest: /opt/
-    remote_src: yes
+    remote_src: true
 ```
 
 #### ansible.builtin.archive
@@ -509,7 +509,7 @@
       - db_password is defined
     fail_msg: "Configuration validation failed"
     success_msg: "Configuration is valid"
-    quiet: no
+    quiet: false
 ```
 
 ### Set Facts
@@ -636,7 +636,7 @@
   rescue:
     - name: Rollback on failure
       ansible.builtin.copy:
-        remote_src: yes
+        remote_src: true
         src: "{{ deploy_result.backup_file }}"
         dest: /opt/app/app.jar
       when: deploy_result.backup_file is defined
@@ -671,7 +671,7 @@
   rescue:
     - name: Restore backup on failure
       ansible.builtin.copy:
-        remote_src: yes
+        remote_src: true
         src: "{{ config_update.backup_file }}"
         dest: /etc/nginx/nginx.conf
       when: config_update.backup_file is defined
@@ -776,7 +776,7 @@
       - /opt/backups
       - /var/backups
     patterns: "backup-.*\\.tar\\.gz$"
-    use_regex: yes
+    use_regex: true
     file_type: file
   register: backup_files
 
@@ -785,7 +785,7 @@
   ansible.builtin.find:
     paths: /tmp
     file_type: directory
-    recurse: no
+    recurse: false
   register: directories
 
 - name: Remove empty directories
@@ -907,7 +907,7 @@
     -out "/tmp/{{ inventory_hostname }}.crt"
     -subj "/CN={{ inventory_hostname }}"
   delegate_to: localhost
-  become: no
+  become: false
 ```
 
 #### run_once
@@ -1046,7 +1046,7 @@
     name: net.ipv4.ip_forward
     value: '1'
     state: present
-    reload: yes
+    reload: true
 ```
 
 ## Cloud Provider Modules
@@ -1153,7 +1153,7 @@
     object: "backups/{{ ansible_date_time.date }}/app.tar.gz"
     src: /tmp/app.tar.gz
     mode: put
-    encrypt: yes
+    encrypt: true
 
 # Download file from S3
 - name: Download configuration from S3

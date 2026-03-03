@@ -46,6 +46,15 @@ class ScriptedPipelineGenerator:
             )
         )
 
+    @staticmethod
+    def _indent_lines(text, spaces=4):
+        """Indent all non-empty lines by the given number of spaces."""
+        prefix = ' ' * spaces
+        return '\n'.join(
+            prefix + line if line.strip() else line
+            for line in text.split('\n')
+        )
+
     def _build_node_content(self):
         """Build content inside node block"""
         parts = []
@@ -59,8 +68,10 @@ class ScriptedPipelineGenerator:
         use_error_handling = self.config.get('error_handling', True)
 
         if use_error_handling:
-            # Build try block content
-            try_content = self._build_stages_content(stages, pattern)
+            # Build try block content.
+            # Re-indent by 4 extra spaces so stages sit inside try {} correctly.
+            raw_try_content = self._build_stages_content(stages, pattern)
+            try_content = self._indent_lines(raw_try_content, 4)
 
             # Build catch block
             catch_content = """        currentBuild.result = 'FAILURE'
@@ -117,8 +128,9 @@ class ScriptedPipelineGenerator:
                 custom_cmd = self.config.get(f'{stage}_cmd', f'echo "Running {stage}"')
                 stage_content = f"""        sh '{custom_cmd}'"""
 
+            stage_display_name = stage.replace('-', ' ').replace('_', ' ').title()
             stage_block = ScriptedSyntax.stage_block(
-                stage.capitalize(),
+                stage_display_name,
                 stage_content
             )
             stage_blocks.append(stage_block)
@@ -320,10 +332,16 @@ def main():
     """Main entry point"""
     args = parse_args()
 
+    try:
+        stages = ValidationHelpers.parse_stage_list(args.stages)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     # Build configuration from args
     config = {
         'name': args.name,
-        'stages': args.stages.split(','),
+        'stages': stages,
         'agent_label': args.agent_label,
         'build_tool': args.build_tool,
         'docker_image': args.docker_image,

@@ -54,6 +54,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate language parameter
+case "$LANGUAGE" in
+    nodejs|python|go|java|generic) ;;
+    *)
+        echo "Warning: Unknown language '$LANGUAGE'. Supported: nodejs, python, go, java, generic. Falling back to 'generic'." >&2
+        LANGUAGE="generic"
+        ;;
+esac
+
 # Generate base .dockerignore
 cat > "$OUTPUT_FILE" <<'EOF'
 # Git

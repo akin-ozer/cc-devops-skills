@@ -1,0 +1,13 @@
+---
+# Role: sample-role
+# Handlers
+
+- name: Restart sample-service
+  ansible.builtin.service:
+    name: "{{ sample_role_service_name }}"
+    state: restarted
+
+- name: Reload sample-service
+  ansible.builtin.service:
+    name: "{{ sample_role_service_name }}"
+    state: reloaded

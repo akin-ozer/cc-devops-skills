@@ -58,8 +58,6 @@ node_modules/
 .npm
 .yarn
 .pnp.*
-dist/
-build/
 
 # Python
 __pycache__/
@@ -82,17 +80,15 @@ go.work
 go.work.sum
 
 # Java
-target/
 *.class
 *.jar
 *.war
 *.ear
 .gradle/
-build/
 .mvn/
 !.mvn/wrapper/maven-wrapper.jar
 
-# Build artifacts
+# Build artifacts (covers all languages)
 dist/
 build/
 target/

@@ -2,23 +2,43 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-deployment
+  namespace: default
   labels:
-    app: nginx
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/instance: nginx-deployment
+    app.kubernetes.io/version: "1.25.3"
+    app.kubernetes.io/part-of: my-app
+    app.kubernetes.io/managed-by: kubectl
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: nginx
+      app.kubernetes.io/name: nginx
   template:
     metadata:
       labels:
-        app: nginx
+        app.kubernetes.io/name: nginx
+        app.kubernetes.io/instance: nginx-deployment
+        app.kubernetes.io/version: "1.25.3"
+        app.kubernetes.io/part-of: my-app
+        app.kubernetes.io/managed-by: kubectl
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
       containers:
       - name: nginx
-        image: nginx:1.14.2
+        image: nginx:1.25.3
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         resources:
           requests:
             memory: "64Mi"
@@ -26,3 +46,15 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10

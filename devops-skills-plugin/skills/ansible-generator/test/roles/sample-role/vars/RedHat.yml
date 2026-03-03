@@ -1,0 +1,6 @@
+---
+# OS-specific variables for RHEL/CentOS/Rocky
+
+sample_role_package_name: curl
+sample_role_service_name: sample-service
+sample_role_config_dir: /etc/sample-service

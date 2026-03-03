@@ -186,6 +186,72 @@ help:
 EOF
 }
 
+# Generate C++ project Makefile
+generate_cpp_makefile() {
+    local project="$1"
+    sed "s/PROJECT_NAME/${project}/g" << 'EOF'
+# Makefile for C++ project
+SHELL := bash
+.ONESHELL:
+.SHELLFLAGS := -eu -o pipefail -c
+.DELETE_ON_ERROR:
+.SUFFIXES:
+MAKEFLAGS += --warn-undefined-variables
+MAKEFLAGS += --no-builtin-rules
+
+PROJECT := PROJECT_NAME
+VERSION := 1.0.0
+
+CXX ?= g++
+CXXFLAGS ?= -Wall -Wextra -std=c++17 -O2
+PREFIX ?= /usr/local
+
+SRCDIR := src
+BUILDDIR := build
+OBJDIR := $(BUILDDIR)/obj
+
+SOURCES := $(wildcard $(SRCDIR)/*.cpp)
+OBJECTS := $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+DEPENDS := $(OBJECTS:.o=.d)
+TARGET := $(BUILDDIR)/$(PROJECT)
+
+.PHONY: all clean install test help
+
+## Build the application (default)
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(@D)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+-include $(DEPENDS)
+
+## Install to PREFIX
+install: $(TARGET)
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
+
+## Run tests
+test: $(TARGET)
+	@echo "Running tests..."
+	@$(TARGET) --test
+
+## Remove build artifacts
+clean:
+	$(RM) -r $(BUILDDIR)
+
+## Show help
+help:
+	@echo "$(PROJECT) v$(VERSION)"
+	@echo ""
+	@sed -n 's/^## //p' $(MAKEFILE_LIST)
+EOF
+}
+
 # Generate C library Makefile
 generate_c_lib_makefile() {
     local project="$1"
@@ -571,7 +637,7 @@ generate_makefile() {
             generate_c_lib_makefile "${project}" > "${output}"
             ;;
         cpp)
-            generate_c_makefile "${project}" | sed 's/gcc/g++/g; s/\.c/.cpp/g' > "${output}"
+            generate_cpp_makefile "${project}" > "${output}"
             ;;
         go)
             generate_go_makefile "${project}" > "${output}"

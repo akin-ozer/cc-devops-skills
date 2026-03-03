@@ -3,6 +3,12 @@
 # This file defines shared configuration for all child modules
 # Location: Should be placed at the root of your infrastructure directory
 
+# Require minimum Terragrunt version (0.93+ for the new CLI and hcl validate)
+terragrunt_version_constraint = ">= 0.93.0"
+
+# Require minimum Terraform/OpenTofu version
+terraform_version_constraint = ">= [TERRAFORM_VERSION]"
+
 # Configure Terragrunt to automatically store tfstate files in an S3 bucket
 remote_state {
   backend = "s3"
@@ -43,14 +49,16 @@ terraform {
   required_version = ">= [TERRAFORM_VERSION]"
 
   required_providers {
-    [PROVIDER_NAME] = {
+    # Replace 'aws' with your provider name (e.g., azurerm, google).
+    aws = {
       source  = "[PROVIDER_SOURCE]"
       version = "~> [PROVIDER_VERSION]"
     }
   }
 }
 
-provider "[PROVIDER_NAME]" {
+# Replace 'aws' with your provider name to match the required_providers block above.
+provider "aws" {
   region = "[AWS_REGION]"
 
   # Optional: Default tags applied to all resources

@@ -35,33 +35,23 @@ terraform {
   required_version = ">= [TERRAFORM_VERSION]"
 
   required_providers {
-    [PROVIDER_NAME] = {
+    # Replace 'aws' with your provider name (e.g., azurerm, google).
+    aws = {
       source  = "[PROVIDER_SOURCE]"
       version = "~> [PROVIDER_VERSION]"
     }
   }
 }
 
-provider "[PROVIDER_NAME]" {
+# Replace 'aws' with your provider name to match the required_providers block above.
+provider "aws" {
   region = "[AWS_REGION]"
 }
 EOF
 }
 
-# Module inputs
-inputs = {
-  # Configuration variables
-  [VARIABLE_NAME] = "[VALUE]"
-
-  # Tags
-  tags = {
-    Name        = "[RESOURCE_NAME]"
-    Environment = "[ENVIRONMENT]"
-    ManagedBy   = "Terragrunt"
-  }
-}
-
 # Optional: Locals block for computed values
+# Place locals above inputs so values are defined before they are referenced.
 locals {
   # Common configuration
   environment = "[ENVIRONMENT]"
@@ -69,4 +59,18 @@ locals {
 
   # Computed values
   # name_prefix = "${local.environment}-${local.region}"
+}
+
+# Module inputs
+inputs = {
+  # Replace the commented examples below with your actual variable names and values.
+  # variable_name   = "value"
+  # another_var     = "[PLACEHOLDER]"
+
+  # Tags
+  tags = {
+    Name        = "[RESOURCE_NAME]"
+    Environment = local.environment
+    ManagedBy   = "Terragrunt"
+  }
 }

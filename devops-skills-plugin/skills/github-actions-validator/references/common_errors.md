@@ -328,22 +328,18 @@ on:
 
 ## Path Filter Errors
 
-### 1. Invalid Glob Pattern
+### 1. Glob Pattern Best Practices
 
-**Error:**
-```
-Invalid glob pattern: '**.js'
-```
+**Note:** `**.js` (double-star without a slash) is **not flagged by actionlint** as an error. GitHub's glob engine treats it similarly to `**/*.js`, but `**/*.js` is the conventional and explicit form. Prefer it for clarity.
 
-**Fix:**
 ```yaml
-# Bad
+# Not recommended (ambiguous intent, but accepted by actionlint and GitHub)
 on:
   push:
     paths:
-      - '**.js'  # Missing directory separator
+      - '**.js'
 
-# Good
+# Recommended (explicit and conventional)
 on:
   push:
     paths:

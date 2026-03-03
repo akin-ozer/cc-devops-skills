@@ -152,7 +152,7 @@ ${{ runner.tool_cache }}      # Tool cache directory path
     fi
 
 # Cache key with OS
-- uses: actions/cache@v4
+- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   with:
     path: ~/.cache
     key: ${{ runner.os }}-cache-${{ hashFiles('**/lock.file') }}
@@ -191,7 +191,7 @@ strategy:
 
 steps:
   - name: Setup Node.js ${{ matrix.node }}
-    uses: actions/setup-node@v4
+    uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
     with:
       node-version: ${{ matrix.node }}
 
@@ -346,7 +346,7 @@ jobs:
 **hashFiles()**
 ```yaml
 # Generate hash of file contents (for cache keys)
-- uses: actions/cache@v4
+- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   with:
     path: ~/.npm
     key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
@@ -508,13 +508,13 @@ timeout-minutes: ${{ github.event_name == 'schedule' && 120 || 30 }}
 
 ```yaml
 # Artifact name with context values
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
   with:
     name: build-${{ runner.os }}-${{ github.sha }}
     path: dist/
 
 # Cache key with multiple factors
-- uses: actions/cache@v4
+- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   with:
     path: ~/.cache
     key: ${{ runner.os }}-${{ hashFiles('**/*.lock') }}-${{ github.ref_name }}

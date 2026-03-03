@@ -6,7 +6,6 @@ This script generates a Declarative Jenkinsfile with specified configuration.
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -15,25 +14,6 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from common_patterns import PipelinePatterns, StageTemplates, PostConditions, EnvironmentTemplates
 from syntax_helpers import DeclarativeSyntax, FormattingHelpers, GroovySyntax, ValidationHelpers
-
-STAGE_KEY_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
-
-
-def parse_stage_list(stages_value):
-    """Parse comma-separated stage values into normalized keys."""
-    stages = []
-    for raw_stage in stages_value.split(','):
-        stage = raw_stage.strip().lower()
-        if not stage:
-            continue
-        if not STAGE_KEY_PATTERN.fullmatch(stage):
-            raise ValueError(
-                f"Invalid stage key '{raw_stage.strip()}'. Use only lowercase letters, numbers, '-' and '_'"
-            )
-        stages.append(stage)
-    if not stages:
-        raise ValueError('At least one stage must be provided via --stages')
-    return stages
 
 
 def resolve_k8s_yaml(k8s_yaml_value):
@@ -235,9 +215,13 @@ class DeclarativePipelineGenerator:
                 ))
             elif stage == 'parallel-tests':
                 test_types = self.config.get('test_types', ['unit', 'integration'])
+                # Avoid redundant failFast true at stage level when
+                # parallelsAlwaysFailFast() is already set globally in options
+                has_global_fail_fast = self.config.get('options', {}).get('parallelsAlwaysFailFast', False)
+                stage_fail_fast = self.config.get('parallel_fail_fast', True) and not has_global_fail_fast
                 self.pipeline_parts.append(StageTemplates.parallel_test_stage(
                     test_types,
-                    fail_fast=self.config.get('parallel_fail_fast', True),
+                    fail_fast=stage_fail_fast,
                 ))
             else:
                 # Custom stage
@@ -396,7 +380,7 @@ def main():
     """Main entry point"""
     args = parse_args()
     try:
-        stages = parse_stage_list(args.stages)
+        stages = ValidationHelpers.parse_stage_list(args.stages)
         k8s_yaml = resolve_k8s_yaml(args.k8s_yaml)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

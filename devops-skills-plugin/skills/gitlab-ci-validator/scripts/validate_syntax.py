@@ -266,8 +266,10 @@ class GitLabCIValidator:
         """Validate all jobs"""
 
         defined_stages = set(self.config.get('stages', []))
-        default_stages = {'.pre', 'build', 'test', 'deploy', '.post'}
-        valid_stages = defined_stages or default_stages
+        default_stages = {'build', 'test', 'deploy'}
+        # .pre and .post are always valid GitLab reserved stages regardless of the stages list
+        reserved_stages = {'.pre', '.post'}
+        valid_stages = (defined_stages or default_stages) | reserved_stages
 
         for key, value in self.config.items():
             # Skip global keywords and hidden jobs
@@ -484,7 +486,7 @@ class GitLabCIValidator:
                 continue
 
             valid_cache_keywords = {
-                'paths', 'key', 'untracked', 'policy', 'when'
+                'paths', 'key', 'untracked', 'policy', 'when', 'fallback_keys'
             }
 
             for keyword in cache_item.keys():
@@ -820,7 +822,7 @@ class GitLabCIValidator:
 
                 valid_rule_keywords = {
                     'if', 'changes', 'exists', 'when', 'allow_failure',
-                    'variables', 'needs'
+                    'variables', 'needs', 'start_in'
                 }
 
                 for keyword in rule.keys():

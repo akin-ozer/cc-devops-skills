@@ -12,15 +12,17 @@ class GroovySyntax:
     @staticmethod
     def format_string(value: str) -> str:
         """Format a string with proper Groovy quoting"""
+        # Always escape backslashes first to avoid broken Groovy escape sequences
+        escaped = value.replace('\\', '\\\\')
         if "'" in value and '"' not in value:
-            return f'"{value}"'
+            return f'"{escaped}"'
         elif '"' in value and "'" not in value:
-            return f"'{value}'"
+            return f"'{escaped}'"
         elif '"' in value and "'" in value:
             # Use triple quotes
-            return f"'''{value}'''"
+            return f"'''{escaped}'''"
         else:
-            return f"'{value}'"
+            return f"'{escaped}'"
 
     @staticmethod
     def single_quoted_literal(value: str) -> str:
@@ -456,6 +458,29 @@ class ValidationHelpers:
         # Remove leading/trailing hyphens
         sanitized = sanitized.strip('-')
         return sanitized.lower()
+
+    @staticmethod
+    def parse_stage_list(stages_value: str) -> list:
+        """Parse comma-separated stage values into normalized lowercase keys.
+
+        Keys are lowercased automatically. Raises ValueError if any key contains
+        characters outside [a-z0-9_-] or if the resulting list is empty.
+        """
+        _STAGE_KEY_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
+        stages = []
+        for raw_stage in stages_value.split(','):
+            stage = raw_stage.strip().lower()
+            if not stage:
+                continue
+            if not _STAGE_KEY_PATTERN.fullmatch(stage):
+                raise ValueError(
+                    f"Invalid stage key '{raw_stage.strip()}'. "
+                    "Use only lowercase letters, numbers, '-' and '_'"
+                )
+            stages.append(stage)
+        if not stages:
+            raise ValueError('At least one stage must be provided via --stages')
+        return stages
 
 
 class FormattingHelpers:

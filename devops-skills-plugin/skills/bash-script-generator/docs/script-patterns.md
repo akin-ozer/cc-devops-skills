@@ -237,24 +237,15 @@ parse_ini() {
 ### Simple Logging with Levels
 
 ```bash
-# Log level: DEBUG=0, INFO=1, WARN=2, ERROR=3
+# LOG_LEVEL: 0=DEBUG, 1=INFO (default), 2=WARN, 3=ERROR
 LOG_LEVEL=${LOG_LEVEL:-1}
 
-log_debug() {
-    [[ ${LOG_LEVEL} -le 0 ]] && echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
-}
-
-log_info() {
-    [[ ${LOG_LEVEL} -le 1 ]] && echo "[INFO]  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
-}
-
-log_warn() {
-    [[ ${LOG_LEVEL} -le 2 ]] && echo "[WARN]  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
-}
-
-log_error() {
-    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
-}
+# Use if-form guards — the && short-circuit form returns 1 when the
+# level check fails, which triggers set -e at the call site.
+log_debug() { if [[ ${LOG_LEVEL} -le 0 ]]; then echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; fi; }
+log_info()  { if [[ ${LOG_LEVEL} -le 1 ]]; then echo "[INFO]  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; fi; }
+log_warn()  { if [[ ${LOG_LEVEL} -le 2 ]]; then echo "[WARN]  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; fi; }
+log_error() { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
 ```
 
 ### File-based Logging

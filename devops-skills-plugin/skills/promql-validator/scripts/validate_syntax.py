@@ -46,6 +46,12 @@ class PromQLSyntaxValidator:
         'changes', 'resets', 'avg_over_time', 'min_over_time', 'max_over_time',
         'sum_over_time', 'count_over_time', 'quantile_over_time', 'stddev_over_time',
         'stdvar_over_time', 'last_over_time', 'present_over_time', 'mad_over_time',
+        # Prometheus 3.5+ experimental timestamp functions
+        # (require --enable-feature=promql-experimental-functions)
+        'ts_of_max_over_time', 'ts_of_min_over_time', 'ts_of_last_over_time',
+        # Prometheus 3.7+ experimental functions
+        # (require --enable-feature=promql-experimental-functions)
+        'first_over_time', 'ts_of_first_over_time',
         # Prediction functions
         'predict_linear',
         'holt_winters',  # Deprecated in Prometheus 3.0, use double_exponential_smoothing
@@ -85,6 +91,8 @@ class PromQLSyntaxValidator:
         'group_left',   # Vector matching: one-to-many joins
         'group_right',  # Vector matching: many-to-one joins
         'bool',         # Comparison modifier: metric > bool 10
+        'start',        # @ modifier: metric[5m] @ start()
+        'end',          # @ modifier: metric[5m] @ end()
     }
 
     def __init__(self, query: str):
@@ -306,9 +314,14 @@ class PromQLSyntaxValidator:
 
     def _check_time_ranges(self):
         """Check for valid time range syntax"""
+        # Strip quoted string literals before scanning for range vectors.
+        # Without this, regex character classes inside label-value strings
+        # (e.g. "([^:]+):.*" in a label_replace() call) are misidentified
+        # as subquery range syntax.
+        query_no_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', self.query)
         # Find all range vectors [duration]
         range_pattern = r'\[([^\]]+)\]'
-        ranges = re.findall(range_pattern, self.query)
+        ranges = re.findall(range_pattern, query_no_strings)
 
         for range_str in ranges:
             range_str = range_str.strip()
@@ -382,8 +395,11 @@ class PromQLSyntaxValidator:
 
     def _check_operators(self):
         """Check for valid operator usage"""
-        # Check for double operators (typos like ++ or --)
-        if re.search(r'[+\-*/]{2,}', self.query):
+        # Strip quoted string literals before searching for consecutive operators so that
+        # label values containing "--" or "++" (e.g. {path="/api--v2"}) do not produce
+        # false positives.
+        query_no_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', self.query)
+        if re.search(r'[+\-*/]{2,}', query_no_strings):
             self.warnings.append({
                 'type': 'double_operator',
                 'message': 'Found consecutive operators - this might be a typo',

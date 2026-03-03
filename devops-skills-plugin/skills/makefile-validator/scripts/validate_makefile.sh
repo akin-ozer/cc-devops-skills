@@ -26,6 +26,11 @@ ERRORS=0
 WARNINGS=0
 INFO=0
 
+# mbake availability flag — set to 1 by setup_venv when the venv+mbake are ready.
+# Stays 0 when python3/pip3 are absent or the venv/install step fails, allowing
+# the validator to fall back to GNU make + custom checks only.
+MBAKE_AVAILABLE=0
+
 # Temporary venv directory (unique per invocation, respects TMPDIR)
 VENV_DIR="${TMPDIR:-/tmp}/makefile-validator-venv-$$"
 CLEANUP_DONE=0
@@ -64,36 +69,63 @@ print_subheader() {
     echo -e "\n${BLUE}[$1]${NC}"
 }
 
-# Check dependencies
+# Check dependencies.
+# python3 and pip3 are needed only for the mbake stages; their absence degrades
+# coverage but does not abort — GNU make syntax and all custom checks still run.
 check_dependencies() {
+    local mbake_prereqs_ok=1
+
     if ! command -v python3 &> /dev/null; then
-        error_exit "python3 is required but not installed"
+        echo -e "${YELLOW}[WARNING]${NC} python3 not found — mbake stages will be skipped"
+        echo "   Install python3 to enable mbake validation and format-check coverage"
+        ((WARNINGS++))
+        mbake_prereqs_ok=0
     fi
 
     if ! command -v pip3 &> /dev/null; then
-        error_exit "pip3 is required but not installed"
+        echo -e "${YELLOW}[WARNING]${NC} pip3 not found — mbake stages will be skipped"
+        echo "   Install pip3 to enable mbake validation and format-check coverage"
+        ((WARNINGS++))
+        mbake_prereqs_ok=0
     fi
 
     if ! command -v make &> /dev/null; then
-        echo -e "${YELLOW}[WARNING]${NC} GNU make not found - syntax validation will be limited"
+        echo -e "${YELLOW}[WARNING]${NC} GNU make not found — syntax validation will be limited"
         ((WARNINGS++))
     fi
+
+    # Signal to setup_venv (and main) that it is worth attempting venv setup
+    [ "$mbake_prereqs_ok" -eq 1 ] && MBAKE_AVAILABLE=1 || true
 }
 
-# Setup virtual environment and install mbake
+# Setup virtual environment and install mbake.
+# On failure (offline, proxy, bad python env) the function warns and clears
+# MBAKE_AVAILABLE so the caller skips all mbake-dependent stages.
 setup_venv() {
     print_subheader "ENVIRONMENT SETUP"
     echo "Creating temporary venv at: $VENV_DIR"
 
-    python3 -m venv "$VENV_DIR" 2>&1 || error_exit "Failed to create virtual environment"
+    if ! python3 -m venv "$VENV_DIR" 2>&1; then
+        echo -e "${YELLOW}⚠${NC} Failed to create virtual environment — mbake stages will be skipped"
+        ((WARNINGS++))
+        MBAKE_AVAILABLE=0
+        return 0
+    fi
 
     # Activate venv
     # shellcheck source=/dev/null
     source "$VENV_DIR/bin/activate"
 
     echo "Installing mbake..."
-    pip3 install --quiet mbake 2>&1 || error_exit "Failed to install mbake"
+    if ! pip3 install --quiet mbake 2>&1; then
+        echo -e "${YELLOW}⚠${NC} Failed to install mbake — mbake stages will be skipped"
+        echo "   Ensure network access or an internal PyPI mirror is available, then rerun"
+        ((WARNINGS++))
+        MBAKE_AVAILABLE=0
+        return 0
+    fi
 
+    MBAKE_AVAILABLE=1
     echo -e "${GREEN}✓${NC} Environment ready"
 }
 
@@ -129,12 +161,15 @@ syntax_check() {
     makefile_name=$(basename "$abs_file")
 
     # Run make from the Makefile's directory to resolve relative paths correctly
-    if (cd "$makefile_dir" && make -f "$makefile_name" -n --dry-run) &> /dev/null; then
+    # Capture output and exit code in a single invocation (avoids running make twice)
+    local make_output make_exit=0
+    make_output=$(cd "$makefile_dir" && make -f "$makefile_name" -n 2>&1) || make_exit=$?
+
+    if [ "$make_exit" -eq 0 ]; then
         echo -e "${GREEN}✓${NC} No syntax errors found"
-        return 0
     else
         echo -e "${RED}✗${NC} Syntax errors detected:"
-        (cd "$makefile_dir" && make -f "$makefile_name" -n --dry-run) 2>&1 || true
+        echo "$make_output"
         ((ERRORS++))
         return 1
     fi
@@ -170,10 +205,13 @@ mbake_format_check() {
     local format_oneline
     format_oneline=$(echo "$format_output" | tr '\n' ' ' | tr -s ' ')
 
-    # Check for known false positives (mbake limitation with GNU Make special targets)
-    # mbake doesn't recognize .DELETE_ON_ERROR, .SUFFIXES, .ONESHELL, .POSIX
+    # Check for known false positives (mbake limitation with GNU Make special targets).
+    # mbake does not recognise many valid GNU Make special targets (.DELETE_ON_ERROR,
+    # .SUFFIXES, .ONESHELL, .POSIX, .PRECIOUS, .NOTPARALLEL, .INTERMEDIATE, etc.).
+    # The sed cleaning below already strips all of them; this flag just controls
+    # whether the "known mbake limitation" info note is printed.
     local has_unknown_special_target=0
-    if echo "$format_oneline" | grep -qE "Unknown special target '\.(DELETE_ON_ERROR|SUFFIXES|ONESHELL|POSIX)'"; then
+    if echo "$format_oneline" | grep -qE "Unknown special target '\.[A-Z_]+'"; then
         has_unknown_special_target=1
     fi
 
@@ -285,8 +323,9 @@ custom_checks() {
     fi
 
     # Check for hardcoded credentials (expanded pattern for common credential names)
+    # Note: grep -n adds "N:" prefix, so filter must match "N:# comment" format, not "# comment"
     local cred_lines
-    cred_lines=$(grep -niE '(password|secret|api[_-]?key|apikey|token|private[_-]?key|aws_access_key|aws_secret_access_key|github_token|auth_token|credentials|azure_client_secret|database_url|db_password|ssh_key|ssl_key|encryption_key)\s*[:?]?=' "$file" 2>/dev/null | grep -v "^\s*#" | head -3) || true
+    cred_lines=$(grep -niE '(password|secret|api[_-]?key|apikey|token|private[_-]?key|aws_access_key|aws_secret_access_key|github_token|auth_token|credentials|azure_client_secret|database_url|db_password|ssh_key|ssl_key|encryption_key)\s*[:?]?=' "$file" 2>/dev/null | grep -vE "^[0-9]+:[[:space:]]*#" | head -3) || true
     if [ -n "$cred_lines" ]; then
         echo -e "${RED}✗${NC} Potential hardcoded credentials detected:"
         echo "$cred_lines"
@@ -298,10 +337,11 @@ custom_checks() {
     # Check for TRULY unsafe variable expansion patterns
     # Only flag variables that are NOT defined with defaults in the same file
     # Look for rm/sudo/curl/wget with variables that could be empty or user-controlled
+    # Handles both UPPERCASE and lowercase variable names
     local unsafe_vars=""
     while IFS= read -r line; do
-        # Extract variable name from $(VAR) pattern
-        var_name=$(echo "$line" | grep -oE '\$\([A-Z_]+\)' | head -1 | tr -d '$()')
+        # Extract variable name from $(VAR) or $(var) pattern (any case)
+        var_name=$(echo "$line" | grep -oE '\$\([a-zA-Z_][a-zA-Z0-9_]*\)' | head -1 | tr -d '$()')
         if [ -n "$var_name" ]; then
             # Check if variable has a default value with := or ?=
             if ! grep -qE "^${var_name}\s*[:?]=" "$file"; then
@@ -309,7 +349,7 @@ custom_checks() {
                 unsafe_vars="${unsafe_vars}${line}\n"
             fi
         fi
-    done < <(grep -E '\$\([A-Z_]+\)' "$file" | grep -E '(rm -rf|sudo|curl|wget)')
+    done < <(grep -E '\$\([a-zA-Z_][a-zA-Z0-9_]*\)' "$file" | grep -E '(rm -rf|sudo|curl|wget)')
 
     if [ -n "$unsafe_vars" ]; then
         echo -e "${YELLOW}⚠${NC} Variables without defaults used in dangerous commands:"
@@ -350,8 +390,10 @@ custom_checks() {
     fi
 
     # Check for recursive variable expansion with shell commands (performance issue)
+    # Pattern uses single quotes so \$ reaches grep as a literal-dollar matcher,
+    # not as an end-of-line anchor (which double-quote expansion would produce).
     local shell_lines
-    shell_lines=$(grep -nE "^\s*[A-Z_]+\s*=\s*\$\(shell" "$file" 2>/dev/null | head -3) || true
+    shell_lines=$(grep -nE '^\s*[A-Z_]+\s*=\s*\$\(shell' "$file" 2>/dev/null | head -3) || true
     if [ -n "$shell_lines" ]; then
         echo -e "${YELLOW}⚠${NC} Shell commands with recursive expansion '=' found:"
         echo "$shell_lines"
@@ -373,8 +415,9 @@ custom_checks() {
 
     # Check for using 'make' instead of '$(MAKE)' in recursive calls
     # Exclude: echo statements, comments, and string literals
+    # Match 'make' followed by whitespace OR at end of line (bare 'make' with no args)
     local make_lines
-    make_lines=$(grep -nE "^\t[^#@]*\bmake\s" "$file" 2>/dev/null | grep -vE '(echo|printf|MAKE\)|".*make.*"|'"'"'.*make.*'"'"')' | head -3) || true
+    make_lines=$(grep -nE "^\t[^#@]*\bmake(\s|$)" "$file" 2>/dev/null | grep -vE '(echo|printf|MAKE\)|".*make.*"|'"'"'.*make.*'"'"')' | head -3) || true
     if [ -n "$make_lines" ]; then
         echo -e "${YELLOW}⚠${NC} Direct 'make' call in recipe (should use \$(MAKE)):"
         echo "$make_lines"
@@ -598,18 +641,28 @@ main() {
     # Validation pipeline
     check_dependencies
     validate_file "$makefile"
-    setup_venv
 
-    # Run syntax check (continue even if it fails)
+    # Set up mbake venv only when python3+pip3 are present (MBAKE_AVAILABLE=1 after check_dependencies)
+    if [ "$MBAKE_AVAILABLE" -eq 1 ]; then
+        setup_venv || true
+    fi
+
+    # Run syntax check — always runs (uses GNU make, not mbake)
     syntax_check "$makefile" || true
 
-    # Run mbake validation (continue even if it fails)
-    mbake_validation "$makefile" || true
+    # Run mbake stages only when the venv is ready
+    if [ "$MBAKE_AVAILABLE" -eq 1 ]; then
+        mbake_validation "$makefile" || true
+        mbake_format_check "$makefile" || true
+    else
+        print_subheader "MBAKE VALIDATION"
+        echo -e "${BLUE}ℹ${NC} Skipped — mbake not available (python3, pip3, and network required)"
+        print_subheader "MBAKE FORMAT CHECK"
+        echo -e "${BLUE}ℹ${NC} Skipped — mbake not available (python3, pip3, and network required)"
+        ((INFO+=2))
+    fi
 
-    # Run format check (continue even if it fails)
-    mbake_format_check "$makefile" || true
-
-    # Run custom checks (continue even if it fails)
+    # Run custom checks — always runs (pure bash + grep, no external tools)
     custom_checks "$makefile" || true
 
     # Run checkmake if available (optional, continue even if it fails)

@@ -78,11 +78,21 @@ class SecurityScanner:
         (re.compile(r'--insecure|-k\s'), 'insecure-ssl', 'Do not disable SSL/TLS verification'),
     ]
 
+    # Pattern for secret variable references: $VAR or ${VAR} where VAR contains
+    # a sensitive keyword (as a suffix or standalone).  The keyword list intentionally
+    # omits the bare word KEY to avoid flagging unrelated vars like $CACHE_KEY or
+    # $KEY_FILE; SECRET_KEY and API_KEY are still caught via SECRET/API_KEY terms.
+    _SECRET_VAR = (
+        r'\$\{?[A-Za-z0-9_]*'
+        r'(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|CREDENTIAL|API_KEY|APIKEY)'
+        r'[A-Za-z0-9_]*\}?'
+    )
+
     # Patterns that might leak secrets in logs
     ECHO_SECRET_PATTERNS = [
-        re.compile(r'echo\s+.*\$(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)'),
-        re.compile(r'print.*\$(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)'),
-        re.compile(r'console\.log.*\$(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)'),
+        re.compile(r'echo\s+.*' + _SECRET_VAR, re.IGNORECASE),
+        re.compile(r'print\b.*' + _SECRET_VAR, re.IGNORECASE),
+        re.compile(r'console\.log\b.*' + _SECRET_VAR, re.IGNORECASE),
     ]
 
     def __init__(self, file_path: str):
@@ -288,6 +298,10 @@ class SecurityScanner:
                 else:
                     return
 
+            # Images pinned by digest are always safe — skip all tag checks
+            if '@sha256:' in image_value:
+                return
+
             # Check for :latest tag (security risk due to unpredictability)
             if ':latest' in image_value:
                 self.issues.append(SecurityIssue(
@@ -297,6 +311,19 @@ class SecurityScanner:
                     'image-latest-tag',
                     "Pin to specific version or SHA digest to ensure consistent, verified images"
                 ))
+            elif not image_value.startswith('$'):
+                # Check for image with no tag at all (implicit :latest).
+                # Examine the last path component (after any registry/org prefix)
+                # to distinguish 'registry:5000/image' (port colon) from 'image:1.0' (tag colon).
+                last_component = image_value.rsplit('/', 1)[-1]
+                if ':' not in last_component:
+                    self.issues.append(SecurityIssue(
+                        'medium',
+                        line,
+                        f"Image in {context} has no version tag (implicitly uses ':latest')",
+                        'image-no-tag',
+                        "Pin to a specific version tag (e.g., ubuntu:22.04) or SHA digest"
+                    ))
 
             # Check for variables in image names (potential injection)
             if '$' in image_value and '@sha256' not in image_value:
@@ -669,8 +696,10 @@ class SecurityScanner:
                                 "Specify explicit paths to avoid exposing sensitive files"
                             ))
 
-                        # Warn about including common sensitive directories
-                        if any(sensitive in path.lower() for sensitive in ['.git', '.env', 'secrets', 'credentials']):
+                        # Warn about including sensitive files/directories.
+                        # Uses component-aware matching so compound report filenames
+                        # like 'secrets-report.json' are not treated as credential leaks.
+                        if self._is_sensitive_artifact_path(path):
                             self.issues.append(SecurityIssue(
                                 'high',
                                 line,
@@ -679,6 +708,32 @@ class SecurityScanner:
                                 "Exclude sensitive directories from artifacts"
                             ))
 
+
+    def _is_sensitive_artifact_path(self, path: str) -> bool:
+        """Return True if an artifact path is genuinely sensitive.
+
+        Uses component-aware matching so compound report filenames like
+        'secrets-report.json' or 'gl-secret-detection-report.json' are not
+        mistakenly flagged as credential leaks.
+        """
+        path_lower = path.strip('/').lower()
+
+        # .git directory — always sensitive
+        if '.git' in path_lower:
+            return True
+
+        # .env file or prefixed variants (.env.local, .env.production, etc.)
+        if re.search(r'(^|/)\.env($|[./])', path_lower):
+            return True
+
+        # 'secrets' and 'credentials' — only flag as a standalone path component
+        # (directory name, bare filename, or filename stem), not as part of a
+        # compound name like 'secrets-report.json' or 'credentials-backup.tar'.
+        for word in ('secrets', 'credentials'):
+            if re.search(rf'(^|/){re.escape(word)}(/|$|\.)', path_lower):
+                return True
+
+        return False
 
     def _check_git_strategy_security(self):
         """Check Git strategy security"""

@@ -49,7 +49,7 @@ None.
 
 ```yaml
 - hosts: servers
-  become: yes
+  become: true
   roles:
     - role: [role_name]
       vars:
@@ -61,7 +61,7 @@ None.
 
 ```yaml
 - hosts: production
-  become: yes
+  become: true
   vars:
     [role_name]_port: [custom_port]
     [role_name]_max_connections: 200

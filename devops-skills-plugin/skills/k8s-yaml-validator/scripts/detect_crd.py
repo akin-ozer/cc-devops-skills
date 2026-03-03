@@ -21,6 +21,15 @@ except ImportError:
     sys.exit(1)
 
 
+def _has_yaml_content(content: str) -> bool:
+    """Return True only if content has at least one non-empty, non-comment line."""
+    for line in content.split('\n'):
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            return True
+    return False
+
+
 def split_yaml_documents(content):
     """
     Split YAML content into individual documents.
@@ -37,7 +46,7 @@ def split_yaml_documents(content):
         if line.strip() == '---':
             if current_doc:
                 doc_content = '\n'.join(current_doc)
-                if doc_content.strip():  # Only add non-empty documents
+                if doc_content.strip() and _has_yaml_content(doc_content):
                     documents.append({
                         'content': doc_content,
                         'start_line': current_start_line
@@ -50,7 +59,7 @@ def split_yaml_documents(content):
     # Don't forget the last document
     if current_doc:
         doc_content = '\n'.join(current_doc)
-        if doc_content.strip():
+        if doc_content.strip() and _has_yaml_content(doc_content):
             documents.append({
                 'content': doc_content,
                 'start_line': current_start_line
@@ -78,9 +87,11 @@ def parse_yaml_file(file_path):
         print(f"Error reading file: {e}", file=sys.stderr)
         return [], [{'error': str(e), 'document': 0}]
 
-    # First, try parsing the entire file at once (fast path)
+    # First, try parsing the entire file at once (fast path).
+    # Filter out None documents produced by bare '---' separators so that
+    # totalDocuments is consistent with count_yaml_documents.py.
     try:
-        documents = list(yaml.safe_load_all(content))
+        documents = [d for d in yaml.safe_load_all(content) if d is not None]
         return documents, []
     except yaml.YAMLError:
         # If full parsing fails, try document-by-document parsing

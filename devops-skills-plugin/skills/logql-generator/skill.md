@@ -191,7 +191,7 @@ topk(10, sum by (error_type) (count_over_time({job="app"} | json | level="error"
 ### Formatting and IP Matching
 ```logql
 {job="app"} | json | line_format "{{.level}}: {{.message}}"
-{job="app"} | json | label_format env="{{.environment}}"
+{job="app"} | json | label_format env=`{{.environment}}`
 {job="nginx"} | logfmt | remote_addr = ip("192.168.4.0/24")
 ```
 
@@ -285,7 +285,11 @@ sum(count_over_time({app="api"} | json | level="error" [5m])) or vector(0)
 |----------|-------------|
 | `sum_over_time`, `avg_over_time`, `max_over_time`, `min_over_time` | Aggregate numeric values |
 | `quantile_over_time(φ, range)` | φ-quantile (0 ≤ φ ≤ 1) |
-| `first_over_time`, `last_over_time` | First/last value |
+| `first_over_time`, `last_over_time` | First/last value in interval |
+| `stddev_over_time` | Population standard deviation of unwrapped values |
+| `stdvar_over_time` | Population variance of unwrapped values |
+| `rate_counter` | Per-second rate treating values as a monotonically increasing counter |
+| `bytes_over_time` | Total bytes in time range (no unwrap needed) |
 
 ### Aggregation Operators
 `sum`, `avg`, `min`, `max`, `count`, `stddev`, `topk`, `bottomk`, `approx_topk`, `sort`, `sort_desc`
@@ -318,6 +322,30 @@ label_replace(rate({job="api"} |= "err" [1m]), "foo", "$1", "service", "(.*):.*"
 | json method="request.method", status="response.status"  # Specific fields
 | json servers[0], headers="request.headers[\"User-Agent\"]"  # Nested/array
 ```
+
+### pattern
+```logql
+| pattern "<ip> - - [<timestamp>] \"<method> <path> <_>\" <status> <size>"
+```
+Named placeholders become extracted labels; `<_>` discards a field.
+
+### regexp
+```logql
+| regexp "(?P<level>\\w+): (?P<message>.+)"
+```
+Uses named capture groups (`?P<name>`). Slower than `pattern`/`logfmt`/`json`.
+
+### decolorize
+```logql
+| decolorize
+```
+Strips ANSI color escape codes. Apply before parsing when logs come from terminal output.
+
+### unpack
+```logql
+| unpack
+```
+Unpacks log entries that were packed by Promtail's `pack` pipeline stage. Restores the original log line and any embedded labels.
 
 ## Template Functions
 

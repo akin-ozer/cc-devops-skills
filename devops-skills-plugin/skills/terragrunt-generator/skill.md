@@ -264,7 +264,7 @@ Use this map for every generated output:
 | `[BUCKET_NAME]` | Remote state S3 bucket | `acme-tfstate-prod` | Bucket must exist before first apply |
 | `[DYNAMODB_TABLE]` | State lock table | `acme-terraform-locks` | Table must exist before first apply |
 | `[PROVIDER_SOURCE]` | Terraform provider source | `hashicorp/aws` | Use fully qualified source |
-| `[TERRAFORM_VERSION]` | Required Terraform/OpenTofu version | `1.8.5` | Keep compatible with module constraints |
+| `[TERRAFORM_VERSION]` | Required Terraform/OpenTofu version | `1.8.5` | Used in both `terraform_version_constraint` and `required_version`. Keep compatible with module constraints. |
 
 **Legacy alias normalization:** If you see `[REGION]` in older examples, treat it as `[AWS_REGION]` and replace it before validation.
 
@@ -273,8 +273,11 @@ Complete directory structures for dev/staging/prod.
 
 > **MANDATORY:** Before generating:
 > 1. Determine architecture pattern (see Architecture Patterns section)
-> 2. Read relevant templates for root and child modules
-> 3. Verify env.hcl placement and access patterns
+> 2. Read relevant templates for root, env, and child modules
+> 3. Verify env.hcl placement and access patterns:
+>    ```
+>    Read: assets/templates/env/env.hcl
+>    ```
 
 **Patterns:** `references/common-patterns.md` → Environment-Specific Patterns
 
@@ -416,6 +419,7 @@ Complete the **Architecture Pattern Selection Checklist (Canonical)** above and 
 | Configuration Type | Template to Read | Purpose |
 |-------------------|------------------|---------|
 | Root configuration | `assets/templates/root/terragrunt.hcl` | Shared state backend, providers, and common inputs |
+| Environment variables | `assets/templates/env/env.hcl` | Per-environment locals read by child modules (Pattern A) |
 | Child module | `assets/templates/child/terragrunt.hcl` | Environment module wired to root include |
 | Standalone module | `assets/templates/module/terragrunt.hcl` | Independent Terragrunt module without root include |
 | Stack file | `assets/templates/stack/terragrunt.stack.hcl` | Blueprint that generates multiple units |
@@ -678,6 +682,7 @@ Reference `../terragrunt-validator/references/best_practices.md` for comprehensi
 | Configuration Type | Template File | Purpose | When to Read |
 |-------------------|---------------|---------|--------------|
 | Root configuration | `assets/templates/root/terragrunt.hcl` | Shared backend, provider, and common inputs | Before generating any root.hcl |
+| Environment variables | `assets/templates/env/env.hcl` | Per-environment locals (environment, region, sizing, feature toggles) | Before generating any env.hcl (Pattern A) |
 | Child module | `assets/templates/child/terragrunt.hcl` | Module include, source, and optional dependency scaffolding | Before generating any child module |
 | Standalone module | `assets/templates/module/terragrunt.hcl` | Module config without root inheritance | Before generating standalone modules |
 | Stack file | `assets/templates/stack/terragrunt.stack.hcl` | Stack blueprint and unit generation | Before generating stacks |

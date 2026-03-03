@@ -1,0 +1,43 @@
+# Test file for k8s-yaml-validator skill - schema validation errors
+# Purpose: Exercise kubeconform schema type-mismatch detection on syntactically
+# valid YAML. The comprehensive-test.yaml cannot cover this path because its
+# schema errors are shadowed by a YAML parse error in Document 1.
+#
+# Intentional errors:
+#   - spec.replicas: "3"   → must be integer, not string
+#   - containerPort: "80"  → must be integer, not string
+#
+# Expected behavior:
+#   - yamllint: PASS (valid YAML syntax)
+#   - detect_crd: 0 CRDs detected
+#   - kubeconform: FAIL (2 schema type errors reported as JSON paths)
+#   - dry-run: blocked by schema errors
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-error-app
+  namespace: default
+  labels:
+    app: schema-error-app
+spec:
+  replicas: "3"
+  selector:
+    matchLabels:
+      app: schema-error-app
+  template:
+    metadata:
+      labels:
+        app: schema-error-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.25.3
+        ports:
+        - containerPort: "80"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"

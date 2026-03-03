@@ -1,0 +1,123 @@
+---
+# Playbook: nginx-tls-playbook.yml
+# Description: Deploy nginx with TLS on Ubuntu/Debian and RHEL 8+
+# Requirements:
+#   - Ansible 2.10+
+#   - Target hosts: Ubuntu 20.04+, Debian 11+, or RHEL/Rocky 8+
+# Variables:
+#   - nginx_tls_cert: Path to TLS certificate (required)
+#   - nginx_tls_key: Path to TLS private key (required)
+#   - nginx_server_name: Server name / virtual host (default: ansible_fqdn)
+#   - nginx_http_port: HTTP port (default: 80)
+#   - nginx_https_port: HTTPS port (default: 443)
+# Usage:
+#   ansible-playbook -i inventory/production/hosts.yml nginx-tls-playbook.yml \
+#     -e "nginx_tls_cert=/etc/ssl/certs/app.crt nginx_tls_key=/etc/ssl/private/app.key"
+
+- name: Deploy nginx with TLS
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  vars:
+    nginx_http_port: 80
+    nginx_https_port: 443
+    nginx_server_name: "{{ ansible_fqdn }}"
+
+  pre_tasks:
+    - name: Assert required variables are defined
+      ansible.builtin.assert:
+        that:
+          - nginx_tls_cert is defined
+          - nginx_tls_key is defined
+        fail_msg: "nginx_tls_cert and nginx_tls_key must be provided"
+
+    - name: Update apt cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      tags:
+        - always
+
+    - name: Update dnf cache (RHEL 8+)
+      ansible.builtin.dnf:
+        update_cache: true
+      when: ansible_os_family == "RedHat"
+      tags:
+        - always
+
+  tasks:
+    - name: Install nginx (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+      when: ansible_os_family == "Debian"
+      tags:
+        - install
+        - packages
+
+    - name: Install nginx (RHEL 8+)
+      ansible.builtin.dnf:
+        name: nginx
+        state: present
+      when: ansible_os_family == "RedHat"
+      tags:
+        - install
+        - packages
+
+    - name: Ensure TLS certificate exists
+      ansible.builtin.stat:
+        path: "{{ nginx_tls_cert }}"
+      register: tls_cert_stat
+      tags:
+        - configure
+        - tls
+
+    - name: Fail if TLS certificate is missing
+      ansible.builtin.fail:
+        msg: "TLS certificate not found at {{ nginx_tls_cert }}"
+      when: not tls_cert_stat.stat.exists
+      tags:
+        - configure
+        - tls
+
+    - name: Deploy nginx configuration
+      ansible.builtin.template:
+        src: nginx-tls.conf.j2
+        dest: /etc/nginx/conf.d/tls.conf
+        mode: '0644'
+        owner: root
+        group: root
+        backup: true
+        validate: nginx -t -c %s
+      notify: Reload nginx
+      tags:
+        - configure
+
+    - name: Ensure nginx is started and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+      tags:
+        - service
+
+  post_tasks:
+    - name: Verify nginx responds on HTTPS
+      ansible.builtin.uri:
+        url: "https://localhost:{{ nginx_https_port }}/"
+        validate_certs: false
+        status_code: [200, 301, 302]
+      register: health_check
+      until: health_check.status in [200, 301, 302]
+      retries: 5
+      delay: 5
+      tags:
+        - verify
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

@@ -198,36 +198,47 @@ Follow this workflow when generating Dockerfiles. Adapt based on user needs:
 
 #### Node.js Multi-Stage Dockerfile
 
+> **Build-stage dependency rule:** If the application has a build step (TypeScript,
+> Vite, Webpack, etc.), install **all** dependencies in the builder stage (omit
+> `--only=production`) and prune dev deps after the build. Using
+> `--only=production` before a build step will cause `npm run build` to fail
+> because dev tools are not installed.
+
 ```dockerfile
 # syntax=docker/dockerfile:1
 
-# Build stage
+# Build stage — installs all deps so build tools (tsc, vite, etc.) are available,
+# then prunes dev deps so the production stage only ships what is needed at runtime.
 FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy dependency files for caching
 COPY package*.json ./
-# Use npm ci for deterministic builds
-RUN npm ci --only=production && \
+# Install ALL dependencies (including devDependencies required by the build step)
+RUN npm ci && \
     npm cache clean --force
 
 # Copy application code
 COPY . .
 
-# Build application (if needed)
-# RUN npm run build
+# Build application and prune dev dependencies
+RUN npm run build && \
+    npm prune --production
 
 # Production stage
 FROM node:20-alpine AS production
 WORKDIR /app
 
+# Set production environment
+ENV NODE_ENV=production
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy dependencies and application from builder
+# Copy pruned node_modules and built application from builder
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --chown=nodejs:nodejs . .
+COPY --from=builder --chown=nodejs:nodejs /app .
 
 # Switch to non-root user
 USER nodejs
@@ -243,6 +254,15 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 CMD ["node", "index.js"]
 ```
 
+> **Simple app (no build step):** If there is no compilation or bundling, install
+> only production deps in the builder stage and copy source from the host context:
+> ```dockerfile
+> RUN npm ci --only=production && npm cache clean --force
+> ...
+> COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+> COPY --chown=nodejs:nodejs . .
+> ```
+
 #### Python Multi-Stage Dockerfile
 
 ```dockerfile
@@ -253,6 +273,7 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
@@ -276,8 +297,12 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Update PATH
-ENV PATH=/home/appuser/.local/bin:$PATH
+# Update PATH and set Python production env vars
+# PYTHONUNBUFFERED=1 ensures stdout/stderr are flushed immediately (essential for container logs)
+# PYTHONDONTWRITEBYTECODE=1 prevents writing .pyc files to disk
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Switch to non-root user
 USER appuser
@@ -313,6 +338,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o main .
 
 # Production stage (using distroless for minimal image)
+# gcr.io/distroless/static-debian12 IS a specific tag; hadolint DL3006 is a
+# false positive for non-Docker-Hub registries.
+# hadolint ignore=DL3006
 FROM gcr.io/distroless/static-debian12 AS production
 WORKDIR /
 
@@ -322,8 +350,7 @@ COPY --from=builder /app/main /main
 # Expose port
 EXPOSE 8080
 
-# Health check (distroless doesn't have shell, so this is commented)
-# HEALTHCHECK not supported in distroless without shell
+# HEALTHCHECK is not supported in distroless images (no shell available)
 
 # Switch to non-root user (distroless runs as nonroot by default)
 USER nonroot:nonroot
@@ -360,6 +387,7 @@ FROM eclipse-temurin:21-jre-jammy AS production
 WORKDIR /app
 
 # Install healthcheck dependency and create non-root user
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -u 1001 appuser
@@ -768,6 +796,7 @@ CMD ["npm", "start"]
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim AS builder
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
@@ -778,7 +807,9 @@ WORKDIR /app
 RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
-ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 USER appuser
 EXPOSE 8000
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1

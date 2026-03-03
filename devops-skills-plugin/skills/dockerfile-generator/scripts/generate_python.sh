@@ -83,14 +83,25 @@ escape_sed_replacement() {
     printf '%s' "$input"
 }
 
-# Build CMD instruction based on entry format:
-# - single token: run as Python script
-# - multi-token: treat as full command executed by shell
-APP_ENTRY_ESCAPED="$(escape_json_string "$APP_ENTRY")"
+# Build CMD instruction.
+# - Single token (no space): treat as a Python script file, prepend interpreter.
+# - Multi-token (has space): tokenize into a proper exec-form JSON array so that
+#   every word becomes its own element. This avoids sh -c wrapping, which adds
+#   an extra process and breaks PID-1 signal handling.
+#   Examples:
+#     "app.py"                                -> CMD ["python", "app.py"]
+#     "python app.py"                         -> CMD ["python", "app.py"]
+#     "uvicorn main:app --host 0.0.0.0 --port 8000"
+#                                             -> CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 if [[ "$APP_ENTRY" =~ [[:space:]] ]]; then
-    CMD_INSTRUCTION="CMD [\"sh\", \"-c\", \"$APP_ENTRY_ESCAPED\"]"
+    read -ra _entry_tokens <<< "$APP_ENTRY"
+    _json_parts=()
+    for _token in "${_entry_tokens[@]}"; do
+        _json_parts+=("\"$(escape_json_string "$_token")\"")
+    done
+    CMD_INSTRUCTION="CMD [$(IFS=', '; echo "${_json_parts[*]}")]"
 else
-    CMD_INSTRUCTION="CMD [\"python\", \"$APP_ENTRY_ESCAPED\"]"
+    CMD_INSTRUCTION="CMD [\"python\", \"$(escape_json_string "$APP_ENTRY")\"]"
 fi
 CMD_INSTRUCTION_SED="$(escape_sed_replacement "$CMD_INSTRUCTION")"
 
@@ -103,6 +114,7 @@ FROM python:PYTHON_VERSION-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
@@ -126,8 +138,10 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Update PATH
-ENV PATH=/home/appuser/.local/bin:$PATH
+# Update PATH and set Python production env vars
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Switch to non-root user
 USER appuser

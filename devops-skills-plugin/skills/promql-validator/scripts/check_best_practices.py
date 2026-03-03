@@ -89,6 +89,7 @@ class PromQLBestPracticesChecker:
         self._check_absent_with_aggregation()
         self._check_vector_matching()
         self._check_native_histogram_usage()
+        self._check_high_cardinality_labels_in_aggregation()
         # Design pattern checks
         self._check_mixed_metric_types()
 
@@ -133,6 +134,10 @@ class PromQLBestPracticesChecker:
             'count_over_time', 'quantile_over_time', 'stddev_over_time', 'stdvar_over_time',
             'last_over_time', 'mad_over_time', 'sort', 'sort_desc', 'sort_by_label',
             'sort_by_label_desc', 'holt_winters', 'double_exponential_smoothing', 'info',
+            # Prometheus 3.5+ experimental timestamp functions
+            'ts_of_max_over_time', 'ts_of_min_over_time', 'ts_of_last_over_time',
+            # Prometheus 3.7+ experimental functions
+            'first_over_time', 'ts_of_first_over_time',
             # Keywords and operators
             'by', 'without', 'and', 'or', 'unless', 'on', 'ignoring',
             'group_left', 'group_right', 'bool', 'offset', 'start', 'end',
@@ -160,10 +165,12 @@ class PromQLBestPracticesChecker:
 
     def _strip_label_selectors_and_strings(self, query: str) -> str:
         """
-        Remove content inside {...} label selectors, quoted strings, and grouping clauses.
-        This prevents label names from being misidentified as metric names.
+        Remove content inside {...} label selectors, [...] range/subquery specifiers,
+        quoted strings, and grouping clauses.
+        This prevents label names and duration tokens from being misidentified as metric names.
 
-        Also strips content from:
+        Strips content from:
+        - [...] range vectors and subqueries (e.g. [5m], [7d:1h])
         - by (...) clauses
         - without (...) clauses
         - on (...) clauses
@@ -171,7 +178,12 @@ class PromQLBestPracticesChecker:
         - group_left(...) clauses
         - group_right(...) clauses
         """
-        # First, strip grouping clauses (by, without, on, ignoring, group_left, group_right)
+        # Strip range vector and subquery contents: [5m], [1h], [7d:1h], [30m:]
+        # Duration tokens like ":1h" must not be matched as metric names.
+        # Replace bracket contents with spaces to preserve string length/positions.
+        query = re.sub(r'\[([^\]]*)\]', lambda m: '[' + ' ' * len(m.group(1)) + ']', query)
+
+        # Strip grouping clauses (by, without, on, ignoring, group_left, group_right)
         # These contain label names, not metric names
         query = re.sub(r'\b(by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)', r'\1 ( )', query)
 
@@ -260,9 +272,16 @@ class PromQLBestPracticesChecker:
 
     def _check_missing_rate_on_counters(self):
         """Check if counter metrics are used without rate/increase"""
+        # Strip label selector contents and quoted strings before scanning for counter
+        # metric names.  Without this, a counter-suffix name that appears inside a label
+        # VALUE (e.g. {label="http_requests_total"}) would be misidentified as a bare
+        # metric reference and produce a false-positive missing_rate warning.
+        # _check_high_cardinality() already uses the same stripping approach.
+        query_for_metric_scan = self._strip_label_selectors_and_strings(self.query)
+
         # Find metric names that look like counters
         metric_pattern = r'\b([a-zA-Z_:][a-zA-Z0-9_:]*(?:_total|_count|_sum|_bucket))\b'
-        counter_metrics = re.findall(metric_pattern, self.query)
+        counter_metrics = re.findall(metric_pattern, query_for_metric_scan)
 
         for metric in counter_metrics:
             # Check if it's wrapped in rate/irate/increase
@@ -312,14 +331,29 @@ class PromQLBestPracticesChecker:
                 })
 
     def _check_averaging_quantiles(self):
-        """Check for averaging pre-calculated quantiles"""
-        # Pattern: avg(...{quantile="..."})
-        if re.search(r'avg\s*\([^)]*\{[^}]*quantile\s*=', self.query):
+        """Check for aggregating pre-calculated quantiles with invalid operations.
+
+        avg() is the most obviously wrong case, but sum(), max(), and min() on
+        Prometheus summary quantile labels are equally invalid:
+        - sum(p95_from_instance_A, p95_from_instance_B) is not a meaningful p95
+        - max() gives the worst-case instance p95 but is often misread as "global p95"
+        - min() has the same confusion
+
+        The only correct approach is to calculate quantiles from histogram buckets
+        using histogram_quantile().
+        """
+        # Matches any aggregation whose argument contains a {quantile="..."} selector.
+        # The selector unambiguously identifies Prometheus summary quantile label usage.
+        invalid_aggregations = r'(?:avg|sum|min|max|stddev|stdvar)\s*\([^)]*\{[^}]*quantile\s*='
+        match = re.search(invalid_aggregations, self.query)
+        if match:
+            # Extract which aggregation was used for a clearer error message.
+            agg_func = match.group(0).split('(')[0].strip()
             self.issues.append({
                 'type': 'averaging_quantiles',
-                'message': 'Averaging pre-calculated quantiles is mathematically invalid',
+                'message': f'{agg_func}() on pre-calculated quantile labels produces mathematically invalid results',
                 'severity': 'error',
-                'recommendation': 'Use histogram_quantile() with histogram buckets instead'
+                'recommendation': 'Use histogram_quantile() with histogram buckets instead: histogram_quantile(0.95, sum by (le) (rate(metric_bucket[5m])))'
             })
 
     def _check_subquery_performance(self):
@@ -729,6 +763,56 @@ class PromQLBestPracticesChecker:
                     'recommendation': 'Use: histogram_count(rate(histogram_metric[5m])) to get observations per second'
                 })
 
+    def _check_high_cardinality_labels_in_aggregation(self):
+        """
+        Check for known high-cardinality label names inside by() or without() clauses.
+
+        Per best_practices.md: Labels like user_id, session_id, request_id, IP addresses,
+        full URLs, and UUIDs create one series per unique value, which can be millions of
+        series. They should not appear in aggregation dimensions.
+        """
+        # Extract all by(...) and without(...) clause contents
+        agg_clause_pattern = r'\b(?:by|without)\s*\(([^)]*)\)'
+        clauses = re.findall(agg_clause_pattern, self.query)
+
+        # High-cardinality label name indicators (from best_practices.md)
+        # These are either exact known names or suffix patterns
+        HIGH_CARDINALITY_EXACT = {
+            'ip', 'url', 'path', 'timestamp', 'uuid', 'tid',
+        }
+        HIGH_CARDINALITY_SUFFIXES = (
+            '_id',      # user_id, session_id, request_id, trace_id, span_id, etc.
+            '_uuid',    # any_uuid
+            '_ip',      # client_ip, source_ip, etc.
+            '_url',     # full_url, request_url, etc.
+            '_address', # ip_address, email_address (high cardinality)
+        )
+
+        found = []
+        for clause in clauses:
+            # Split on commas and strip whitespace to get individual label names
+            label_names = [lbl.strip() for lbl in clause.split(',') if lbl.strip()]
+            for label in label_names:
+                lower = label.lower()
+                if lower in HIGH_CARDINALITY_EXACT:
+                    found.append(label)
+                elif any(lower.endswith(suffix) for suffix in HIGH_CARDINALITY_SUFFIXES):
+                    found.append(label)
+
+        if found:
+            label_list = ', '.join(dict.fromkeys(found))  # deduplicate, preserve order
+            self.issues.append({
+                'type': 'high_cardinality_aggregation_label',
+                'message': f'Aggregating by high-cardinality label(s): {label_list}',
+                'severity': 'warning',
+                'recommendation': (
+                    f'Labels like {label_list} can have millions of unique values, '
+                    'creating one time series per value and degrading query performance. '
+                    'Remove them from by()/without() or replace with lower-cardinality alternatives '
+                    '(e.g. use "service" instead of "user_id").'
+                )
+            })
+
     def _check_mixed_metric_types(self):
         """
         Check if query combines fundamentally different metric types in a single expression.
@@ -777,6 +861,10 @@ class PromQLBestPracticesChecker:
             'count_over_time', 'quantile_over_time', 'stddev_over_time', 'stdvar_over_time',
             'last_over_time', 'mad_over_time', 'sort', 'sort_desc', 'sort_by_label',
             'sort_by_label_desc', 'holt_winters', 'double_exponential_smoothing', 'info',
+            # Prometheus 3.5+ experimental timestamp functions
+            'ts_of_max_over_time', 'ts_of_min_over_time', 'ts_of_last_over_time',
+            # Prometheus 3.7+ experimental functions
+            'first_over_time', 'ts_of_first_over_time',
             'by', 'without', 'and', 'or', 'unless', 'on', 'ignoring',
             'group_left', 'group_right', 'bool', 'offset', 'start', 'end',
             'inf', 'nan'

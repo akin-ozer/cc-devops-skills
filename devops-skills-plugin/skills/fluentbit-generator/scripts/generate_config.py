@@ -164,6 +164,7 @@ class FluentBitConfigGenerator:
         es_index_prefix: str = "k8s",
         cluster_name: str = "my-cluster",
         environment: str = "production",
+        container_runtime: str = "cri",
         tls_verify: bool = True,
         tls_ca_file: Optional[str] = None,
         **kwargs
@@ -177,6 +178,8 @@ class FluentBitConfigGenerator:
             es_index_prefix: Index prefix for Logstash format
             cluster_name: Kubernetes cluster name
             environment: Environment identifier
+            container_runtime: Container runtime parser to use ("cri" for containerd/CRI-O,
+                               "docker" for Docker). Default: "cri" (Kubernetes 1.24+).
             tls_verify: Verify TLS certificates (default: True).
                         Set to False only when self-signed certs are in use
                         and no CA file can be provided.
@@ -186,11 +189,18 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        es_host = es_host or "elasticsearch.logging.svc"
-        es_port = es_port or 9200
-        es_index_prefix = es_index_prefix or "k8s"
-        cluster_name = cluster_name or "my-cluster"
-        environment = environment or "production"
+        if es_host is None:
+            es_host = "elasticsearch.logging.svc"
+        if es_port is None:
+            es_port = 9200
+        if es_index_prefix is None:
+            es_index_prefix = "k8s"
+        if cluster_name is None:
+            cluster_name = "my-cluster"
+        if environment is None:
+            environment = "production"
+        if container_runtime is None:
+            container_runtime = "cri"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -199,7 +209,7 @@ class FluentBitConfigGenerator:
     Tag               kube.*
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*fluent-bit*.log
-    Parser            docker
+    Parser            {container_runtime}
     DB                /var/log/flb_kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
@@ -255,6 +265,7 @@ class FluentBitConfigGenerator:
         loki_host: str = "loki.logging.svc",
         loki_port: int = 3100,
         cluster_name: str = "my-cluster",
+        container_runtime: str = "cri",
         **kwargs
     ) -> str:
         """
@@ -264,13 +275,20 @@ class FluentBitConfigGenerator:
             loki_host: Loki hostname
             loki_port: Loki port
             cluster_name: Kubernetes cluster name
+            container_runtime: Container runtime parser to use ("cri" for containerd/CRI-O,
+                               "docker" for Docker). Default: "cri" (Kubernetes 1.24+).
 
         Returns:
             Complete Fluent Bit configuration string
         """
-        loki_host = loki_host or "loki.logging.svc"
-        loki_port = loki_port or 3100
-        cluster_name = cluster_name or "my-cluster"
+        if loki_host is None:
+            loki_host = "loki.logging.svc"
+        if loki_port is None:
+            loki_port = 3100
+        if cluster_name is None:
+            cluster_name = "my-cluster"
+        if container_runtime is None:
+            container_runtime = "cri"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -279,7 +297,7 @@ class FluentBitConfigGenerator:
     Tag               kube.*
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*fluent-bit*.log
-    Parser            docker
+    Parser            {container_runtime}
     DB                /var/log/flb_kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
@@ -322,6 +340,7 @@ class FluentBitConfigGenerator:
         aws_region: str = "us-east-1",
         log_group_name: str = "/aws/kubernetes/logs",
         cluster_name: str = "my-cluster",
+        container_runtime: str = "cri",
         **kwargs
     ) -> str:
         """
@@ -331,13 +350,20 @@ class FluentBitConfigGenerator:
             aws_region: AWS region for CloudWatch
             log_group_name: CloudWatch log group name
             cluster_name: Kubernetes cluster name
+            container_runtime: Container runtime parser to use ("cri" for containerd/CRI-O,
+                               "docker" for Docker). Default: "cri" (Kubernetes 1.24+).
 
         Returns:
             Complete Fluent Bit configuration string
         """
-        aws_region = aws_region or "us-east-1"
-        log_group_name = log_group_name or "/aws/kubernetes/logs"
-        cluster_name = cluster_name or "my-cluster"
+        if aws_region is None:
+            aws_region = "us-east-1"
+        if log_group_name is None:
+            log_group_name = "/aws/kubernetes/logs"
+        if cluster_name is None:
+            cluster_name = "my-cluster"
+        if container_runtime is None:
+            container_runtime = "cri"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -346,7 +372,7 @@ class FluentBitConfigGenerator:
     Tag               kube.*
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*fluent-bit*.log
-    Parser            docker
+    Parser            {container_runtime}
     DB                /var/log/flb_kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
@@ -384,6 +410,7 @@ class FluentBitConfigGenerator:
         otlp_endpoint: str = "opentelemetry-collector.observability.svc:4318",
         cluster_name: str = "my-cluster",
         environment: str = "production",
+        container_runtime: str = "cri",
         tls_verify: bool = True,
         tls_ca_file: Optional[str] = None,
         **kwargs
@@ -395,6 +422,8 @@ class FluentBitConfigGenerator:
             otlp_endpoint: OpenTelemetry Collector endpoint (HTTP)
             cluster_name: Kubernetes cluster name
             environment: Environment identifier
+            container_runtime: Container runtime parser to use ("cri" for containerd/CRI-O,
+                               "docker" for Docker). Default: "cri" (Kubernetes 1.24+).
             tls_verify: Verify TLS certificates (default: True).
                         Set to False only when self-signed certs are in use
                         and no CA file can be provided.
@@ -404,9 +433,14 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        otlp_endpoint = otlp_endpoint or "opentelemetry-collector.observability.svc:4318"
-        cluster_name = cluster_name or "my-cluster"
-        environment = environment or "production"
+        if otlp_endpoint is None:
+            otlp_endpoint = "opentelemetry-collector.observability.svc:4318"
+        if cluster_name is None:
+            cluster_name = "my-cluster"
+        if environment is None:
+            environment = "production"
+        if container_runtime is None:
+            container_runtime = "cri"
         host, port, logs_uri = self._parse_otlp_endpoint(otlp_endpoint)
         config = self._generate_service_section(parsers_file="parsers.conf")
 
@@ -416,7 +450,7 @@ class FluentBitConfigGenerator:
     Tag               kube.*
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*fluent-bit*.log
-    Parser            docker
+    Parser            {container_runtime}
     DB                /var/log/flb_kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
@@ -474,7 +508,7 @@ class FluentBitConfigGenerator:
 
         Args:
             log_path: Path to application log files
-            language: Programming language for multiline parser (java, python, go)
+            language: Programming language for multiline parser (java, python, go, ruby)
             app_name: Application name
             environment: Environment identifier
             es_host: Elasticsearch hostname
@@ -482,11 +516,16 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        log_path = log_path or "/var/log/app/*.log"
-        language = language or "java"
-        app_name = app_name or "myapp"
-        environment = environment or "production"
-        es_host = es_host or "elasticsearch"
+        if log_path is None:
+            log_path = "/var/log/app/*.log"
+        if language is None:
+            language = "java"
+        if app_name is None:
+            app_name = "myapp"
+        if environment is None:
+            environment = "production"
+        if es_host is None:
+            es_host = "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -494,7 +533,6 @@ class FluentBitConfigGenerator:
     Name              tail
     Tag               app.*
     Path              {log_path}
-    Parser            json
     Multiline.Parser  multiline-{language}
     DB                /var/log/flb_app.db
     Mem_Buf_Limit     100MB
@@ -544,9 +582,12 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        listen_port = listen_port or 5140
-        syslog_host = syslog_host or "syslog-server.example.com"
-        syslog_port = syslog_port or 514
+        if listen_port is None:
+            listen_port = 5140
+        if syslog_host is None:
+            syslog_host = "syslog-server.example.com"
+        if syslog_port is None:
+            syslog_port = 514
         config = self._generate_service_section(flush=5, parsers_file="parsers.conf")
 
         config += f"""
@@ -599,9 +640,12 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        log_path = log_path or "/var/log/app/*.log"
-        s3_bucket = s3_bucket or "my-logs-bucket"
-        s3_region = s3_region or "us-east-1"
+        if log_path is None:
+            log_path = "/var/log/app/*.log"
+        if s3_bucket is None:
+            s3_bucket = "my-logs-bucket"
+        if s3_region is None:
+            s3_region = "us-east-1"
         config = self._generate_service_section(flush=5)
 
         config += f"""
@@ -651,9 +695,12 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        http_port = http_port or 9880
-        kafka_brokers = kafka_brokers or "kafka:9092"
-        kafka_topic = kafka_topic or "logs"
+        if http_port is None:
+            http_port = 9880
+        if kafka_brokers is None:
+            kafka_brokers = "kafka:9092"
+        if kafka_topic is None:
+            kafka_topic = "logs"
         config = self._generate_service_section()
 
         config += f"""
@@ -699,8 +746,10 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        es_host = es_host or "elasticsearch"
-        s3_bucket = s3_bucket or "logs-archive"
+        if es_host is None:
+            es_host = "elasticsearch"
+        if s3_bucket is None:
+            s3_bucket = "logs-archive"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -770,10 +819,14 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        prometheus_host = prometheus_host or "prometheus.monitoring.svc"
-        prometheus_port = prometheus_port or 9090
-        scrape_interval = scrape_interval or 15
-        cluster_name = cluster_name or "my-cluster"
+        if prometheus_host is None:
+            prometheus_host = "prometheus.monitoring.svc"
+        if prometheus_port is None:
+            prometheus_port = 9090
+        if scrape_interval is None:
+            scrape_interval = 15
+        if cluster_name is None:
+            cluster_name = "my-cluster"
         config = self._generate_service_section(flush=scrape_interval)
 
         config += f"""
@@ -788,11 +841,6 @@ class FluentBitConfigGenerator:
     Host              127.0.0.1
     Port              2020
     Scrape_interval   {scrape_interval}
-
-[FILTER]
-    Name          modify
-    Match         *
-    Add           cluster {cluster_name}
 
 [OUTPUT]
     Name              prometheus_remote_write
@@ -830,9 +878,12 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        log_path = log_path or "/var/log/app/*.log"
-        lua_script_path = lua_script_path or "/fluent-bit/scripts/filter.lua"
-        es_host = es_host or "elasticsearch"
+        if log_path is None:
+            log_path = "/var/log/app/*.log"
+        if lua_script_path is None:
+            lua_script_path = "/fluent-bit/scripts/filter.lua"
+        if es_host is None:
+            es_host = "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -910,8 +961,10 @@ class FluentBitConfigGenerator:
         Returns:
             Complete Fluent Bit configuration string
         """
-        log_path = log_path or "/var/log/app/*.log"
-        es_host = es_host or "elasticsearch"
+        if log_path is None:
+            log_path = "/var/log/app/*.log"
+        if es_host is None:
+            es_host = "elasticsearch"
         config = self._generate_service_section(parsers_file="parsers.conf")
 
         config += f"""
@@ -1019,15 +1072,17 @@ def main() -> None:
             "es_host",
             "es_port",
             "es_index_prefix",
+            "container_runtime",
             "tls_verify",
             "tls_ca_file",
         ],
-        "kubernetes-loki": ["cluster_name", "loki_host", "loki_port"],
-        "kubernetes-cloudwatch": ["cluster_name", "aws_region", "log_group_name"],
+        "kubernetes-loki": ["cluster_name", "loki_host", "loki_port", "container_runtime"],
+        "kubernetes-cloudwatch": ["cluster_name", "aws_region", "log_group_name", "container_runtime"],
         "kubernetes-opentelemetry": [
             "cluster_name",
             "environment",
             "otlp_endpoint",
+            "container_runtime",
             "tls_verify",
             "tls_ca_file",
         ],
@@ -1117,8 +1172,20 @@ def main() -> None:
     parser.add_argument(
         "--language",
         default=None,
-        choices=["java", "python", "go"],
+        choices=["java", "python", "go", "ruby"],
         help="Language for multiline parsing",
+    )
+
+    # Kubernetes container runtime
+    parser.add_argument(
+        "--container-runtime",
+        default=None,
+        choices=["docker", "cri"],
+        help=(
+            "Container runtime parser for Kubernetes log tailing. "
+            "Use 'cri' for containerd/CRI-O (Kubernetes 1.24+, default) "
+            "or 'docker' for legacy Docker shim clusters."
+        ),
     )
 
     # S3 options

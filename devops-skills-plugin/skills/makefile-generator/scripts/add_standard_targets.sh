@@ -127,13 +127,6 @@ target_exists() {
     grep -qE "^${target}[[:space:]]*:" "$makefile" 2>/dev/null
 }
 
-# Check if .PHONY already includes target
-phony_includes() {
-    local target="$1"
-    local makefile="$2"
-    grep -qE "^\.PHONY:.*\b${target}\b" "$makefile" 2>/dev/null
-}
-
 # Generate target code
 generate_target() {
     local target="$1"

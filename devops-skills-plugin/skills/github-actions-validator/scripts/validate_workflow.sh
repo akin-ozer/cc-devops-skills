@@ -190,7 +190,7 @@ check_action_versions() {
         echo ""
         log_info "Recommendations:"
         if [ $deprecated_count -gt 0 ]; then
-            log_error "  - Update deprecated actions immediately (v3 -> v4)"
+            log_error "  - Update deprecated actions to current versions (see references/action_versions.md)"
         fi
         if [ $outdated_count -gt 0 ]; then
             log_warn "  - Consider updating outdated actions for latest features"
@@ -317,16 +317,24 @@ get_tool_path() {
     fi
 }
 
-# Validate workflow with actionlint
+# Validate workflow with actionlint.
+# Captures output to global ACTIONLINT_OUTPUT (for reference hints) while printing it.
 validate_with_actionlint() {
     local workflow_path=$1
     log_section "Running actionlint"
 
-    local actionlint_path=$(get_tool_path "actionlint")
+    local actionlint_path
+    actionlint_path=$(get_tool_path "actionlint")
+
+    local output=""
+    local actionlint_exit=0
 
     if [ -f "$workflow_path" ]; then
         log_info "Validating: $workflow_path"
-        if "${actionlint_path}" "$workflow_path" 2>&1; then
+        output=$("${actionlint_path}" "$workflow_path" 2>&1) || actionlint_exit=$?
+        [ -n "$output" ] && echo "$output"
+        ACTIONLINT_OUTPUT="$output"
+        if [ $actionlint_exit -eq 0 ]; then
             log_info "✓ actionlint validation passed"
             return 0
         else
@@ -347,7 +355,10 @@ validate_with_actionlint() {
             return 0
         fi
 
-        if "${actionlint_path}" "${workflow_files[@]}" 2>&1; then
+        output=$("${actionlint_path}" "${workflow_files[@]}" 2>&1) || actionlint_exit=$?
+        [ -n "$output" ] && echo "$output"
+        ACTIONLINT_OUTPUT="$output"
+        if [ $actionlint_exit -eq 0 ]; then
             log_info "✓ actionlint validation passed for ${#workflow_files[@]} file(s)"
             return 0
         else
@@ -562,7 +573,9 @@ test_with_act() {
 }
 
 # Display usage
+# Optional first argument: exit code (default 0, pass 1 for error paths)
 usage() {
+    local exit_code="${1:-0}"
     echo "Usage: $0 [OPTIONS] <workflow-file-or-directory>"
     echo ""
     echo "Options:"
@@ -583,7 +596,7 @@ usage() {
     echo "  - act: For workflow testing (installed via install_tools.sh)"
     echo "  - Docker: Required for act to run (must be running)"
     echo ""
-    exit 0
+    exit "$exit_code"
 }
 
 # Main validation
@@ -628,7 +641,7 @@ main() {
     if [ -z "$workflow_path" ]; then
         log_error "No workflow file or directory specified"
         echo ""
-        usage
+        usage 1
     fi
 
     if [ "$lint_only" = true ] && [ "$test_only" = true ]; then
@@ -682,7 +695,7 @@ main() {
     fi
 
     local exit_code=0
-    local validation_output=""
+    ACTIONLINT_OUTPUT=""
 
     # Run version check if requested
     if [ "$check_versions" = true ]; then
@@ -696,15 +709,9 @@ main() {
         fi
     fi
 
-    # Run actionlint
+    # Run actionlint (output is captured and printed inside validate_with_actionlint,
+    # and stored in ACTIONLINT_OUTPUT for reference hint routing)
     if [ "$run_actionlint" = true ]; then
-        # Capture output for reference hints (use local actionlint first, then fallback to PATH)
-        local actionlint_cmd="${TOOLS_DIR}/actionlint"
-        if [ ! -f "$actionlint_cmd" ]; then
-            actionlint_cmd="actionlint"
-        fi
-        validation_output=$("$actionlint_cmd" "$workflow_path" 2>&1) || true
-
         if ! validate_with_actionlint "$workflow_path"; then
             exit_code=1
         fi
@@ -724,8 +731,8 @@ main() {
         log_error "✗ Some validations failed"
 
         # Show reference hints based on errors
-        if [ -n "$validation_output" ]; then
-            show_reference_hints "$validation_output"
+        if [ -n "$ACTIONLINT_OUTPUT" ]; then
+            show_reference_hints "$ACTIONLINT_OUTPUT"
         fi
 
         echo ""

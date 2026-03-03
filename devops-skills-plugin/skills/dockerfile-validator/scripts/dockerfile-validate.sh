@@ -48,6 +48,7 @@ EXIT_CODE=0
 BP_ERRORS=0
 BP_WARNINGS=0
 BP_INFO=0
+BP_HAS_WARNINGS=false   # set true when BP has warnings but no errors (drives WARN summary state)
 RUN_COUNT=0
 
 ################################################################################
@@ -379,11 +380,15 @@ run_best_practices() {
     fi
 
     # Check for hardcoded secrets (ignore comments)
+    # Use tolower() instead of IGNORECASE=1 for ~ operator: BSD awk (macOS) does not
+    # honour IGNORECASE when using the dynamic ~ operator, only for literal /patterns/.
+    # Dockerfile convention is UPPERCASE variable names (ENV PASSWORD=, ENV API_KEY=),
+    # so without tolower() all secrets are silently missed on macOS.
     if awk '
-        BEGIN { IGNORECASE=1 }
         /^[[:space:]]*#/ { next }
-        /^[[:space:]]*(ENV|ARG)[[:space:]]+/ {
-            if ($0 ~ /(password|secret|api[_-]?key|token)[[:space:]]*=/) {
+        /^[[:space:]]*(ENV|ARG)[[:space:]]/ {
+            lower = tolower($0)
+            if (lower ~ /(password|secret|api_key|api-key|apikey|token)[[:space:]]*=/) {
                 found=1
             }
         }
@@ -396,46 +401,51 @@ run_best_practices() {
     fi
 
     # Check for poor COPY ordering (COPY . before dependency installation)
-    # This hurts build cache efficiency - dependencies should be copied first
-    COPY_ALL_LINE=$(printf '%s\n' "$normalized_content" | awk '
-        BEGIN { IGNORECASE=1 }
+    # This hurts build cache efficiency - dependencies should be copied first.
+    # Stage-aware: resets tracking on each FROM so a COPY . in a builder stage
+    # does not produce a false positive against installs in a separate runtime stage.
+    COPY_ORDER_ISSUE=$(printf '%s\n' "$normalized_content" | awk '
         {
-            line = $0
-            if (line !~ /^[[:space:]]*COPY[[:space:]]+/) {
+            lower = tolower($0)
+
+            # New build stage — reset per-stage COPY . tracking
+            if (lower ~ /^[[:space:]]*from[[:space:]]+/) {
+                stage_copy_line = 0
                 next
             }
 
-            sub(/^[[:space:]]*COPY[[:space:]]+/, "", line)
-            while (line ~ /^--[^[:space:]]+[[:space:]]+/) {
-                sub(/^--[^[:space:]]+[[:space:]]+/, "", line)
+            # Skip comment lines
+            if (lower ~ /^[[:space:]]*#/) { next }
+
+            # Record the first COPY . in the current stage (ignore COPY --from=)
+            if (stage_copy_line == 0 && lower ~ /^[[:space:]]*copy[[:space:]]+/) {
+                stripped = lower
+                sub(/^[[:space:]]*copy[[:space:]]+/, "", stripped)
+                while (stripped ~ /^--[^[:space:]]+[[:space:]]+/) {
+                    sub(/^--[^[:space:]]+[[:space:]]+/, "", stripped)
+                }
+                split(stripped, parts, /[[:space:]]+/)
+                if (parts[1] == "." || parts[1] == "./") {
+                    stage_copy_line = NR
+                }
             }
 
-            split(line, parts, /[[:space:]]+/)
-            if (parts[1] == "." || parts[1] == "./") {
-                print NR
-                exit
-            }
-        }
-    ')
-
-    if [ -n "$COPY_ALL_LINE" ]; then
-        INSTALL_AFTER_COPY=$(printf '%s\n' "$normalized_content" | awk -v copy_line="$COPY_ALL_LINE" '
-            BEGIN { IGNORECASE=1 }
-            NR > copy_line && /^[[:space:]]*RUN[[:space:]]+/ {
-                if ($0 ~ /pip[[:space:]]+install|npm[[:space:]]+install|npm[[:space:]]+ci|yarn([[:space:]]+install)?|go[[:space:]]+mod|apt-get[[:space:]]+install|apk[[:space:]]+add/) {
-                    found=1
+            # Flag if a package install follows COPY . within the same stage
+            if (stage_copy_line > 0 && NR > stage_copy_line && lower ~ /^[[:space:]]*run[[:space:]]+/) {
+                if (lower ~ /pip[[:space:]]+install|npm[[:space:]]+install|npm[[:space:]]+ci|yarn[[:space:]]|go[[:space:]]+mod[[:space:]]|apt-get[[:space:]]+install|apk[[:space:]]+add/) {
+                    found = 1
                     exit
                 }
             }
-            END { print found + 0 }
-        ')
+        }
+        END { print found + 0 }
+    ')
 
-        if [ "$INSTALL_AFTER_COPY" -gt 0 ]; then
-            echo -e "${YELLOW}[WARNING] COPY . appears before dependency installation${NC}"
-            echo "  → Copy dependency files (package.json, requirements.txt) first for better cache"
-            echo "  → Then install dependencies, then COPY . for source code"
-            ((BP_WARNINGS++))
-        fi
+    if [ "$COPY_ORDER_ISSUE" -gt 0 ]; then
+        echo -e "${YELLOW}[WARNING] COPY . appears before dependency installation${NC}"
+        echo "  → Copy dependency files (package.json, requirements.txt) first for better cache"
+        echo "  → Then install dependencies, then COPY . for source code"
+        ((BP_WARNINGS++))
     fi
 
     echo ""
@@ -450,6 +460,7 @@ run_best_practices() {
         return 0
     elif [ $BP_ERRORS -eq 0 ]; then
         echo -e "${YELLOW}⚠ Best practices completed with warnings${NC}"
+        BP_HAS_WARNINGS=true
         return 0
     else
         echo -e "${RED}✗ Best practices validation failed${NC}"
@@ -534,35 +545,36 @@ run_optimization() {
 ################################################################################
 
 show_help() {
-    cat << EOF
-${BOLD}Dockerfile Validator - Complete Lifecycle${NC}
-
-Validates Dockerfiles with automatic tool management and cleanup.
-
-${BOLD}Usage:${NC}
-    $(basename "$0") [Dockerfile]
-
-${BOLD}Validation Stages:${NC}
-    1. Syntax validation (hadolint)
-    2. Security scanning (Checkov)
-    3. Best practices validation
-    4. Optimization analysis
-
-${BOLD}Features:${NC}
-    • Auto-installs tools if not found
-    • Runs all validation stages
-    • Auto-cleanup on exit
-
-${BOLD}Examples:${NC}
-    $(basename "$0")                    # Validate ./Dockerfile
-    $(basename "$0") Dockerfile.prod    # Validate specific file
-
-${BOLD}Exit Codes:${NC}
-    0    All validations passed
-    1    One or more validations failed
-    2    Critical error
-
-EOF
+    # Use echo -e so that BOLD/NC variables (which hold \033[...m escape sequences)
+    # are interpreted correctly. cat << EOF expands variables but does not process
+    # \033 escape sequences, causing raw escape codes to appear in the output.
+    echo -e "${BOLD}Dockerfile Validator - Complete Lifecycle${NC}"
+    echo ""
+    echo "Validates Dockerfiles with automatic tool management and cleanup."
+    echo ""
+    echo -e "${BOLD}Usage:${NC}"
+    echo "    $(basename "$0") [Dockerfile]"
+    echo ""
+    echo -e "${BOLD}Validation Stages:${NC}"
+    echo "    1. Syntax validation (hadolint)"
+    echo "    2. Security scanning (Checkov)"
+    echo "    3. Best practices validation"
+    echo "    4. Optimization analysis"
+    echo ""
+    echo -e "${BOLD}Features:${NC}"
+    echo "    • Auto-installs tools if not found"
+    echo "    • Runs all validation stages"
+    echo "    • Auto-cleanup on exit"
+    echo ""
+    echo -e "${BOLD}Examples:${NC}"
+    echo "    $(basename "$0")                    # Validate ./Dockerfile"
+    echo "    $(basename "$0") Dockerfile.prod    # Validate specific file"
+    echo ""
+    echo -e "${BOLD}Exit Codes:${NC}"
+    echo "    0    All validations passed"
+    echo "    1    One or more validations failed"
+    echo "    2    Critical error"
+    echo ""
 }
 
 # Check for help
@@ -611,7 +623,9 @@ echo ""
 run_checkov && CHECKOV_RESULT="PASS" || CHECKOV_RESULT="FAIL"
 echo ""
 
-run_best_practices && BEST_PRACTICES_RESULT="PASS" || BEST_PRACTICES_RESULT="FAIL"
+run_best_practices && {
+    [ "$BP_HAS_WARNINGS" = true ] && BEST_PRACTICES_RESULT="WARN" || BEST_PRACTICES_RESULT="PASS"
+} || BEST_PRACTICES_RESULT="FAIL"
 echo ""
 
 run_optimization && OPTIMIZATION_RESULT="INFO"
@@ -626,7 +640,13 @@ echo ""
 # Print results
 [ "$HADOLINT_RESULT" = "PASS" ] && echo -e "  Syntax (hadolint):     ${GREEN}✓ PASSED${NC}" || echo -e "  Syntax (hadolint):     ${RED}✗ FAILED${NC}"
 [ "$CHECKOV_RESULT" = "PASS" ] && echo -e "  Security (Checkov):    ${GREEN}✓ PASSED${NC}" || echo -e "  Security (Checkov):    ${RED}✗ FAILED${NC}"
-[ "$BEST_PRACTICES_RESULT" = "PASS" ] && echo -e "  Best Practices:        ${GREEN}✓ PASSED${NC}" || echo -e "  Best Practices:        ${RED}✗ FAILED${NC}"
+if [ "$BEST_PRACTICES_RESULT" = "PASS" ]; then
+    echo -e "  Best Practices:        ${GREEN}✓ PASSED${NC}"
+elif [ "$BEST_PRACTICES_RESULT" = "WARN" ]; then
+    echo -e "  Best Practices:        ${YELLOW}⚠ WARNED${NC}"
+else
+    echo -e "  Best Practices:        ${RED}✗ FAILED${NC}"
+fi
 echo -e "  Optimization:          ${BLUE}ℹ INFORMATIONAL${NC}"
 
 echo ""

@@ -6,7 +6,8 @@
 set -euo pipefail
 
 # Constants
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly LOG_FILE="/tmp/example.log"
 
 # Functions
@@ -44,7 +45,7 @@ process_file() {
 }
 
 main() {
-    log_info "Script started"
+    log_info "Script started from $SCRIPT_DIR"
 
     # Create temporary file
     local temp_file

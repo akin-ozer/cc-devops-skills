@@ -171,13 +171,17 @@ run: echo $VARIABLE
 
 ### 8. Glob Pattern Validation
 
-Validates glob patterns in path filters:
+Validates glob patterns in `paths:` and `paths-ignore:` filters for structural errors (e.g., empty patterns or malformed syntax).
+
+**Note:** The pattern `**.js` (double-star without a slash) is **not flagged** by actionlint as of v1.7.x. It is functionally equivalent to `**/*.js` in GitHub's glob engine but `**/*.js` is more explicit and widely understood. Use `**/*.js` as a best practice, not because actionlint will warn about the alternative.
 
 ```yaml
+# Best practice (clear intent)
 on:
   push:
     paths:
-      - '**.js'  # Error: Should be '**/*.js'
+      - '**/*.js'   # Matches any .js file in any subdirectory
+      - 'src/**'    # Matches everything under src/
 ```
 
 ### 9. Security Checks

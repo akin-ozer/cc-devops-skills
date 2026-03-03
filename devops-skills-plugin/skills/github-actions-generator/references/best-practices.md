@@ -20,7 +20,7 @@
 **Best Practice:**
 ```yaml
 # ✅ BEST: Pinned to specific full SHA (40 characters) with version comment
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 ```
 
 **Why:**
@@ -161,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
@@ -204,24 +204,24 @@ steps:
 
 ### 1. Dependency Caching (Updated November 2025)
 
-**Important:** As of February 2025, actions/cache v4.2.0+ is required (v4.3.0 latest). The cache service was rewritten for improved performance. Legacy cache service was sunset on February 1, 2025.
+**Important:** actions/cache v5.0.3 is recommended (Node 24 runtime). The cache service was rewritten for improved performance in 2025. Legacy cache service was sunset on February 1, 2025.
 
 **Cache Size Limits (New):** As of November 2025, repositories can exceed the previous 10 GB cache limit using a pay-as-you-go model. All repositories receive 10 GB free, with additional storage available.
 
 **NPM/Node.js with Built-in Caching:**
 ```yaml
-- uses: actions/setup-node@v6
+- uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
   with:
     node-version: '24'
     cache: 'npm'
     cache-dependency-path: '**/package-lock.json'
 ```
 
-**Manual Caching with actions/cache@v4:**
+**Manual Caching with actions/cache@v5:**
 ```yaml
 - name: Cache node modules
   id: cache-npm
-  uses: actions/cache@v4
+  uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   env:
     cache-name: cache-node-modules
   with:
@@ -242,7 +242,7 @@ steps:
 
 **Maven with Built-in Caching:**
 ```yaml
-- uses: actions/setup-java@v4
+- uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
   with:
     java-version: '17'
     distribution: 'temurin'
@@ -251,7 +251,7 @@ steps:
 
 **Ruby Gems with Matrix Strategy:**
 ```yaml
-- uses: actions/cache@v4
+- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
   with:
     path: vendor/bundle
     key: bundle-${{ matrix.os }}-${{ matrix.ruby-version }}-${{ hashFiles('**/Gemfile.lock') }}
@@ -289,12 +289,12 @@ concurrency:
 **Best Practice:**
 ```yaml
 # ✅ GOOD: Shallow clone when full history not needed
-- uses: actions/checkout@v4
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     fetch-depth: 1
 
 # ✅ GOOD: Fetch specific depth for changelog generation
-- uses: actions/checkout@v4
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   with:
     fetch-depth: 50
 ```
@@ -435,7 +435,7 @@ jobs:
 **Recommended Approach:**
 ```yaml
 # Format: @<SHA> # <version-tag>
-- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 ```
 
 **Finding SHAs:**
@@ -494,7 +494,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: test-results
           path: test-results/
@@ -626,7 +626,7 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: build-${{ github.sha }}
           path: dist/
@@ -636,7 +636,7 @@ jobs:
     needs: build
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
         with:
           name: build-${{ github.sha }}
           path: dist/
@@ -681,7 +681,7 @@ env:
 ```yaml
 # ❌ BAD: Deprecated actions
 - uses: actions/setup-node@v1  # Use v6 instead (Node 24 runtime)
-- uses: actions/cache@v1       # Use v4.3.0+ instead (v4.2.0+ required as of Feb 2025)
+- uses: actions/cache@v1       # Use v5.0.3+ instead (Node 24 runtime, required as of Feb 2025)
 ```
 
 ### 3. Overly Broad Permissions

@@ -61,6 +61,10 @@ detect_pipeline_type() {
         echo "declarative"
     elif grep -qE '^\s*node\s*(\(|{)' "$file"; then
         echo "scripted"
+    # 'stages {' is exclusive to Declarative syntax — catch malformed declarative
+    # pipelines that are missing the outer 'pipeline {}' wrapper.
+    elif grep -qE '^\s*stages\s*\{' "$file"; then
+        echo "declarative"
     else
         echo "unknown"
     fi
@@ -123,8 +127,15 @@ check_credentials() {
             log_error "$line_num" "  → Use credentials() or withCredentials instead"
         fi
 
-        # Check for token/secret variable assignments with long values
-        if echo "$line" | grep -qiE '(token|secret)\s*=\s*["\047][a-zA-Z0-9]{20,}'; then
+        # Check for token/secret variable assignments with long values.
+        # Variable name group includes api[_-]?token to catch 'apiToken', 'api_token'.
+        # Value char class [a-zA-Z0-9_-] covers hyphen-delimited tokens such as
+        # sk-..., ghp-..., stripe-style keys that previously evaded [a-zA-Z0-9]{20,}.
+        # $'...' ANSI quoting is used so that \047 (octal for ') is expanded by bash
+        # into a literal single-quote before being passed to grep; plain single-quoted
+        # shell strings pass \047 as literal chars and BSD grep does not treat them as
+        # an octal escape in ERE, meaning single-quoted token values would be missed.
+        if echo "$line" | grep -qiE $'(api[_-]?token|token|secret)\\s*=\\s*["\047][a-zA-Z0-9_-]{20,}'; then
             log_warning "$line_num" "Potential hardcoded token/secret detected"
             log_warning "$line_num" "  → Use Jenkins Credentials Manager"
         fi

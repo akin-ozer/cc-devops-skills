@@ -81,7 +81,7 @@ variable "encrypt" {}
 
 ```hcl
 terraform {
-  required_version = ">= 1.8, < 2.0"  # Use 1.8+ for modern features
+  required_version = ">= 1.10, < 2.0"  # Use 1.10+ for modern features (ephemeral resources, write-only)
 }
 ```
 

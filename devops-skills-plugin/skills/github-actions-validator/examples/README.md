@@ -25,12 +25,11 @@ A workflow containing common intentional errors for testing error detection.
 
 **Purpose:** Test error detection and reference file consultation
 
-**Errors included:**
-1. Typo in runner label (`ubuntu-lastest` instead of `ubuntu-latest`)
-2. Invalid CRON expression (day 8 doesn't exist)
-3. Invalid glob pattern (`**.js` instead of `**/*.js`)
-4. Undefined job dependency (`biuld` instead of `build`)
-5. Script injection vulnerability (untrusted input in script)
+**Errors included (4 total, all caught by actionlint):**
+1. Invalid CRON expression (day 8 doesn't exist) — `[events]`
+2. Typo in runner label (`ubuntu-lastest` instead of `ubuntu-latest`) — `[runner-label]`
+3. Script injection vulnerability (untrusted input in script) — `[expression]`
+4. Undefined job dependency (`biuld` instead of `build`) — `[job-needs]`
 
 **Usage:**
 ```bash

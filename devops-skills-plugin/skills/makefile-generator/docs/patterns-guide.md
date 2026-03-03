@@ -400,6 +400,8 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 # Source files
 SOURCES := $(shell find . -name '*.go' -not -path './vendor/*')
+# go.sum may not exist in modules with no external dependencies
+GO_SUM := $(wildcard go.sum)
 TARGET := $(PROJECT)
 
 .PHONY: all build install test clean fmt lint mod-tidy
@@ -408,7 +410,7 @@ all: build
 
 build: $(TARGET)
 
-$(TARGET): $(SOURCES) go.mod go.sum
+$(TARGET): $(SOURCES) go.mod $(GO_SUM)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $@ ./cmd/$(PROJECT)
 
 install: $(TARGET)

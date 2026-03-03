@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: nginx
+  # Stage 9 violation: :latest tag — should be pinned to a specific version
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Stage 9 violations intentionally omitted:
+#   podSecurityContext (runAsNonRoot, runAsUser, fsGroup)
+#   securityContext (allowPrivilegeEscalation, readOnlyRootFilesystem, capabilities.drop)
+#   resources (limits.cpu, limits.memory, requests.cpu, requests.memory)
+#   livenessProbe
+#   readinessProbe

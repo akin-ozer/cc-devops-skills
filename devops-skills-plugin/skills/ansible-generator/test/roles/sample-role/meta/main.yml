@@ -1,0 +1,31 @@
+---
+# Role: sample-role
+# Metadata
+
+galaxy_info:
+  role_name: sample-role
+  author: Your Name
+  description: Sample role demonstrating correct ansible-generator output patterns
+  license: MIT
+  min_ansible_version: "2.10"
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal    # 20.04
+        - jammy    # 22.04
+        - noble    # 24.04
+    - name: Debian
+      versions:
+        - bullseye # 11
+        - bookworm # 12
+    - name: EL
+      versions:
+        - 8
+        - 9
+
+  galaxy_tags:
+    - sample
+    - example
+
+dependencies: []
