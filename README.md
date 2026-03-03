@@ -1,124 +1,34 @@
-# DevOps Skills for Claude Code
-
-A comprehensive collection of Claude Code skills for DevOps engineers, providing generators and validators for infrastructure automation, CI/CD pipelines, container orchestration, and observability tooling.
+# DevOps skills for Claude Code and Codex
 
 [![Mentioned in Awesome Claude Code](https://awesome.re/mentioned-badge-flat.svg)](https://github.com/hesreallyhim/awesome-claude-code)
-## What are Claude Code Skills?
 
-Skills are reusable prompt templates that help Claude provide expert guidance on specific topics. When you invoke a skill, Claude assumes the role of an expert in that domain and provides detailed, actionable advice with automatic validation.
+A practical skill pack for DevOps work in Claude Code and Codex desktop.
 
-## Available Skills (31 skills)
+This repository ships **31 skills**:
+- **16 generators** for scaffolding production-ready configs
+- **14 validators** for linting, security checks, and dry-run validation
+- **1 debugger** (`k8s-debug`) for cluster troubleshooting
 
-### Ansible (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `ansible-generator` | Generate production-ready Ansible playbooks, roles, tasks, and inventory files following best practices |
-| `ansible-validator` | Validate, lint, and test Ansible playbooks and roles using ansible-lint and syntax checks |
+The goal is simple: make infra and pipeline work faster without skipping correctness checks.
 
-### Azure Pipelines (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `azure-pipelines-generator` | Generate best practice Azure DevOps Pipelines for CI/CD workflows |
-| `azure-pipelines-validator` | Validate, lint, and secure Azure DevOps Pipeline configurations |
+## quick install
 
-### Bash Scripts (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `bash-script-generator` | Generate best practice bash scripts with proper error handling and portability |
-| `bash-script-validator` | Validate, lint, and optimize bash and shell scripts for syntax and security |
-
-### Docker (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `dockerfile-generator` | Generate production-ready Dockerfiles with multi-stage builds and security hardening |
-| `dockerfile-validator` | Validate Dockerfiles using hadolint and Checkov for security and best practices |
-
-### Fluent Bit (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `fluentbit-generator` | Generate Fluent Bit configurations for log collection and forwarding pipelines |
-| `fluentbit-validator` | Validate Fluent Bit configurations for syntax, security, and best practices |
-
-### GitHub Actions (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `github-actions-generator` | Generate GitHub Actions workflows and custom actions (composite, Docker, JavaScript) |
-| `github-actions-validator` | Validate GitHub Actions workflows using actionlint and test with act |
-
-### GitLab CI (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `gitlab-ci-generator` | Generate GitLab CI/CD pipelines following best practices |
-| `gitlab-ci-validator` | Validate, lint, and secure GitLab CI/CD pipeline configurations |
-
-### Helm (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `helm-generator` | Generate Helm charts with proper templating, values, and chart structure |
-| `helm-validator` | Validate and lint Helm charts with automatic CRD documentation lookup |
-
-### Jenkins (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `jenkinsfile-generator` | Generate Jenkinsfiles for Declarative and Scripted pipeline syntaxes |
-| `jenkinsfile-validator` | Validate and lint Jenkinsfile pipelines for syntax and best practices |
-
-### Kubernetes (3 skills)
-| Skill | Description |
-|-------|-------------|
-| `k8s-generator` | Generate Kubernetes YAML manifests with automatic CRD documentation lookup |
-| `k8s-yaml-validator` | Validate Kubernetes manifests using kubeconform and yamllint |
-| `k8s-debug` | Debug Kubernetes cluster issues with systematic troubleshooting workflows |
-
-### Logging & Observability (3 skills)
-| Skill | Description |
-|-------|-------------|
-| `logql-generator` | Generate LogQL queries for Loki log analysis and alerting |
-| `loki-config-generator` | Generate Loki configuration files for log aggregation |
-| `promql-generator` | Generate PromQL queries for Prometheus monitoring and alerting |
-
-### Makefiles (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `makefile-generator` | Generate best practice Makefiles for build automation |
-| `makefile-validator` | Validate, lint, and optimize Makefiles for syntax and best practices |
-
-### PromQL (1 skill)
-| Skill | Description |
-|-------|-------------|
-| `promql-validator` | Validate PromQL queries for syntax and best practices |
-
-### Terraform (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `terraform-generator` | Generate Terraform configurations following best practices |
-| `terraform-validator` | Validate Terraform configurations with fmt, validate, and tflint |
-
-### Terragrunt (2 skills)
-| Skill | Description |
-|-------|-------------|
-| `terragrunt-generator` | Generate Terragrunt configurations for multi-environment deployments |
-| `terragrunt-validator` | Validate Terragrunt configurations and DRY patterns |
-
-## Installation
-
-### From Plugin Marketplace (Recommended)
-
-Add this repository as a Claude Code plugin marketplace and install the skills:
+### Claude Code plugin marketplace
 
 ```bash
-# Add the marketplace
 /plugin marketplace add akin-ozer/cc-devops-skills
-
-# Install the plugin
 /plugin install devops-skills@akin-ozer
 ```
 
-Or browse available plugins interactively with `/plugin`.
+### Codex desktop
 
-### Team Installation
+```bash
+$skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
+```
 
-To automatically install for your team, add to your project's `.claude/settings.json`:
+### team rollout
+
+Add this to project-level `.claude/settings.json`:
 
 ```json
 {
@@ -133,230 +43,163 @@ To automatically install for your team, add to your project's `.claude/settings.
 }
 ```
 
-When team members trust the repository folder, Claude Code automatically installs the marketplace.
+## how people use this repo
 
-Now available for Codex desktop 🎉
+Most workflows are generator + validator loops.
 
-```
-$skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
-```
-
-## How to Use
-
-### Invoking a Skill
-
-Simply ask Claude to use a skill by name:
-
-```
-Use the dockerfile-generator skill to create a Dockerfile for my Node.js application
+```mermaid
+flowchart LR
+  A["Ask for generator skill"] --> B["Create artifact"]
+  B --> C["Run matching validator"]
+  C --> D{"Passes checks?"}
+  D -- "No" --> E["Patch + re-run checks"]
+  D -- "Yes" --> F["Ship to PR/CI"]
 ```
 
-Or ask Claude to validate an existing file:
+Typical prompts:
 
-```
-Validate my terraform configuration using the terraform-validator skill
-```
-
-### Generator + Validator Workflow
-
-Most skills come in pairs (generator + validator). When you use a generator skill, it automatically validates the output:
-
-1. **Generator creates** the resource following best practices
-2. **Validator checks** for syntax errors, security issues, and best practices
-3. **Generator fixes** any validation errors
-4. **Final output** is production-ready and validated
-
-## Skill Categories
-
-### By Function
-- **Generators**: Create new resources from scratch following best practices
-- **Validators**: Validate, lint, and secure existing resources
-- **Debug/Troubleshooting**: Diagnose and fix issues in running systems
-
-### By Technology Area
-
-```
-Infrastructure as Code
-├── Terraform (generator, validator)
-├── Terragrunt (generator, validator)
-└── Ansible (generator, validator)
-
-Container & Orchestration
-├── Dockerfile (generator, validator)
-├── Kubernetes (generator, validator, debug)
-└── Helm (generator, validator)
-
-CI/CD Pipelines
-├── GitHub Actions (generator, validator)
-├── GitLab CI (generator, validator)
-├── Jenkins (generator, validator)
-└── Azure Pipelines (generator, validator)
-
-Observability
-├── PromQL (generator, validator)
-├── LogQL (generator)
-├── Fluent Bit (generator, validator)
-└── Loki Config (generator)
-
-Build & Scripting
-├── Makefile (generator, validator)
-└── Bash Script (generator, validator)
+```text
+Use terraform-generator to scaffold a reusable AWS VPC module with outputs and examples.
+Validate ./infra/vpc with terraform-validator and list only high-severity findings.
+Use k8s-debug to diagnose pods stuck in Pending in namespace payments.
 ```
 
-### By Experience Level
+If you used `k8s-generator` before, the correct skill name is `k8s-yaml-generator`.
 
-| Level | Skills |
-|-------|--------|
-| **Beginner-friendly** | dockerfile-generator, bash-script-generator, makefile-generator |
-| **Intermediate** | terraform-generator, ansible-generator, github-actions-generator, k8s-generator |
-| **Advanced** | helm-generator, terragrunt-generator, k8s-debug, promql-generator |
+## what makes these skills useful
 
-## Key Features
+- **Local-first validation pipelines**: many validator skills run shell/Python checks directly from their `scripts/` folders.
+- **Tool-aware workflows**: validators integrate with real tools like `terraform`, `tflint`, `checkov`, `helm`, `kubeconform`, `actionlint`, and `act`.
+- **CRD/provider documentation lookup**: Kubernetes/Helm/Terraform/Terragrunt/Ansible flows include explicit doc lookup paths for custom resources.
+- **Fallback behavior is defined**: when a tool is missing, many skills degrade gracefully and tell you exactly what was skipped.
 
-### Automatic Validation
-All generator skills automatically validate their output using the corresponding validator skill, ensuring production-ready results.
+## skill catalog (31)
 
-### Version-Aware Documentation
-Skills automatically fetch up-to-date documentation for:
-- Custom Resource Definitions (CRDs) in Kubernetes
-- Terraform providers and modules
-- Ansible collections and modules
-- CI/CD actions and plugins
+### infrastructure as code (6)
 
-### Best Practices Enforcement
-Each skill enforces domain-specific best practices:
-- Security hardening
-- Resource optimization
-- Naming conventions
-- Idempotency guarantees
+| Skill | Primary use |
+|---|---|
+| `ansible-generator` | Scaffold playbooks, roles, inventories, and vars |
+| `ansible-validator` | Validate/lint/security-check playbooks, roles, and inventories |
+| `terraform-generator` | Generate Terraform modules/resources/variables/outputs |
+| `terraform-validator` | Run Terraform validation, linting, security audit, and planning |
+| `terragrunt-generator` | Scaffold Terragrunt root/child/stack layouts |
+| `terragrunt-validator` | Validate Terragrunt HCL, stacks, and module wiring |
 
-## Skill Structure
+### ci/cd pipelines (8)
 
-Each skill in `.claude/skills/` contains:
+| Skill | Primary use |
+|---|---|
+| `azure-pipelines-generator` | Generate `azure-pipelines.yml` and reusable templates |
+| `azure-pipelines-validator` | Validate syntax/security/best-practice rules for Azure Pipelines |
+| `github-actions-generator` | Scaffold workflows and `action.yml` actions |
+| `github-actions-validator` | Validate and test workflows under `.github/workflows` |
+| `gitlab-ci-generator` | Generate `.gitlab-ci.yml` pipelines and job stages |
+| `gitlab-ci-validator` | Validate and secure GitLab CI configs |
+| `jenkinsfile-generator` | Generate declarative/scripted Jenkinsfiles |
+| `jenkinsfile-validator` | Validate Jenkinsfiles and shared-library pipeline code |
 
-```
-skill-name/
-├── SKILL.md           # Main skill prompt with instructions
-├── references/        # Best practices and troubleshooting guides
-├── scripts/           # Helper scripts for validation
-├── assets/            # Templates and configuration files
-└── test/              # Test files for validation
-```
+### containers and kubernetes (7)
 
-## Contributing
+| Skill | Primary use |
+|---|---|
+| `dockerfile-generator` | Create production-friendly Dockerfiles |
+| `dockerfile-validator` | Lint and security-check Dockerfiles |
+| `helm-generator` | Scaffold Helm charts, values, and templates |
+| `helm-validator` | Validate chart structure, templates, schemas, and CRD usage |
+| `k8s-yaml-generator` | Generate Kubernetes manifests (including CRDs) |
+| `k8s-yaml-validator` | Validate/lint/dry-run Kubernetes YAML |
+| `k8s-debug` | Troubleshoot runtime cluster failures |
 
-These skills are designed to evolve with DevOps best practices. Contributions welcome:
-- Add new skills for emerging technologies
-- Update existing skills with new best practices
-- Improve validation scripts and references
-- Add test cases for better coverage
+### observability and logging (6)
 
-## Best Practices for Using Skills
+| Skill | Primary use |
+|---|---|
+| `fluentbit-generator` | Generate Fluent Bit pipelines (`INPUT`/`FILTER`/`OUTPUT`) |
+| `fluentbit-validator` | Validate Fluent Bit config quality and safety |
+| `logql-generator` | Build LogQL queries and alert expressions |
+| `loki-config-generator` | Generate Loki server configs for common deployment modes |
+| `promql-generator` | Generate PromQL queries, recording rules, and alerts |
+| `promql-validator` | Validate and optimize PromQL queries/alerts |
 
-1. **Be specific**: Provide context about your environment, requirements, and constraints
-2. **Share files**: Upload relevant configuration files for Claude to review
-3. **Ask follow-ups**: Skills are starting points - ask for clarification or alternatives
-4. **Combine skills**: Use generators and validators together for best results
-5. **Iterate**: Refine the output by providing feedback
+### scripting and build (4)
 
-## Requirements
+| Skill | Primary use |
+|---|---|
+| `bash-script-generator` | Create shell scripts and CLI helpers |
+| `bash-script-validator` | Validate shell scripts with ShellCheck-oriented checks |
+| `makefile-generator` | Generate Makefiles with reusable targets |
+| `makefile-validator` | Validate Makefile correctness and anti-patterns |
 
-### MCP Servers (Recommended)
+## validator internals (examples)
 
-Skills leverage MCP (Model Context Protocol) servers for enhanced functionality:
+These are real execution patterns inside the skill instructions and scripts:
 
-| MCP Server | Purpose | Used By |
-|------------|---------|---------|
-| **Context7** | Fetch up-to-date documentation for CRDs, Terraform providers, Ansible collections | k8s-generator, helm-generator, terraform-generator, ansible-generator |
+| Skill | Validation pattern |
+|---|---|
+| `terraform-validator` | `terraform fmt` -> `tflint` -> `terraform validate` -> Checkov -> optional `terraform plan` |
+| `k8s-yaml-validator` | CRD detection -> `kubeconform` schema checks -> `kubectl --dry-run` flow |
+| `helm-validator` | `helm lint` -> `helm template` -> `kubeconform` -> optional cluster dry-run |
+| `github-actions-validator` | `actionlint` static checks + `act` runtime workflow tests |
+| `gitlab-ci-validator` | syntax + best-practice + security checks with strict/test-only modes |
+| `ansible-validator` | syntax/lint/check-mode + role tests + security checks |
+| `dockerfile-validator` | scripted lint/security path with fallback scanning modes |
 
-Context7 enables skills to automatically look up version-aware documentation for custom resources, ensuring generated configurations are accurate and up-to-date.
+## requirements
 
-### CLI Tools by Skill
+You do not need every tool for every skill. Install the tools for the domains you use.
 
-#### Infrastructure as Code
+### baseline
 
-| Tool | Skills | Installation |
-|------|--------|--------------|
-| `terraform` | terraform-generator, terraform-validator | `brew install terraform` |
-| `tflint` | terraform-validator | `brew install tflint` |
-| `terragrunt` | terragrunt-generator, terragrunt-validator | `brew install terragrunt` |
-| `checkov` | terraform-validator, dockerfile-validator | `pip install checkov` (Python 3.9+) |
-| `ansible-lint` | ansible-generator, ansible-validator | `pip install ansible-lint` |
-| `ansible` | ansible-validator | `pip install ansible` |
+- `bash`
+- `python3` (3.8+ recommended; 3.9+ for some security tooling)
 
-#### Container & Kubernetes
+### common toolchain by domain
 
-| Tool | Skills | Installation |
-|------|--------|--------------|
-| `hadolint` | dockerfile-validator | `brew install hadolint` |
-| `helm` | helm-generator, helm-validator | `brew install helm` (v3+) |
-| `kubeconform` | k8s-yaml-validator, helm-validator | `brew install kubeconform` |
-| `kubectl` | k8s-debug, k8s-yaml-validator | `brew install kubectl` |
-| `yamllint` | k8s-yaml-validator, helm-validator, ansible-validator | `pip install yamllint` |
+| Domain | Common tools |
+|---|---|
+| Terraform/Terragrunt | `terraform`, `tflint`, `terragrunt`, `checkov` |
+| Kubernetes/Helm | `kubectl`, `kubeconform`, `helm`, `yamllint` |
+| Docker | `hadolint` |
+| GitHub Actions | `actionlint`, `act` |
+| Shell scripting | `shellcheck` |
+| Prometheus | `promtool` |
 
-#### CI/CD Pipelines
-
-| Tool | Skills | Installation |
-|------|--------|--------------|
-| `actionlint` | github-actions-validator | `brew install actionlint` |
-| `act` | github-actions-validator | `brew install act` |
-
-#### Scripting & Build
-
-| Tool | Skills | Installation |
-|------|--------|--------------|
-| `shellcheck` | bash-script-validator | `brew install shellcheck` |
-| `make` | makefile-validator | Usually pre-installed |
-
-#### Observability
-
-| Tool | Skills | Installation |
-|------|--------|--------------|
-| `promtool` | promql-validator | Part of Prometheus: `brew install prometheus` |
-| `fluent-bit` | fluentbit-validator | `brew install fluent-bit` (optional, for dry-run) |
-
-### Optional Tools
-
-These tools provide additional functionality but are not strictly required:
-
-| Tool | Purpose | Installation |
-|------|---------|--------------|
-| `yq` | YAML manipulation and querying | `brew install yq` |
-| `helm-diff` | Preview Helm upgrade changes | `helm plugin install https://github.com/databus23/helm-diff` |
-| `molecule` | Ansible role testing | `pip install molecule` |
-| `docker` | Required for `act` to test GitHub Actions locally | `brew install docker` |
-
-### Python Requirements
-
-Many validation scripts require Python:
-- **Python 3.8+** - Required for most validation scripts
-- **Python 3.9+** - Required for Checkov
-
-### Quick Install (macOS with Homebrew)
+### quick install (macOS example)
 
 ```bash
-# Core tools
-brew install terraform tflint terragrunt helm kubeconform kubectl yamllint
-brew install hadolint actionlint act shellcheck prometheus
-
-# Python tools (use pipx for isolation)
-pipx install ansible-lint checkov yamllint
-
-# Optional
-brew install yq fluent-bit
+brew install terraform tflint terragrunt helm kubeconform kubectl hadolint
+brew install actionlint act shellcheck prometheus yq fluent-bit
+pipx install ansible ansible-lint checkov yamllint molecule
 helm plugin install https://github.com/databus23/helm-diff
 ```
 
-### Quick Install (Linux)
+## repo layout
 
-```bash
-# Python tools
-pip install ansible-lint checkov yamllint
-
-# Other tools - see individual tool documentation for Linux installation
-# Most tools provide binary releases on GitHub
+```text
+cc-devops-skills/
+├── README.md
+├── LICENSE
+└── devops-skills-plugin/
+    ├── .claude-plugin/plugin.json
+    └── skills/
+        └── <skill-name>/
+            ├── SKILL.md
+            ├── scripts/
+            ├── references/
+            ├── assets/
+            ├── examples/
+            └── tests/ (or test/)
 ```
 
-## License
+## contributing
 
-Apache 2.0
+Contributions are welcome for:
+- new skills in adjacent DevOps domains
+- better validator coverage and safer defaults
+- test fixtures and regression tests
+- improved docs/examples for real production scenarios
+
+## license
+
+Apache-2.0
