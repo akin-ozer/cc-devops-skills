@@ -60,8 +60,12 @@ extract_inputs() {
     }
     in_inputs && /^outputs:[[:space:]]*$/ {
       emit_record()
+      key = ""
+      required = ""
+      default_value = ""
+      has_default = 0
       in_inputs = 0
-      exit
+      next
     }
     !in_inputs {
       next
@@ -93,7 +97,7 @@ extract_inputs() {
     END {
       emit_record()
     }
-  ' "$file_path" | LC_ALL=C sort
+  ' "$file_path" | LC_ALL=C sort -u
 }
 
 extract_outputs() {
@@ -121,7 +125,8 @@ extract_outputs() {
 extract_inputs "$upstream_action" > "$upstream_inputs"
 extract_inputs "$LOCAL_ACTION_PATH" > "$local_inputs"
 
-grep -E -v '^(inject_devops_skills|devops_marketplace_url|devops_plugin_name)\t' "$local_inputs" > "$local_core_inputs" || true
+awk -F'\t' '$1 != "inject_devops_skills" && $1 != "devops_marketplace_url" && $1 != "devops_plugin_name"' \
+  "$local_inputs" > "$local_core_inputs"
 
 extract_outputs "$upstream_action" > "$upstream_outputs"
 extract_outputs "$LOCAL_ACTION_PATH" > "$local_outputs"
