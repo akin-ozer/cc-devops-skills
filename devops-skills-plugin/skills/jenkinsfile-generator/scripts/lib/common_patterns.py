@@ -2,7 +2,10 @@
 Common Jenkins pipeline patterns and templates
 """
 
-from syntax_helpers import GroovySyntax, ValidationHelpers
+try:
+    from .syntax_helpers import GroovySyntax, ValidationHelpers
+except ImportError:
+    from syntax_helpers import GroovySyntax, ValidationHelpers
 
 
 class PipelinePatterns:

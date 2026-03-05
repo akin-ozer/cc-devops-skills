@@ -10,7 +10,7 @@ description: Generate/create Loki configs — ingester, querier, compactor, rule
 Generate production-ready Grafana Loki server configurations with best practices. Supports monolithic, simple scalable, and microservices deployment modes with S3, GCS, Azure, or filesystem storage.
 
 > **Current Stable:** Loki 3.6.2 (November 2025)
-> **Important:** Promtail deprecated in 3.4 - use [Grafana Alloy](https://grafana.com/docs/alloy/latest/) instead. See `examples/grafana-alloy.yaml` for log collection configuration.
+> **Important:** Promtail deprecated in 3.4 - use [Grafana Alloy](https://grafana.com/docs/alloy/latest/) instead. See `examples/grafana-alloy.alloy` for the Alloy pipeline and `examples/grafana-alloy-daemonset.yaml` for the Kubernetes deployment.
 
 ## When to Use
 
@@ -487,7 +487,7 @@ Import official Loki dashboards:
 
 ### Basic Alloy Configuration
 
-See `examples/grafana-alloy.yaml` for complete configuration.
+See `examples/grafana-alloy.alloy` for the Alloy pipeline and `examples/grafana-alloy-daemonset.yaml` for the Kubernetes deployment.
 
 ```alloy
 // Kubernetes log discovery
@@ -547,7 +547,8 @@ See `examples/` directory for full configurations:
 - `microservices-s3.yaml` - Large-scale distributed
 - `multi-tenant.yaml` - Multi-tenant with per-tenant limits
 - `production-tls.yaml` - TLS-enabled production config
-- `grafana-alloy.yaml` - Log collection with Alloy
+- `grafana-alloy.alloy` - Log collection pipeline with Alloy
+- `grafana-alloy-daemonset.yaml` - Kubernetes DaemonSet for Alloy
 - `kubernetes-helm-values.yaml` - Helm chart values
 
 **Minimal Monolithic:**

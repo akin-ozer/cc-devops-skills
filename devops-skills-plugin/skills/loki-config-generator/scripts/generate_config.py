@@ -1158,7 +1158,8 @@ def main():
             print(f"\nLog Collection:")
             print(f"   Promtail is deprecated (support ends Feb 2026).")
             print(f"   Use Grafana Alloy for log collection: https://grafana.com/docs/alloy/latest/")
-            print(f"   See examples/grafana-alloy.yaml for Kubernetes DaemonSet configuration.")
+            print(f"   See examples/grafana-alloy.alloy for the Alloy pipeline.")
+            print(f"   See examples/grafana-alloy-daemonset.yaml for the Kubernetes DaemonSet.")
 
     except Exception as e:
         print(f"Error generating configuration: {e}", file=sys.stderr)

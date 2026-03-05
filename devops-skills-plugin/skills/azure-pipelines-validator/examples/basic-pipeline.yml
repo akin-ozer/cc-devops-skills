@@ -13,6 +13,7 @@ pool:
 variables:
   buildConfiguration: 'Release'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  NUGET_PACKAGES: '$(Pipeline.Workspace)/.nuget/packages'
 
 stages:
   - stage: Build
@@ -26,11 +27,21 @@ stages:
             inputs:
               version: '8.x'
 
+          - task: Cache@2
+            displayName: 'Cache NuGet packages'
+            inputs:
+              key: 'nuget | "$(Agent.OS)" | **/*.csproj'
+              restoreKeys: |
+                nuget | "$(Agent.OS)"
+              path: '$(NUGET_PACKAGES)'
+
           - task: DotNetCoreCLI@2
             displayName: 'Restore Dependencies'
             inputs:
               command: 'restore'
               projects: '**/*.csproj'
+            env:
+              NUGET_PACKAGES: '$(NUGET_PACKAGES)'
 
           - task: DotNetCoreCLI@2
             displayName: 'Build Project'
@@ -38,6 +49,8 @@ stages:
               command: 'build'
               projects: '**/*.csproj'
               arguments: '--configuration $(buildConfiguration)'
+            env:
+              NUGET_PACKAGES: '$(NUGET_PACKAGES)'
 
           - task: PublishPipelineArtifact@1
             displayName: 'Publish Build Artifacts'
@@ -49,15 +62,25 @@ stages:
     displayName: 'Test Stage'
     dependsOn: Build
     jobs:
-      - job: TestJob
+      - job: VerificationJob
         displayName: 'Run Tests'
         steps:
+          - task: Cache@2
+            displayName: 'Restore NuGet cache'
+            inputs:
+              key: 'nuget | "$(Agent.OS)" | **/*.csproj'
+              restoreKeys: |
+                nuget | "$(Agent.OS)"
+              path: '$(NUGET_PACKAGES)'
+
           - task: DotNetCoreCLI@2
             displayName: 'Run Unit Tests'
             inputs:
               command: 'test'
               projects: '**/*Tests.csproj'
               arguments: '--configuration $(buildConfiguration) --collect:"XPlat Code Coverage"'
+            env:
+              NUGET_PACKAGES: '$(NUGET_PACKAGES)'
 
           - task: PublishCodeCoverageResults@2
             displayName: 'Publish Code Coverage'

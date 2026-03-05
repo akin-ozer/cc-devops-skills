@@ -56,6 +56,27 @@ class ValidatorTestCase(unittest.TestCase):
         Path(config_path).unlink(missing_ok=True)
         return proc, summary
 
+    def run_validator_file(self, config_path, check="all", env=None):
+        """Run validator against a checked-in config file and return (proc, summary)."""
+        cmd = [
+            sys.executable,
+            str(VALIDATOR),
+            "--file",
+            str(config_path),
+            "--check",
+            check,
+            "--json",
+        ]
+
+        run_env = None
+        if env is not None:
+            run_env = os.environ.copy()
+            run_env.update(env)
+
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=run_env)
+        summary = json.loads(proc.stdout)
+        return proc, summary
+
     def test_single_space_and_equals_delimiters_are_supported(self):
         proc, summary = self.run_validator(
             """
@@ -466,6 +487,24 @@ class ValidatorTestCase(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Recommendation:", proc.stdout)
         self.assertNotIn("Info", proc.stdout)
+
+    def test_valid_basic_sample_is_clean_static_baseline(self):
+        """The shipped valid sample should only emit the environment-driven dry-run recommendation."""
+        proc, summary = self.run_validator_file(
+            SKILL_DIR / "tests" / "valid-basic.conf",
+            check="all",
+            env={"PATH": "/nonexistent"},
+        )
+
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(summary["errors"], [])
+        self.assertEqual(summary["warnings"], [])
+        self.assertEqual(
+            summary["recommendations"],
+            [
+                "Dry-run skipped because fluent-bit binary is not available in PATH; run dry-run in CI or a Fluent Bit runtime image."
+            ],
+        )
 
 
     # -------------------------------------------------------------------------

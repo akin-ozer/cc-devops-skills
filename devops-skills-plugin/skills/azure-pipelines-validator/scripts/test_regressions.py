@@ -66,6 +66,16 @@ class TestStepWalkerCoverage(unittest.TestCase):
 
 
 class TestScannerRegressions(unittest.TestCase):
+    def test_basic_example_is_clean_best_practices_baseline(self):
+        pipeline = SCRIPT_DIR.parent / "examples" / "basic-pipeline.yml"
+        issues = BestPracticesChecker(str(pipeline)).check()
+
+        self.assertEqual(
+            [],
+            issues,
+            f"Expected basic example to be clean, got {[issue.rule for issue in issues]}",
+        )
+
     def test_security_detects_dangerous_script_in_conditional_block(self):
         pipeline = _write_pipeline(
             """

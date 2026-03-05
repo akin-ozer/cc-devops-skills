@@ -22,6 +22,7 @@ from yaml.constructor import ConstructorError
 
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
+EXAMPLES_DIR = SCRIPT_DIR.parent / "examples"
 
 from generate_config import LokiConfigGenerator  # noqa: E402
 
@@ -86,6 +87,21 @@ class TestTempOutputPathHelper(unittest.TestCase):
             self.assertTrue(path.exists())
 
         self.assertFalse(temp_dir.exists())
+
+
+class TestExampleArtifacts(unittest.TestCase):
+    """Repository examples should use the correct file type for Alloy."""
+
+    def test_alloy_example_uses_alloy_extension(self):
+        self.assertTrue((EXAMPLES_DIR / "grafana-alloy.alloy").is_file())
+        self.assertFalse((EXAMPLES_DIR / "grafana-alloy.yaml").exists())
+
+    def test_alloy_daemonset_yaml_parses(self):
+        manifest = EXAMPLES_DIR / "grafana-alloy-daemonset.yaml"
+        docs = list(yaml.safe_load_all(manifest.read_text()))
+        self.assertEqual(len(docs), 6)
+        self.assertEqual(docs[0]["kind"], "Namespace")
+        self.assertEqual(docs[-1]["kind"], "DaemonSet")
 
 
 class TestAllCombinationsGenerate(unittest.TestCase):
