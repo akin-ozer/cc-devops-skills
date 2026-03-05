@@ -1,33 +1,9 @@
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~
-
 # Rendered templates output
 /rendered/
 rendered-*.yaml
 
-# Python artifacts
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-*.egg-info/
-
 # Test artifacts
 /tmp/
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE files
-.idea/
-.vscode/
-*.sublime-*
 
 # Helm artifacts
 *.tgz

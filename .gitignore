@@ -1,5 +1,50 @@
-### Example user template template
-### Example user template
+### Repository-wide ignore rules
 
-# IntelliJ project files
-.idea
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.iml
+*.sublime-*
+*.swp
+*.swo
+*~
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# General temporary and generated artifacts
+*.tmp
+*.temp
+*.log
+*.bak
+*.orig
+.cache/
+build/
+dist/
+coverage/
+test-output/
+test-results/
