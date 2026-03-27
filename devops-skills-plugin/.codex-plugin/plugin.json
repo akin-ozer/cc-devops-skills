@@ -1,0 +1,49 @@
+{
+  "name": "devops-skills",
+  "version": "1.0.0",
+  "description": "Set of DevOps skills for Claude Code and Codex.",
+  "author": {
+    "name": "Akin Ozer",
+    "email": "[TODO: author@example.com]",
+    "url": "https://github.com/akin-ozer"
+  },
+  "homepage": "https://github.com/akin-ozer/cc-devops-skills",
+  "repository": "https://github.com/akin-ozer/cc-devops-skills.git",
+  "license": "Apache-2.0",
+  "keywords": [
+    "devops",
+    "skills",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "hooks": "[TODO: ./hooks.json]",
+  "mcpServers": "[TODO: ./.mcp.json]",
+  "apps": "[TODO: ./.app.json]",
+  "interface": {
+    "displayName": "DevOps Skills",
+    "shortDescription": "DevOps skill pack for infrastructure and pipeline work.",
+    "longDescription": "A practical skill pack for DevOps work in Claude Code and Codex desktop, including generators, validators, and Kubernetes debugging workflows.",
+    "developerName": "Akin Ozer",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/akin-ozer/cc-devops-skills",
+    "privacyPolicyURL": "[TODO: https://example.com/privacy]",
+    "termsOfServiceURL": "[TODO: https://example.com/terms]",
+    "defaultPrompt": [
+      "Generate a secure GitHub Actions workflow.",
+      "Validate this Terraform module for risks.",
+      "Help debug a failing Kubernetes rollout."
+    ],
+    "brandColor": "[TODO: #3B82F6]",
+    "composerIcon": "[TODO: ./assets/icon.png]",
+    "logo": "[TODO: ./assets/logo.png]",
+    "screenshots": [
+      "[TODO: ./assets/screenshot1.png]",
+      "[TODO: ./assets/screenshot2.png]",
+      "[TODO: ./assets/screenshot3.png]"
+    ]
+  }
+}

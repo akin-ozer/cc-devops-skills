@@ -22,9 +22,50 @@ The goal is simple: make infra and pipeline work faster without skipping correct
 
 ### Codex Desktop
 
+Skills only:
+
 ```bash
 $skill-installer install https://github.com/akin-ozer/cc-devops-skills/tree/main/devops-skills-plugin/skills
 ```
+
+Manual plugin install:
+
+1. Clone the repo and link the packaged plugin into your local Codex plugin directory:
+
+```bash
+git clone https://github.com/akin-ozer/cc-devops-skills.git ~/.codex/devops-skills
+mkdir -p ~/plugins ~/.agents/plugins
+ln -s ~/.codex/devops-skills/devops-skills-plugin ~/plugins/devops-skills
+```
+
+2. Create or update `~/.agents/plugins/marketplace.json` so Codex can discover the plugin:
+
+```json
+{
+  "name": "local-plugins",
+  "interface": {
+    "displayName": "Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "devops-skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/devops-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
+```
+
+If you already use `~/.agents/plugins/marketplace.json`, append the `devops-skills` entry instead of replacing the file.
+
+The packaged Codex manifest lives at `devops-skills-plugin/.codex-plugin/plugin.json`. It exists alongside the Claude manifest and points at the same `skills/` directory.
 
 ### Team Rollout
 
@@ -230,6 +271,7 @@ cc-devops-skills/
 │   └── compat-check.yml
 └── devops-skills-plugin/
     ├── .claude-plugin/plugin.json
+    ├── .codex-plugin/plugin.json
     └── skills/
         └── <skill-name>/
             ├── SKILL.md
