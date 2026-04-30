@@ -2,6 +2,15 @@
 
 This document summarizes official Docker best practices based on current recommendations from Docker documentation and industry standards.
 
+## Contents
+
+- [General Principles](#general-principles) — ephemeral containers, build context, multi-stage, single concern
+- [Dockerfile Instructions Best Practices](#dockerfile-instructions-best-practices) — FROM, RUN, COPY/ADD, WORKDIR, USER, CMD/ENTRYPOINT
+- [Build Optimization](#build-optimization) — instruction order, BuildKit cache and secret mounts
+- [Security Best Practices](#security-best-practices) — non-root user, secrets, minimal surface
+- [Common Anti-Patterns](#common-anti-patterns) — missing cleanup, bloated layers
+- [Resources](#resources)
+
 ## General Principles
 
 ### 1. Create Ephemeral Containers

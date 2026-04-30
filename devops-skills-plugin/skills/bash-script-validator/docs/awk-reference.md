@@ -1,5 +1,22 @@
 # GNU AWK (gawk) Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Basic Syntax](#basic-syntax)
+- [Structure](#structure)
+- [Built-in Variables](#built-in-variables)
+- [Common Usage Patterns](#common-usage-patterns)
+- [Arrays](#arrays)
+- [Functions](#functions)
+- [Practical Examples for Shell Scripts](#practical-examples-for-shell-scripts)
+- [Multi-line AWK Scripts](#multi-line-awk-scripts)
+- [Common Patterns](#common-patterns)
+- [Performance Tips](#performance-tips)
+- [Common Pitfalls in Shell Scripts](#common-pitfalls-in-shell-scripts)
+- [Combining with Other Tools](#combining-with-other-tools)
+- [Resources](#resources)
+
 ## Overview
 
 AWK is a powerful text processing language designed for pattern scanning and processing. It's particularly useful for field-based data manipulation.

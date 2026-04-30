@@ -1,5 +1,23 @@
 # ShellCheck Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Basic Usage](#basic-usage)
+- [Severity Levels](#severity-levels)
+- [Common Error Codes](#common-error-codes)
+- [Disabling Checks](#disabling-checks)
+- [ShellCheck Directives](#shellcheck-directives)
+- [Configuration File](#configuration-file)
+- [Integration with CI/CD](#integration-with-cicd)
+- [Common Patterns and Best Practices](#common-patterns-and-best-practices)
+- [Advanced Features](#advanced-features)
+- [Exit Codes](#exit-codes)
+- [Editor Integration](#editor-integration)
+- [Resources](#resources)
+- [Quick Reference Table](#quick-reference-table)
+
 ## Overview
 
 ShellCheck is a static analysis tool for shell scripts that provides warnings and suggestions for syntax and semantic issues to improve script quality and prevent errors.

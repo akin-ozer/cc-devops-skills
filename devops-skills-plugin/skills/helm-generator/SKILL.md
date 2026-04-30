@@ -1,6 +1,6 @@
 ---
 name: helm-generator
-description: Create, scaffold, or generate Helm charts, Chart.yaml, values.yaml, templates, helpers.
+description: Use when scaffolding new Helm charts or converting Kubernetes manifests to Helm. Generates Chart.yaml, values.yaml, _helpers.tpl, and resource templates (Deployment/StatefulSet/DaemonSet/Service/Ingress/HPA). Triggers — 'create Helm chart', 'scaffold chart', 'generate Helm templates', 'convert manifests to Helm', 'package as Helm chart'. Not for linting/validating existing charts (use helm-validator) or raw K8s YAML (use k8s-yaml-generator).
 ---
 
 # Helm Chart Generator
@@ -91,6 +91,7 @@ Options:
 - `--with-ingress` - Include ingress template
 - `--with-hpa` - Include HPA template
 - `--force` - Overwrite existing chart without prompting
+- `--dry-run` - Print planned file tree and Chart.yaml/values.yaml previews without writing or removing anything
 
 Image parsing behavior:
 - `--image nginx:1.27` -> repository `nginx`, tag `1.27`
@@ -99,7 +100,7 @@ Image parsing behavior:
 - `--tag` cannot be combined with digest image references
 
 Idempotency and overwrite behavior:
-- `generate_chart_structure.sh`: prompts before overwrite; `--force` overwrites non-interactively.
+- `generate_chart_structure.sh`: prompts before overwrite; `--force` overwrites non-interactively; `--dry-run` previews the plan without writing or removing files.
 - `generate_standard_helpers.sh`: prompts before replacing `templates/_helpers.tpl`; `--force` bypasses prompt.
 
 Expected scaffold shape:
@@ -153,23 +154,7 @@ Resource coverage from `references/resource_templates.md`:
 - Network: NetworkPolicy
 - Autoscaling: HPA, PodDisruptionBudget
 
-Required template patterns:
-```yaml
-metadata:
-  name: {{ include "mychart.fullname" . }}
-  labels: {{- include "mychart.labels" . | nindent 4 }}
-
-{{- with .Values.nodeSelector }}
-nodeSelector: {{- toYaml . | nindent 2 }}
-{{- end }}
-
-annotations:
-  {{- if and .Values.configMap .Values.configMap.enabled }}
-  checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-  {{- end }}
-```
-
-Checksum annotations are required for workloads, but must be conditional and only reference generated templates (`configmap.yaml`, `secret.yaml`).
+Required template patterns: see `references/resource_templates.md` -> "Required Template Patterns".
 
 ### Stage 6: Create values.yaml
 
@@ -184,6 +169,8 @@ Structure guidelines:
 See `assets/values-schema-template.json` for JSON Schema validation.
 
 ### Stage 7: Validate
+
+Prerequisites: Requires helm 3.x; tests additionally require python3.
 
 Preferred path: run the `helm-validator` skill.
 
@@ -202,17 +189,7 @@ Re-run validation after any fixes.
 
 ## Template Functions Quick Reference
 
-See `references/helm_template_functions.md` for complete guide.
-
-| Function | Purpose | Example |
-|----------|---------|---------|
-| `required` | Enforce required values | `{{ required "msg" .Values.x }}` |
-| `default` | Fallback value | `{{ .Values.x \| default 1 }}` |
-| `quote` | Quote strings | `{{ .Values.x \| quote }}` |
-| `include` | Use helpers | `{{ include "name" . \| nindent 4 }}` |
-| `toYaml` | Convert to YAML | `{{ toYaml .Values.x \| nindent 2 }}` |
-| `tpl` | Render as template | `{{ tpl .Values.config . }}` |
-| `nindent` | Newline + indent | `{{- include "x" . \| nindent 4 }}` |
+See `references/helm_template_functions.md` -> "Quick Reference" for the function table and the rest of the guide.
 
 ## Working with CRDs
 
@@ -241,6 +218,15 @@ Key points:
 | Port mismatch (Service vs container) | Set both `service.port` and `service.targetPort`, then re-run `helm template test <chart-dir>` |
 | CRD validation fails | Verify apiVersion/spec fields with Context7 or operator docs, then re-render |
 | Script argument failures | Run `bash scripts/generate_chart_structure.sh --help` and pass required values for option flags |
+
+### Recovery
+
+If you scaffolded over the wrong directory (the script's overwrite path runs `rm -rf "$CHART_DIR"` after `--force` or interactive confirmation):
+
+- If the target was tracked in git: `git status` to see the deletions, then `git restore <paths>` (or `git checkout -- <paths>`) to bring the prior contents back. Untracked files removed by `rm -rf` cannot be recovered with git.
+- If you have a backup (snapshot, IDE local history, filesystem backup), restore from it before re-running the script.
+- Before re-running, use `--dry-run` to confirm the target path and planned tree, then re-run without `--dry-run` once correct.
+- To avoid the failure mode in the future: run `--dry-run` first against any path that may already contain real chart content; never pass `--force` until the dry-run output matches your intent.
 
 ## Example Flows
 

@@ -1,8 +1,5 @@
 # GitHub Actions Best Practices
 
-**Last Updated:** November 2025
-**Based on:** Official GitHub Actions documentation and Context7 verified sources
-
 ## Table of Contents
 1. [Security Best Practices](#security-best-practices)
 2. [Performance Optimization](#performance-optimization)
@@ -753,3 +750,12 @@ jobs:
 5. Follow conventions: Standard naming, proper versioning, community practices
 
 Always validate workflows with the github-actions-validator skill before deploying.
+
+---
+
+## Version notes
+
+Verify against current upstream sources before relying on dated material below.
+
+- Last updated: November 2025
+- Based on: Official GitHub Actions documentation and Context7 verified sources

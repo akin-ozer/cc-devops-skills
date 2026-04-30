@@ -130,6 +130,10 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
 
     for container in containers:
         print(f"\n### Container: {container} ###")
+        # --tail=100: enough lines to capture a typical crash trace + startup banner
+        # without flooding the report on chatty workloads.
+        # timeout=45: log streams from large pods can stall briefly on the API server;
+        # 45s tolerates that without hanging an interactive diagnostic run.
         stdout, stderr, _ = run_kubectl(
             ["logs", pod_name, "-n", namespace, "-c", container, "--tail=100"],
             timeout=45,
@@ -137,6 +141,9 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
         print_output(stdout, stderr)
 
         print(f"\n### Previous logs for: {container} ###")
+        # --tail=50: previous-container logs are post-mortem only; 50 lines is
+        # enough for the final stack trace without doubling report size.
+        # timeout=45: same rationale as the live-log fetch above.
         stdout, stderr, code = run_kubectl(
             ["logs", pod_name, "-n", namespace, "-c", container, "--previous", "--tail=50"],
             timeout=45,
@@ -168,6 +175,9 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
             print_section("INIT CONTAINER LOGS")
             for container in init_containers:
                 print(f"\n### Init Container: {container} ###")
+                # --tail=100: matches main-container budget; init failures often
+                # need the full startup trace to identify the failing step.
+                # timeout=45: matches main-container budget for the same reason.
                 stdout, stderr, _ = run_kubectl(
                     ["logs", pod_name, "-n", namespace, "-c", container, "--tail=100"],
                     timeout=45,
@@ -175,6 +185,8 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
                 print_output(stdout, stderr)
 
                 print(f"\n### Previous init container logs for: {container} ###")
+                # --tail=50: post-mortem-only; smaller budget keeps the report lean.
+                # timeout=45: same rationale as the live init-log fetch above.
                 stdout, stderr, code = run_kubectl(
                     ["logs", pod_name, "-n", namespace, "-c", container, "--previous", "--tail=50"],
                     timeout=45,
@@ -192,6 +204,8 @@ def get_pod_info(pod_name: str, namespace: str = "default") -> None:
 
     # Resource usage
     print_section("RESOURCE USAGE")
+    # timeout=20: metrics-server is either reachable in seconds or unavailable;
+    # a short budget surfaces the missing-metrics case fast instead of blocking.
     stdout, stderr, code = run_kubectl(
         ["top", "pod", pod_name, "-n", namespace, "--containers"],
         timeout=20,

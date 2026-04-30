@@ -372,6 +372,7 @@ run_best_practices() {
 
     # Check RUN command efficiency (using normalized content for accurate counting)
     RUN_COUNT=$(count_instruction "$normalized_content" "RUN")
+    # Threshold of 5 follows hadolint DL3059 ("Multiple consecutive RUN instructions") guidance: each RUN adds a layer, so >5 is a strong signal of unmerged commands.
     if [ "$RUN_COUNT" -gt "5" ]; then
         echo -e "${PURPLE}[INFO] High number of RUN commands ($RUN_COUNT)${NC}"
         echo "  → Consider combining related commands to reduce layers"
@@ -551,6 +552,7 @@ run_optimization() {
 
     echo -e "${BLUE}Layer Optimization:${NC}"
     echo "  RUN commands: $RUN_COUNT"
+    # Threshold of 7 is the stricter optimization tier above hadolint DL3059's general RUN-merge recommendation: at this point a single combined RUN almost always reduces image size meaningfully.
     if [ "$RUN_COUNT" -gt "7" ]; then
         echo -e "  ${PURPLE}[OPTIMIZATION] Consider combining RUN commands${NC}"
         echo "    → Reduces layer count and image size"

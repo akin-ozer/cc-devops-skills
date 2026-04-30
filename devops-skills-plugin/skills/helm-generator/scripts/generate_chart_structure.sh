@@ -5,6 +5,7 @@
 #
 # Options:
 #   --force             Overwrite existing chart without prompting
+#   --dry-run           Print planned tree and Chart.yaml/values.yaml previews without writing
 #   --image <repo>      Set image repository (default: nginx; supports tag or digest refs)
 #   --tag <tag>         Set image tag (default: uses chart appVersion)
 #   --port <number>     Set service port (default: 80)
@@ -27,6 +28,7 @@ NC='\033[0m' # No Color
 
 # Default values
 FORCE=false
+DRY_RUN=false
 IMAGE_REPO="nginx"
 IMAGE_TAG=""
 IMAGE_DIGEST=""
@@ -270,6 +272,7 @@ Arguments:
 
 Options:
   --force           Overwrite existing chart without prompting
+  --dry-run         Print planned tree and Chart.yaml/values.yaml previews; do not write
   --image <repo>    Set image repository (default: nginx)
                     Supports registry ports, tags, and digest refs:
                     - registry:5000/app
@@ -313,6 +316,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE=true
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
             shift
             ;;
         --image)
@@ -392,6 +399,106 @@ if [ -n "$IMAGE_TAG" ]; then
     validate_image_tag "$IMAGE_TAG"
 fi
 
+IMAGE_DISPLAY="$IMAGE_REPO"
+if [ -n "$IMAGE_DIGEST" ]; then
+    IMAGE_DISPLAY="${IMAGE_REPO}@${IMAGE_DIGEST}"
+elif [ -n "$IMAGE_TAG" ]; then
+    IMAGE_DISPLAY="${IMAGE_REPO}:${IMAGE_TAG}"
+else
+    IMAGE_DISPLAY="${IMAGE_REPO}:<chart appVersion>"
+fi
+
+# Print the planned file tree to stdout.
+print_planned_tree() {
+    echo "${CHART_DIR}/"
+    echo "├── Chart.yaml"
+    echo "├── values.yaml"
+    echo "├── .helmignore"
+    echo "├── templates/"
+    echo "│   ├── _helpers.tpl"
+    echo "│   ├── NOTES.txt"
+    if [ "$WITH_TEMPLATES" = true ]; then
+        echo "│   ├── serviceaccount.yaml"
+        echo "│   ├── service.yaml"
+        echo "│   ├── configmap.yaml"
+        echo "│   ├── secret.yaml"
+        if [ "$WORKLOAD_TYPE" = "statefulset" ]; then
+            echo "│   ├── service-headless.yaml"
+            echo "│   ├── statefulset.yaml"
+        elif [ "$WORKLOAD_TYPE" = "daemonset" ]; then
+            echo "│   ├── daemonset.yaml"
+        else
+            echo "│   ├── deployment.yaml"
+        fi
+        if [ "$WITH_INGRESS" = true ]; then
+            echo "│   ├── ingress.yaml"
+        fi
+        if [ "$WITH_HPA" = true ] && [ "$WORKLOAD_TYPE" != "daemonset" ]; then
+            echo "│   └── hpa.yaml"
+        fi
+    fi
+    echo "└── charts/"
+}
+
+# Render Chart.yaml content to stdout.
+render_chart_yaml_preview() {
+    cat <<EOF
+apiVersion: v2
+name: ${CHART_NAME}
+description: A Helm chart for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+EOF
+}
+
+# Render values.yaml header (image/service block) to stdout.
+# Full file is generated at write time; dry-run shows the load-bearing fields users tune.
+render_values_yaml_preview() {
+    cat <<EOF
+# Default values for ${CHART_NAME}.
+replicaCount: 1
+
+image:
+  repository: ${IMAGE_REPO}
+  pullPolicy: IfNotPresent
+  tag: "${IMAGE_TAG}"
+  digest: "${IMAGE_DIGEST}"
+
+service:
+  type: ClusterIP
+  port: ${SERVICE_PORT}
+  targetPort: ${TARGET_PORT}
+  portName: http
+
+# (resources, probes, ingress, autoscaling, configMap, secret, env, volumes,
+#  nodeSelector, tolerations, affinity, and workload-specific blocks omitted in preview)
+EOF
+}
+
+if [ "$DRY_RUN" = true ]; then
+    echo "Dry run: planning Helm chart for: ${CHART_NAME}"
+    echo "  Output directory: ${CHART_DIR}"
+    echo "  Image: ${IMAGE_DISPLAY}"
+    echo "  Service port: ${SERVICE_PORT}"
+    echo "  Target port: ${TARGET_PORT}"
+    echo "  Workload type: ${WORKLOAD_TYPE}"
+    if [ -d "$CHART_DIR" ]; then
+        echo "  Note: ${CHART_DIR} already exists; a real run would prompt or require --force."
+    fi
+    echo
+    echo "Planned file tree:"
+    print_planned_tree
+    echo
+    echo "----- Chart.yaml preview -----"
+    render_chart_yaml_preview
+    echo "----- values.yaml preview -----"
+    render_values_yaml_preview
+    echo "------------------------------"
+    echo "Dry run complete. No files written."
+    exit 0
+fi
+
 # Check if chart directory already exists
 if [ -d "$CHART_DIR" ]; then
     if [ "$FORCE" = true ]; then
@@ -407,15 +514,6 @@ if [ -d "$CHART_DIR" ]; then
         fi
         rm -rf "$CHART_DIR"
     fi
-fi
-
-IMAGE_DISPLAY="$IMAGE_REPO"
-if [ -n "$IMAGE_DIGEST" ]; then
-    IMAGE_DISPLAY="${IMAGE_REPO}@${IMAGE_DIGEST}"
-elif [ -n "$IMAGE_TAG" ]; then
-    IMAGE_DISPLAY="${IMAGE_REPO}:${IMAGE_TAG}"
-else
-    IMAGE_DISPLAY="${IMAGE_REPO}:<chart appVersion>"
 fi
 
 echo "Creating Helm chart structure for: ${CHART_NAME}"

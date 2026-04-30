@@ -1145,6 +1145,51 @@ max_over_time(
 ) * 100
 ```
 
+## Subqueries
+
+Subqueries evaluate an instant query repeatedly over a range, then expose the result as a range vector for an outer aggregator. Useful for combining range-vector functions (e.g. apply `rate()` then `max_over_time` over the rates).
+
+Syntax: `<instant_query>[<range>:<resolution>]`
+
+- `<range>`: time window over which to evaluate
+- `<resolution>`: step between evaluations (defaults to global evaluation interval if omitted)
+
+```promql
+# Maximum 5-minute rate observed over the past 30 minutes (sampled every 1 minute)
+max_over_time(
+  rate(http_requests_total[5m])[30m:1m]
+)
+
+# 95th percentile of per-minute error rates over the past hour
+quantile_over_time(0.95,
+  rate(http_errors_total[1m])[1h:1m]
+)
+```
+
+Subqueries are expensive — prefer recording rules when the inner expression is reused.
+
+## `@` Modifier
+
+The `@` modifier evaluates a selector at a specific timestamp instead of the query's current evaluation time. Useful for anchoring a comparison against a known point or against the query end.
+
+```promql
+# Evaluate rate at the end of a range query window
+rate(http_requests_total[5m] @ end())
+
+# Evaluate rate at the start of the range query window
+rate(http_requests_total[5m] @ start())
+
+# Evaluate at a specific Unix timestamp
+rate(http_requests_total[5m] @ 1609459200)
+
+# Compare current rate vs rate at a fixed timestamp
+rate(http_requests_total[5m])
+  /
+rate(http_requests_total[5m] @ 1609459200)
+```
+
+Combine `@` with `offset` for fully explicit time anchoring; `@` fixes the absolute moment, `offset` shifts relative to it.
+
 ## Performance Considerations
 
 1. **Range Vector Size**: Larger ranges process more data

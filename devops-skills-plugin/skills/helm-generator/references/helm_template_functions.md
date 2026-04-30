@@ -2,6 +2,37 @@
 
 Comprehensive guide to Helm template functions with practical examples.
 
+## Table of Contents
+
+- [Quick Reference](#quick-reference)
+- [Essential Template Functions](#essential-template-functions)
+- [Logical Functions](#logical-functions)
+- [Comparison Functions](#comparison-functions)
+- [String Functions (Sprig)](#string-functions-sprig)
+- [List Functions (Sprig)](#list-functions-sprig)
+- [Dict/Map Functions (Sprig)](#dictmap-functions-sprig)
+- [Type Functions](#type-functions)
+- [Crypto Functions](#crypto-functions)
+- [Date Functions](#date-functions)
+- [Regex Functions](#regex-functions)
+- [Flow Control Functions](#flow-control-functions)
+- [Lookup Function (Cluster Queries)](#lookup-function-cluster-queries)
+- [Best Practices](#best-practices)
+- [Common Patterns](#common-patterns)
+- [Resources](#resources)
+
+## Quick Reference
+
+| Function | Purpose | Example |
+|----------|---------|---------|
+| `required` | Enforce required values | `{{ required "msg" .Values.x }}` |
+| `default` | Fallback value | `{{ .Values.x \| default 1 }}` |
+| `quote` | Quote strings | `{{ .Values.x \| quote }}` |
+| `include` | Use helpers | `{{ include "name" . \| nindent 4 }}` |
+| `toYaml` | Convert to YAML | `{{ toYaml .Values.x \| nindent 2 }}` |
+| `tpl` | Render as template | `{{ tpl .Values.config . }}` |
+| `nindent` | Newline + indent | `{{- include "x" . \| nindent 4 }}` |
+
 ## Essential Template Functions
 
 ### 1. required - Enforce Required Values

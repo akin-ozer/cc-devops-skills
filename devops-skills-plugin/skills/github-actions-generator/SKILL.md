@@ -1,6 +1,6 @@
 ---
 name: github-actions-generator
-description: Create, generate, or scaffold GitHub Actions workflows, action.yml, or .github/workflows CI/CD pipelines.
+description: Use when creating, generating, or scaffolding GitHub Actions workflows (.github/workflows/*.yml), composite/Docker/JavaScript actions (action.yml), reusable workflows, or CI/CD pipelines for GitHub. Triggers — 'set up CI', 'add GitHub Action', 'build a workflow', 'create a custom action', 'make this reusable'. Not for Jenkins/GitLab/CircleCI; for editing existing workflows or validation, see devops-skills:github-actions-validator.
 ---
 
 # GitHub Actions Generator
@@ -156,8 +156,8 @@ See `references/advanced-triggers.md` for complete patterns.
 **Triggers:** "Add security scanning...", "Add dependency review...", "Generate SBOM..."
 
 **Components:**
-- **Dependency Review:** `actions/dependency-review-action@v4`
-- **SBOM Attestations:** `actions/attest-sbom@v2`
+- **Dependency Review:** `actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4.8.3`
+- **SBOM Attestations:** `actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.4.0`
 - **CodeQL Analysis:** `github/codeql-action`
 
 **Permission Model:**
@@ -197,8 +197,8 @@ When using third-party actions (any `uses:` entry not in the same repository):
    ```
 
 2. **Or use Context7 MCP:**
-   - `mcp__context7__resolve-library-id` to find action
-   - `mcp__context7__query-docs` for documentation
+   - `Context7:resolve-library-id` to find action
+   - `Context7:query-docs` for documentation
 
 3. **Pin to SHA with version comment:**
    ```yaml
@@ -217,12 +217,13 @@ See `references/common-actions.md` for pre-verified action versions.
 
 ## Validation Workflow
 
-**CRITICAL:** Every generated resource MUST be validated.
+Validate every generated resource before presenting it.
 
 1. Generate workflow/action file
 2. Invoke `devops-skills:github-actions-validator` skill
 3. If errors: fix and re-validate
 4. If success: present with usage instructions
+5. **Run** `bash scripts/test_generator.sh` after edits to this skill's templates or generator logic.
 
 **Skip validation only for:**
 - Partial code snippets
@@ -248,9 +249,9 @@ Fallback usage must always be reported in the final output.
 
 ---
 
-## Mandatory Standards
+## Generation Standards
 
-All generated resources must follow:
+Apply the following to every generated resource:
 
 | Standard | Implementation |
 |----------|---------------|

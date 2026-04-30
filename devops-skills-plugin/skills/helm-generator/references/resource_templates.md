@@ -29,6 +29,30 @@ Reference templates for common Kubernetes resources with Helm templating.
 - [Autoscaling Resources](#autoscaling-resources)
   - [HorizontalPodAutoscaler](#horizontalpodautoscaler)
   - [PodDisruptionBudget](#poddisruptionbudget)
+- [Required Template Patterns](#required-template-patterns)
+
+---
+
+## Required Template Patterns
+
+Every workload template must include these patterns. Substitute `mychart` with the chart name.
+
+```yaml
+metadata:
+  name: {{ include "mychart.fullname" . }}
+  labels: {{- include "mychart.labels" . | nindent 4 }}
+
+{{- with .Values.nodeSelector }}
+nodeSelector: {{- toYaml . | nindent 2 }}
+{{- end }}
+
+annotations:
+  {{- if and .Values.configMap .Values.configMap.enabled }}
+  checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+  {{- end }}
+```
+
+Checksum annotations are required for workloads, but must be conditional and only reference templates that the chart actually generates (`configmap.yaml`, `secret.yaml`).
 
 ---
 

@@ -197,6 +197,9 @@ section "PERSISTENT VOLUMES"
 run_or_warn "PV list" kubectl_cmd get pv
 
 section "COMPONENT STATUS"
+# componentstatuses is deprecated since k8s 1.19 but kept as the third fallback:
+# /readyz and /healthz are unauthenticated on some restricted clusters, and on
+# very old clusters (pre-1.19) componentstatuses is the only signal available.
 run_pipe_or_warn "Component readiness endpoint query" "kubectl --request-timeout=\"$REQUEST_TIMEOUT\" get --raw='/readyz?verbose' 2>/dev/null || kubectl --request-timeout=\"$REQUEST_TIMEOUT\" get --raw='/healthz?verbose' 2>/dev/null || kubectl --request-timeout=\"$REQUEST_TIMEOUT\" get componentstatuses"
 
 section "API SERVER HEALTH"

@@ -1,5 +1,19 @@
 # POSIX Shell (sh) Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Why POSIX Shell Matters](#why-posix-shell-matters)
+- [Key Differences: sh vs bash](#key-differences-sh-vs-bash)
+- [POSIX Shell Syntax](#posix-shell-syntax)
+- [POSIX Best Practices](#posix-best-practices)
+- [Common Portability Issues](#common-portability-issues)
+- [POSIX Parameter Expansion](#posix-parameter-expansion)
+- [Special Variables (POSIX)](#special-variables-posix)
+- [Testing for POSIX Compliance](#testing-for-posix-compliance)
+- [Common POSIX Utilities](#common-posix-utilities)
+- [Resources](#resources)
+
 ## Overview
 
 POSIX sh is the portable shell specification defined by POSIX standards. Scripts written for POSIX sh should work across different Unix-like systems (bash, dash, ksh, etc.).

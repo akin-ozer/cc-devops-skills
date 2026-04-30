@@ -1,5 +1,20 @@
 # Common Terraform Patterns
 
+## Contents
+
+- [Multi-Environment Pattern](#multi-environment-pattern)
+- [Workspace Pattern](#workspace-pattern)
+- [Blue-Green Deployment Pattern](#blue-green-deployment-pattern)
+- [Data Layer Separation Pattern](#data-layer-separation-pattern)
+- [Module Composition Pattern](#module-composition-pattern)
+- [Conditional Resource Creation Pattern](#conditional-resource-creation-pattern)
+- [Service Mesh Pattern](#service-mesh-pattern)
+- [Tagging Strategy Pattern](#tagging-strategy-pattern)
+- [Secret Injection Pattern](#secret-injection-pattern)
+- [Auto-Scaling Pattern](#auto-scaling-pattern)
+- [Disaster Recovery Pattern](#disaster-recovery-pattern)
+- [Cost Optimization Pattern](#cost-optimization-pattern)
+
 ## Multi-Environment Pattern
 
 ### Directory Structure

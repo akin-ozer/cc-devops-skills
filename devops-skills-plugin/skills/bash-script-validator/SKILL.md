@@ -1,6 +1,6 @@
 ---
 name: bash-script-validator
-description: Validate, lint, audit, or fix bash/shell/.sh scripts via ShellCheck.
+description: Validate, lint, audit, or fix bash/shell/.sh scripts via ShellCheck. Use when the user asks to lint a .sh file, debug a ShellCheck warning, enforce POSIX portability, or gate scripts before CI. Triggers — "lint this .sh", "why does this script fail shellcheck", "is my bash POSIX-compliant", "review shell script before merge", "fix shellcheck warnings". Not for linting Python/Node/etc. — see language-specific skills.
 ---
 
 # Bash Script Validator
@@ -35,6 +35,8 @@ Use this skill when the request includes script quality, linting, syntax checkin
 - Pure prose editing tasks
 
 ## Deterministic Execution Model
+
+Prerequisites: bash; optional shellcheck (system or wrapper); optional python3 (for the wrapper provider).
 
 Run commands from this skill directory:
 
@@ -89,7 +91,11 @@ For each issue, include:
 
 If the request includes patching files and write access is available, apply fixes in small batches grouped by issue type.
 
-### Step 5: Rerun Policy (Mandatory After Changes)
+Before any in-place edit, show a unified diff of the proposed changes and ask the user: `Apply these N fixes to <file>?` Only proceed after explicit confirmation.
+
+Rollback: if a rerun shows the script is broken, revert with `git checkout -- <file>` or restore from a pre-fix snapshot of the script.
+
+### Step 5: Rerun Policy
 
 After each batch of edits, rerun the validator:
 
@@ -102,7 +108,7 @@ Rerun loop rules:
 1. Continue until no new errors are introduced.
 2. If warnings remain by design, document why they are intentionally accepted.
 3. If constraints prevent full resolution, report unresolved items with a clear next action.
-4. Always report the latest rerun exit code and remaining issue count.
+4. Report the latest rerun exit code and remaining issue count (why: lets the caller verify the loop terminated cleanly).
 
 ## Fallback Behavior
 
@@ -121,7 +127,7 @@ Use these branches only when the default flow cannot run as-is.
 
 Use subsection-level citations for every non-trivial fix.
 
-Required citation format:
+Citation format (why: lets reviewers verify the rationale without re-reading the full reference):
 
 ```text
 Reference: docs/<file>.md -> <Section> -> <Subsection>
@@ -233,14 +239,3 @@ Load only what is needed:
 - `docs/awk-reference.md`
 - `docs/sed-reference.md`
 - `docs/regex-reference.md`
-
-## Done Criteria
-
-This skill update is complete when all are true:
-
-1. Trigger guidance is explicit (positive and non-trigger examples).
-2. Default workflow is deterministic and ordered.
-3. Fallback behavior is explicit for missing tooling and constrained environments.
-4. Fix explanations include subsection-level citations.
-5. Post-fix rerun policy is mandatory and reported with exit codes.
-6. Documentation supports both fully automated and constrained execution paths.

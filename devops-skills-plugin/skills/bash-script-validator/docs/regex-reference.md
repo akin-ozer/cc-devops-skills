@@ -1,5 +1,23 @@
 # Regular Expressions Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [BRE vs ERE](#bre-vs-ere)
+- [Basic Metacharacters (Both BRE and ERE)](#basic-metacharacters-both-bre-and-ere)
+- [Extended Metacharacters](#extended-metacharacters)
+- [POSIX Character Classes](#posix-character-classes)
+- [Common Patterns](#common-patterns)
+- [Shell Script Patterns](#shell-script-patterns)
+- [Escaping Special Characters](#escaping-special-characters)
+- [Backreferences](#backreferences)
+- [Greedy vs Non-Greedy](#greedy-vs-non-greedy)
+- [Lookahead and Lookbehind](#lookahead-and-lookbehind)
+- [Common Mistakes](#common-mistakes)
+- [Testing Regex](#testing-regex)
+- [Quick Reference Table](#quick-reference-table)
+- [Resources](#resources)
+
 ## Overview
 
 Regular expressions (regex) are patterns used to match character combinations in strings. POSIX defines two flavors: Basic (BRE) and Extended (ERE).

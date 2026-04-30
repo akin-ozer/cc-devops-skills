@@ -2,6 +2,36 @@
 
 This guide covers frequent mistakes made in bash and shell scripts, their consequences, and how to fix them.
 
+## Contents
+
+- [1. Unquoted Variables](#1-unquoted-variables)
+- [2. Not Checking Command Success](#2-not-checking-command-success)
+- [3. Using [ ] with Bash Features](#3-using---with-bash-features)
+- [4. Useless Use of cat (UUOC)](#4-useless-use-of-cat-uuoc)
+- [5. Not Using -r with read](#5-not-using--r-with-read)
+- [6. Testing $? After Multiple Commands](#6-testing--after-multiple-commands)
+- [7. Arrays in POSIX sh Scripts](#7-arrays-in-posix-sh-scripts)
+- [8. Not Declaring Functions Before Use](#8-not-declaring-functions-before-use)
+- [9. Using eval Unsafely](#9-using-eval-unsafely)
+- [10. Forgetting set -u](#10-forgetting-set--u)
+- [11. Incorrect String Comparison](#11-incorrect-string-comparison)
+- [12. Not Handling Spaces in Filenames](#12-not-handling-spaces-in-filenames)
+- [13. Backticks Instead of $()](#13-backticks-instead-of-)
+- [14. Using = Instead of == in [[ ]]](#14-using--instead-of--in--)
+- [15. Not Quoting $@](#15-not-quoting-)
+- [16. Using ls to Process Files](#16-using-ls-to-process-files)
+- [17. Incorrect Exit Codes](#17-incorrect-exit-codes)
+- [18. Using -a and -o in [ ]](#18-using--a-and--o-in--)
+- [19. Not Making Scripts Executable](#19-not-making-scripts-executable)
+- [20. Forgetting Final Newline](#20-forgetting-final-newline)
+- [21. Using grep -q Without Knowing Implications](#21-using-grep--q-without-knowing-implications)
+- [22. Incorrect glob Pattern](#22-incorrect-glob-pattern)
+- [23. Not Handling Empty Globs](#23-not-handling-empty-globs)
+- [24. Not Sanitizing Input](#24-not-sanitizing-input)
+- [25. Using -e for File Existence](#25-using--e-for-file-existence)
+- [Quick Checklist](#quick-checklist)
+- [Resources](#resources)
+
 ## 1. Unquoted Variables
 
 ### Problem

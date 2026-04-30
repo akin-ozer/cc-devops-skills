@@ -1,5 +1,20 @@
 # GNU grep Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Basic Syntax](#basic-syntax)
+- [Common Options](#common-options)
+- [Common Usage Patterns](#common-usage-patterns)
+- [Regular Expressions in grep](#regular-expressions-in-grep)
+- [Character Classes](#character-classes)
+- [Practical Examples for Shell Scripts](#practical-examples-for-shell-scripts)
+- [Performance Tips](#performance-tips)
+- [Exit Codes](#exit-codes)
+- [Common Pitfalls in Shell Scripts](#common-pitfalls-in-shell-scripts)
+- [Useful Combinations](#useful-combinations)
+- [Resources](#resources)
+
 ## Overview
 
 grep (Global Regular Expression Print) searches for patterns in text files. It's one of the most commonly used Unix tools.

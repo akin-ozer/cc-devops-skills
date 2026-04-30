@@ -1,5 +1,16 @@
 # Bash Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Bash vs POSIX Shell (sh)](#bash-vs-posix-shell-sh)
+- [Core Bash Syntax](#core-bash-syntax)
+- [Best Practices](#best-practices)
+- [Common Pitfalls](#common-pitfalls)
+- [Parameter Expansion Reference](#parameter-expansion-reference)
+- [Special Variables](#special-variables)
+- [Resources](#resources)
+
 ## Overview
 
 Bash (Bourne Again SHell) is a Unix shell and command language. This guide covers bash-specific features, syntax, and best practices.

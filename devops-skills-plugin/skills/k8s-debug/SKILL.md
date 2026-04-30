@@ -1,6 +1,6 @@
 ---
 name: k8s-debug
-description: Diagnose and fix Kubernetes pods, CrashLoopBackOff, Pending, DNS, networking, storage, and rollout failures with kubectl.
+description: Use when diagnosing live Kubernetes failures with kubectl - pod CrashLoopBackOff/Pending/ImagePullBackOff, service/DNS connectivity, PVC binding, rollout stalls, node pressure. Triggers - "pod is crashing", "rollout stuck", "DNS not resolving in pod", "PVC pending", "OOMKilled", "ImagePullBackOff", "service unreachable". Not for authoring manifests, Helm templating, or Terraform-managed cluster provisioning.
 ---
 
 # Kubernetes Debugging Skill
@@ -18,6 +18,10 @@ Use this skill when requests resemble:
 - "Pods are `Pending` and not scheduling."
 - "Cluster health looks degraded after a change."
 - "PVC is pending and pods cannot mount storage."
+- "Pod was OOMKilled" / resource exhaustion (CPU/memory).
+- "ImagePullBackOff after registry change."
+- "NetworkPolicy is blocking traffic" / ingress not routing.
+- "ConfigMap/Secret/RBAC misconfiguration breaks the workload."
 
 ## Prerequisites
 
@@ -27,6 +31,7 @@ Run from the skill directory (`devops-skills-plugin/skills/k8s-debug`) so relati
 - `kubectl` installed and configured.
 - An active cluster context.
 - Read access to namespaces, pods, events, services, and nodes.
+- `python3 >= 3.8` (stdlib only; no third-party packages required).
 
 Quick preflight:
 
@@ -46,23 +51,12 @@ Fallback behavior:
 - If optional tools are missing, scripts continue and print warnings with reduced output.
 - If `kubectl top` is unavailable, continue with `kubectl describe` and events.
 
-## When to Use This Skill
-
-Use this skill for:
-- Pod failures (CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled)
-- Service connectivity or DNS resolution issues
-- Network policy or ingress problems
-- Volume and storage mount failures
-- Deployment rollout issues
-- Cluster health or performance degradation
-- Resource exhaustion (CPU/memory)
-- Configuration problems (ConfigMaps, Secrets, RBAC)
-
 ## Safety Rules for Disruptive Commands
 
 Default mode is read-only diagnosis first. Only execute disruptive commands after confirming blast radius and rollback.
 
-Commands requiring explicit confirmation:
+STOP and ask the user before executing any of these commands. Print the exact command, the target namespace/resource, and the rollback path, then wait for explicit approval. Do not run them as part of automated diagnosis.
+
 - `kubectl delete pod ... --force --grace-period=0`
 - `kubectl drain ...`
 - `kubectl rollout restart ...`
@@ -247,74 +241,7 @@ Then follow `Service Connectivity Workflow` in `./references/troubleshooting_wor
 
 ## Essential Manual Commands
 
-### Pod Debugging
-
-```bash
-# View pod status
-kubectl get pods -n <namespace> -o wide
-
-# Detailed pod information
-kubectl describe pod <pod-name> -n <namespace>
-
-# View logs
-kubectl logs <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace> --previous  # Previous container
-kubectl logs <pod-name> -n <namespace> -c <container>  # Specific container
-
-# Execute commands in pod
-kubectl exec <pod-name> -n <namespace> -it -- /bin/sh
-
-# Get pod YAML
-kubectl get pod <pod-name> -n <namespace> -o yaml
-```
-
-### Service and Network Debugging
-
-```bash
-# Check services
-kubectl get svc -n <namespace>
-kubectl describe svc <service-name> -n <namespace>
-
-# Check endpoints
-kubectl get endpoints -n <namespace>
-
-# Test DNS
-kubectl exec <pod-name> -n <namespace> -- nslookup kubernetes.default
-
-# View events
-kubectl get events -n <namespace> --sort-by='.lastTimestamp'
-```
-
-### Resource Monitoring
-
-```bash
-# Node resources
-kubectl top nodes
-kubectl describe nodes
-
-# Pod resources
-kubectl top pods -n <namespace>
-kubectl top pod <pod-name> -n <namespace> --containers
-```
-
-### Emergency Operations
-
-```bash
-# Restart deployment
-kubectl rollout restart deployment/<name> -n <namespace>
-
-# Rollback deployment
-kubectl rollout undo deployment/<name> -n <namespace>
-
-# Force delete stuck pod
-kubectl delete pod <pod-name> -n <namespace> --force --grace-period=0
-
-# Drain node (maintenance)
-kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
-
-# Cordon node (prevent scheduling)
-kubectl cordon <node-name>
-```
+See `./references/troubleshooting_workflow.md` (lines 300-350) for the consolidated `kubectl` command reference covering pod, service/network, resource, and emergency operations.
 
 ## Completion Criteria
 

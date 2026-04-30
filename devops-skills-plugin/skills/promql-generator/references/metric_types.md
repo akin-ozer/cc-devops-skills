@@ -418,6 +418,73 @@ Choose buckets that cover your expected range:
 // 100B, 1KB, 10KB, 100KB, 1MB, 10MB
 ```
 
+### Native vs Classic Histograms
+
+Native histograms are stable in Prometheus 3.x and offer significant advantages over classic histograms:
+- Sparse bucket representation with near-zero cost for empty buckets
+- No configuration of bucket boundaries during instrumentation
+- Coverage of the full float64 range
+- Efficient mergeability across histograms
+- Simpler query syntax (no `_bucket` suffix or `le` label)
+
+```promql
+# Classic histogram (requires _bucket suffix and le label)
+histogram_quantile(0.95,
+  sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+# Native histogram (simpler - no _bucket suffix, no le label needed)
+histogram_quantile(0.95,
+  sum by (job) (rate(http_request_duration_seconds[5m]))
+)
+```
+
+For function-level reference (histogram_quantile, histogram_count, histogram_sum, histogram_fraction, histogram_stddev, histogram_avg) see references/promql_functions.md.
+
+### Detecting Native vs Classic Histograms
+
+Native histograms are identified by:
+- No `_bucket` suffix on the metric name
+- No `le` label in the time series
+- The metric stores histogram data directly (not separate bucket counters)
+
+Enable native-histogram scraping per job:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'my-app'
+    scrape_native_histograms: true
+```
+
+### Custom Bucket Native Histograms (NHCB)
+
+Prometheus 3.4+ supports custom bucket native histograms (schema -53), allowing classic-to-native histogram conversion at scrape time. Key migration path for users with existing classic histograms.
+
+Benefits:
+- Keep existing instrumentation (no code changes needed)
+- Store classic histograms as native histograms for lower storage cost
+- Query with native histogram syntax
+- Improved reliability and compression
+
+```yaml
+# prometheus.yml - convert classic histograms to NHCB on scrape (Prometheus 3.4+)
+global:
+  scrape_configs:
+    - job_name: 'my-app'
+      convert_classic_histograms_to_nhcb: true
+```
+
+```promql
+# Query NHCB metrics the same way as native histograms
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds[5m])))
+
+# histogram_fraction also works with NHCB (Prometheus 3.4+)
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds[5m]))
+```
+
+Schema -53 indicates custom bucket boundaries. Histograms with different custom bucket boundaries are generally not mergeable with each other.
+
 ---
 
 ## Summary
@@ -624,3 +691,9 @@ node_network_receive_bytes_total   # namespace: node, subsystem: network
 - [Prometheus Metric Types](https://prometheus.io/docs/concepts/metric_types/)
 - [Prometheus Best Practices - Naming](https://prometheus.io/docs/practices/naming/)
 - [Histograms and Summaries](https://prometheus.io/docs/practices/histograms/)
+
+---
+
+## Version notes (verify before use)
+
+Captured 2026-04: native histograms became stable in Prometheus 3.0 (released November 2024). Starting with Prometheus v3.8.0 they are fully stable; scraping native histograms still requires explicit activation via the `scrape_native_histograms` configuration setting. From v3.9, no feature flag is needed but `scrape_native_histograms` must be set explicitly. Verify the current Prometheus release notes before relying on these specifics.

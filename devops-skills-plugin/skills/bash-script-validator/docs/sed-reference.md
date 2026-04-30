@@ -1,5 +1,24 @@
 # GNU sed Reference Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Basic Syntax](#basic-syntax)
+- [Common Options](#common-options)
+- [Basic Commands](#basic-commands)
+- [Address Ranges](#address-ranges)
+- [Advanced Substitution](#advanced-substitution)
+- [Multiple Commands](#multiple-commands)
+- [In-place Editing](#in-place-editing)
+- [Pattern Matching](#pattern-matching)
+- [Practical Examples for Shell Scripts](#practical-examples-for-shell-scripts)
+- [Advanced Features](#advanced-features)
+- [Common Patterns](#common-patterns)
+- [Common Pitfalls in Shell Scripts](#common-pitfalls-in-shell-scripts)
+- [Performance Tips](#performance-tips)
+- [Testing sed Commands](#testing-sed-commands)
+- [Resources](#resources)
+
 ## Overview
 
 sed (Stream EDitor) is a powerful text processing tool that performs basic text transformations on an input stream (file or pipeline).

@@ -1,15 +1,8 @@
 # Common GitHub Actions Reference
 
-**Last Updated:** February 2026
-**Source:** Official GitHub Actions repositories and Context7 verified documentation
-
 This document catalogs frequently used GitHub Actions with current versions, inputs, outputs, and usage examples.
 
-**Important Notes for 2026:**
-- All actions should be pinned to full 40-character SHA for security
-- Node 24 runtime is now supported (Node 20 EOL: April 2026, default switch: March 4, 2026)
-- actions/cache v5.0.3 recommended (Node 24 runtime, runner v2.327.1+)
-- Cache size limits: 10 GB free per repository, additional storage available (as of February 2026)
+All actions should be pinned to full 40-character SHA for security.
 
 ## Table of Contents
 1. [Repository and Checkout](#repository-and-checkout)
@@ -713,3 +706,15 @@ permissions:
 - Verify minimum runner requirements
 
 Always verify action inputs and outputs from official documentation before use.
+
+---
+
+## Version notes
+
+Verify against current upstream sources before relying on dated material below.
+
+- Last updated: February 2026
+- Source: Official GitHub Actions repositories and Context7 verified documentation
+- Node 24 runtime is supported (Node 20 EOL: April 2026, default switch: March 4, 2026)
+- actions/cache v5.0.3 recommended (Node 24 runtime, runner v2.327.1+)
+- Cache size limits: 10 GB free per repository, additional storage available (as of February 2026)

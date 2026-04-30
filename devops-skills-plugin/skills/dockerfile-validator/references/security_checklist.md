@@ -2,6 +2,18 @@
 
 A comprehensive security checklist for Dockerfiles and container images.
 
+## Contents
+
+- [Build-Time Security](#build-time-security) — base image, secrets, packages, user/permissions, file security
+- [Common Vulnerabilities](#common-vulnerabilities)
+- [Runtime Security](#runtime-security)
+- [Image Registry Security](#image-registry-security)
+- [Security Scanning Tools](#security-scanning-tools)
+- [Compliance and Standards](#compliance-and-standards)
+- [Quick Security Wins](#quick-security-wins)
+- [Security Checklist Summary](#security-checklist-summary)
+- [Resources](#resources)
+
 ## Build-Time Security
 
 ### Base Image Security

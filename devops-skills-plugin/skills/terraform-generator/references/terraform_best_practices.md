@@ -1,5 +1,24 @@
 # Terraform Best Practices
 
+## Contents
+
+- [Project Structure](#project-structure)
+- [Naming Conventions](#naming-conventions)
+- [Version Pinning](#version-pinning)
+- [State Management](#state-management)
+- [Variable Management](#variable-management)
+- [Resource Management](#resource-management)
+- [Data Sources](#data-sources)
+- [Local Values](#local-values)
+- [Dynamic Blocks](#dynamic-blocks)
+- [Count and For_Each](#count-and-for_each)
+- [Module Best Practices](#module-best-practices)
+- [Security Best Practices](#security-best-practices)
+- [Testing and Validation](#testing-and-validation)
+- [Documentation](#documentation)
+- [Performance Optimization](#performance-optimization)
+- [Common Pitfalls to Avoid](#common-pitfalls-to-avoid)
+
 ## Project Structure
 
 ### Standard Project Layout

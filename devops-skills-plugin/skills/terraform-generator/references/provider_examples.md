@@ -1,5 +1,13 @@
 # Terraform Provider Examples
 
+## Contents
+
+- [AWS Provider](#aws-provider)
+- [Azure Provider](#azure-provider)
+- [Google Cloud Provider](#google-cloud-provider)
+- [Kubernetes Provider](#kubernetes-provider)
+- [Version snapshot (verify before use)](#version-snapshot-verify-before-use)
+
 ## AWS Provider
 
 ### Provider Configuration
@@ -9,7 +17,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"  # Latest: v6.23.0 (Dec 2025)
+      version = "~> 6.0"  # see "Version snapshot" at the bottom of this file
     }
   }
 }
@@ -932,3 +940,14 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "app" {
   }
 }
 ```
+
+## Version snapshot (verify before use)
+
+Time-sensitive provider versions captured during the last review of this file. Always verify against the Terraform Registry before relying on a specific minor/patch.
+
+| Provider | Snapshot |
+|----------|----------|
+| `hashicorp/aws` | `~> 6.0`; latest observed v6.23.0 (Dec 2025) — confirm at https://registry.terraform.io/providers/hashicorp/aws |
+| `hashicorp/azurerm` | `~> 4.0` — confirm at https://registry.terraform.io/providers/hashicorp/azurerm |
+| `hashicorp/google` | `~> 7.0` — confirm at https://registry.terraform.io/providers/hashicorp/google |
+| `hashicorp/kubernetes` | major/minor pin matched to the target cluster — confirm at https://registry.terraform.io/providers/hashicorp/kubernetes |

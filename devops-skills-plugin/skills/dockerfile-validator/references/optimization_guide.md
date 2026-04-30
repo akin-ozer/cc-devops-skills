@@ -2,6 +2,18 @@
 
 Comprehensive guide for optimizing Docker images for size, build time, and runtime performance.
 
+## Contents
+
+- [Image Size Optimization](#image-size-optimization) — base image choice, multi-stage, layer reduction
+- [Build Time Optimization](#build-time-optimization) — instruction order, BuildKit cache mounts, parallel stages
+- [Runtime Performance Optimization](#runtime-performance-optimization) — exec form, CPU/parallelism
+- [Language-Specific Optimizations](#language-specific-optimizations) — Python, Node, Go patterns
+- [Advanced Techniques](#advanced-techniques) — distroless, scratch, BuildKit features
+- [Optimization Checklist](#optimization-checklist)
+- [Measuring Optimization](#measuring-optimization) — `docker images`, build-time comparisons
+- [Tools for Analysis](#tools-for-analysis) — dive, hadolint, container-diff
+- [Resources](#resources)
+
 ## Image Size Optimization
 
 ### 1. Choose Minimal Base Images
