@@ -858,10 +858,6 @@ Use tools to test pipelines locally:
 # Using gitlab-ci-local
 npm install -g gitlab-ci-local
 gitlab-ci-local
-
-# Using gitlab-ci-validate
-pip install gitlab-ci-validate
-gitlab-ci-validate .gitlab-ci.yml
 ```
 
 ### Use CI Lint Tool
