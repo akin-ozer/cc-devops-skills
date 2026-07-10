@@ -67,10 +67,6 @@ If you already use `~/.agents/plugins/marketplace.json`, append the `devops-skil
 
 The packaged Codex manifest lives at `devops-skills-plugin/.codex-plugin/plugin.json`. It exists alongside the Claude manifest and points at the same `skills/` directory.
 
-## Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the skill folder contract, required `SKILL.md` frontmatter, and generator/validator pairing conventions.
-
 ### Team Rollout
 
 Add this to project-level `.claude/settings.json`:
@@ -287,6 +283,8 @@ cc-devops-skills/
 ```
 
 ## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the skill folder contract, required `SKILL.md` frontmatter, and generator/validator pairing conventions.
 
 Contributions are welcome for:
 - new skills in adjacent DevOps domains
