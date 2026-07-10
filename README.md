@@ -4,6 +4,8 @@
 
 A practical skill pack for DevOps work in Claude Code and Codex desktop.
 
+New here? Start with the 5-minute [`QUICKSTART.md`](QUICKSTART.md).
+
 This repository ships **31 skills**:
 - **16 generators** for scaffolding production-ready configs
 - **14 validators** for linting, security checks, and dry-run validation
