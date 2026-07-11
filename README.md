@@ -284,6 +284,8 @@ cc-devops-skills/
 
 ## Contributing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the skill folder contract, required `SKILL.md` frontmatter, and generator/validator pairing conventions.
+
 Contributions are welcome for:
 - new skills in adjacent DevOps domains
 - better validator coverage and safer defaults
