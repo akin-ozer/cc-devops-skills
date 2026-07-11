@@ -120,6 +120,7 @@ with:
 
 Docs and examples:
 
+- Environment variables: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 - Wrapper details: [`docs/drop-in-wrapper.md`](docs/drop-in-wrapper.md)
 - IaC PR review workflow: [`examples/github-actions/iac-pr-review.yml`](examples/github-actions/iac-pr-review.yml)
 - Compatibility drift check: [`scripts/check_upstream_action_surface.sh`](scripts/check_upstream_action_surface.sh)
