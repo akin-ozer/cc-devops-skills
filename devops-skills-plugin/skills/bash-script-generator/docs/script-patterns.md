@@ -562,5 +562,5 @@ retry_with_jitter() {
 ## References
 
 - [Advanced Bash-Scripting Guide](https://tldp.org/LDP/abs/html/)
-- [Bash Hackers Wiki](https://wiki.bash-hackers.org/)
+- [GNU Bash manual](https://www.gnu.org/software/bash/manual/bash.html)
 - [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html)

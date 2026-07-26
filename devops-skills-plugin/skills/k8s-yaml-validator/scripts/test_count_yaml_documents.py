@@ -108,7 +108,7 @@ metadata:
 
 class TestDryRunGuidanceRegression(unittest.TestCase):
     def test_validate_false_guidance_is_explicitly_parse_only(self):
-        skill_doc_path = SKILL_DIR / "SKILL.md"
+        skill_doc_path = SKILL_DIR / "references" / "extended-guide.md"
         skill_doc = skill_doc_path.read_text(encoding="utf-8")
         self.assertIn(
             "`--validate=false` disables schema/type/required-field validation",

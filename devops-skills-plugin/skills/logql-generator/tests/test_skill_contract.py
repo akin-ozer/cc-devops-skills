@@ -10,14 +10,14 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 COMMON_QUERIES = SKILL_DIR / "examples" / "common_queries.logql"
 
 
-def _resolve_skill_md() -> Path:
-    candidate = SKILL_DIR / "SKILL.md"
+def _resolve_extended_guide() -> Path:
+    candidate = SKILL_DIR / "references" / "extended-guide.md"
     if candidate.exists():
         return candidate
-    raise FileNotFoundError(f"Could not find skill markdown file: {candidate}")
+    raise FileNotFoundError(f"Could not find extended guide: {candidate}")
 
 
-SKILL_MD = _resolve_skill_md()
+SKILL_GUIDE = _resolve_extended_guide()
 
 
 def _between(text: str, start_marker: str, end_marker: str) -> str:
@@ -74,7 +74,7 @@ class TestBytesOverTimePlacement(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.skill_text = SKILL_MD.read_text(encoding="utf-8")
+        cls.skill_text = SKILL_GUIDE.read_text(encoding="utf-8")
         cls.log_range_section = _between(
             cls.skill_text,
             "### Log Range Aggregations",

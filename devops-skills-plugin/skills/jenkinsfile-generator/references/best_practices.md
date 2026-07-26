@@ -747,5 +747,5 @@ stage('Approval') {
 ## References
 
 - [Official Jenkins Pipeline Best Practices](https://www.jenkins.io/doc/book/pipeline/pipeline-best-practices/)
-- [Jenkins Performance Best Practices](https://www.jenkins.io/doc/book/scaling/best-practices/)
+- [Jenkins Pipeline Best Practices](https://www.jenkins.io/doc/book/pipeline/pipeline-best-practices/)
 - [Pipeline Syntax Reference](https://www.jenkins.io/doc/book/pipeline/syntax/)

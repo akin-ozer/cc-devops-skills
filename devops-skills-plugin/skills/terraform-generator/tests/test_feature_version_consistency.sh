@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly CHECK_SCRIPT="$SKILL_DIR/scripts/check_feature_version_consistency.sh"
-SKILL_DOC="$SKILL_DIR/SKILL.md"
+SKILL_DOC="$SKILL_DIR/references/extended-guide.md"
 readonly SKILL_DOC
 
 PASS=0

@@ -575,7 +575,7 @@ Best-practice application is complete when:
 
 ## Further Reading
 
-- [Azure Pipelines Best Practices - Microsoft Learn](https://learn.microsoft.com/en-us/azure/devops/pipelines/best-practices/)
+- [Azure Pipelines Security - Microsoft Learn](https://learn.microsoft.com/en-us/azure/devops/pipelines/security/overview?view=azure-devops)
 - [Azure Pipelines Security](https://learn.microsoft.com/en-us/azure/devops/pipelines/security/overview)
 - [Pipeline caching](https://learn.microsoft.com/en-us/azure/devops/pipelines/release/caching)
 - [Pipeline runs](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/runs)

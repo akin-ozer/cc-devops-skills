@@ -758,5 +758,5 @@ options {
 ## References
 
 - [Official Jenkins Pipeline Best Practices](https://www.jenkins.io/doc/book/pipeline/pipeline-best-practices/)
-- [CloudBees Pipeline Best Practices](https://docs.cloudbees.com/docs/admin-resources/latest/pipeline-best-practices/)
-- [Jenkins Performance Best Practices](https://www.jenkins.io/doc/book/scaling/best-practices/)
+- [CloudBees Pipeline Best Practices](https://docs.cloudbees.com/docs/cloudbees-ci/latest/pipelines/pipeline-best-practices)
+- [Jenkins Pipeline Best Practices](https://www.jenkins.io/doc/book/pipeline/pipeline-best-practices/)

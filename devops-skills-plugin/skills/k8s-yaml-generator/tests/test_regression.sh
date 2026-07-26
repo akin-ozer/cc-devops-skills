@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SKILL_MD="$SKILL_DIR/SKILL.md"
+SKILL_GUIDE="$SKILL_DIR/references/extended-guide.md"
 RBAC_DEFAULT="$SKILL_DIR/examples/rbac.yaml"
 RBAC_OPTIONAL="$SKILL_DIR/examples/rbac-cluster-reader-optional.yaml"
 INGRESS_EXAMPLE="$SKILL_DIR/examples/ingress.yaml"
@@ -76,31 +76,31 @@ echo ""
 echo "[P0] Dry-run fallback is guarded"
 assert_file_not_contains_regex \
   "unsafe server||client fallback removed" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'kubectl apply --dry-run=server -f <file\.yaml> \|\| kubectl apply --dry-run=client -f <file\.yaml>'
 assert_file_contains_literal \
   "server validation status reports passed" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'echo "server_validation=passed"'
 assert_file_contains_literal \
   "server validation status reports skipped" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'echo "server_validation=skipped"'
 assert_file_contains_literal \
   "server validation status reports failed" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'echo "server_validation=failed"'
 assert_file_contains_literal \
   "client validation status reports passed" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'echo "client_validation=passed"'
 assert_file_contains_literal \
   "client validation status reports failed" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'echo "client_validation=failed"'
 assert_file_contains_regex \
   "fallback is gated on connectivity-like failures" \
-  "$SKILL_MD" \
+  "$SKILL_GUIDE" \
   'grep -Eqi "connection refused\|no such host\|i/o timeout\|tls handshake timeout\|unable to connect to the server'
 
 echo ""

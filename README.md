@@ -151,6 +151,12 @@ Use k8s-debug to diagnose pods stuck in Pending in namespace payments.
 - **Tool-aware workflows**: validators integrate with real tools like `terraform`, `tflint`, `checkov`, `helm`, `kubeconform`, `actionlint`, and `act`.
 - **CRD/provider documentation lookup**: Kubernetes/Helm/Terraform/Terragrunt/Ansible flows include explicit doc lookup paths for custom resources.
 - **Fallback behavior is defined**: when a tool is missing, many skills degrade gracefully and tell you exactly what was skipped.
+- **Progressive disclosure**: every `SKILL.md` stays focused on triggering,
+  workflow, gotchas, safety, and validation, then routes uncommon cases to local
+  references, examples, assets, and deterministic scripts.
+
+Repository maintainers can validate this contract across the complete inventory
+with `node scripts/validate_skills.js`.
 
 ## Skill catalog (31)
 

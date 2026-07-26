@@ -379,8 +379,8 @@ List: aws_s3_bucket.production_buckets
 
 ## Related Documentation
 
-- [Terraform Ephemeral Values](https://developer.hashicorp.com/terraform/language/values/ephemeral)
+- [Terraform Ephemeral Values](https://developer.hashicorp.com/terraform/language/manage-sensitive-data/ephemeral)
 - [Terraform State Management](https://developer.hashicorp.com/terraform/language/state)
 - [Import Block](https://developer.hashicorp.com/terraform/language/import)
 - [Moved Block](https://developer.hashicorp.com/terraform/language/moved)
-- [Removed Block](https://developer.hashicorp.com/terraform/language/removed)
+- [Removed Block](https://developer.hashicorp.com/terraform/language/block/removed)

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Regression tests for gitlab-ci-generator SKILL.md contract guarantees."""
+"""Regression tests for gitlab-ci-generator extended-guide contracts."""
 
 from pathlib import Path
 import unittest
 
 
-SKILL_MD = Path(__file__).resolve().parent.parent / "SKILL.md"
+SKILL_GUIDE = (
+    Path(__file__).resolve().parent.parent / "references" / "extended-guide.md"
+)
 
 
 def _between(text: str, start_marker: str, end_marker: str) -> str:
@@ -23,7 +25,7 @@ class TestP1ValidationFallbackContract(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.skill_text = SKILL_MD.read_text(encoding="utf-8")
+        cls.skill_text = SKILL_GUIDE.read_text(encoding="utf-8")
         cls.script_fallback = _between(
             cls.skill_text,
             "2. **Script fallback path (if validator skill cannot be invoked):**",
@@ -62,7 +64,7 @@ class TestP2ModeContractConsistency(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.skill_text = SKILL_MD.read_text(encoding="utf-8")
+        cls.skill_text = SKILL_GUIDE.read_text(encoding="utf-8")
         cls.step1 = _between(
             cls.skill_text,
             "### Step 1: Classify Complexity (REQUIRED)",

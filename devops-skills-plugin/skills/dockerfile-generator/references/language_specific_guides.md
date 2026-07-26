@@ -506,5 +506,5 @@ exec "$@"
 
 - [Official Docker Samples](https://github.com/docker/awesome-compose)
 - [Node.js Docker Best Practices](https://github.com/nodejs/docker-node/blob/main/docs/BestPractices.md)
-- [Python Docker Best Practices](https://docs.python-guide.org/shipping/docker/)
+- [Docker Python guide](https://docs.docker.com/guides/python/)
 - [Go Docker Best Practices](https://docs.docker.com/language/golang/build-images/)

@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-DEFAULT_SKILL_FILE="$SKILL_DIR/SKILL.md"
+DEFAULT_SKILL_FILE="$SKILL_DIR/references/extended-guide.md"
 readonly SKILL_FILE="${SKILL_FILE:-$DEFAULT_SKILL_FILE}"
 readonly BEST_PRACTICES_FILE="${BEST_PRACTICES_FILE:-$SKILL_DIR/references/terraform_best_practices.md}"
 readonly VERSIONS_FILE="${VERSIONS_FILE:-$SKILL_DIR/assets/minimal-project/versions.tf}"

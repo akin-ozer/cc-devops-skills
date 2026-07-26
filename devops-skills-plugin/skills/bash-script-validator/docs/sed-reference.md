@@ -450,5 +450,5 @@ sed -n 's/old/new/gp' file | wc -l
 
 - [GNU sed Manual](https://www.gnu.org/software/sed/manual/)
 - [sed(1) Man Page](https://man7.org/linux/man-pages/man1/sed.1.html)
-- [sed One-Liners](http://sed.sourceforge.net/sed1line.txt)
+- [GNU sed manual](https://www.gnu.org/software/sed/manual/sed.html)
 - [Grymoire sed Tutorial](https://www.grymoire.com/Unix/Sed.html)

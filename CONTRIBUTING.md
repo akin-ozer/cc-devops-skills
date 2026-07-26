@@ -47,12 +47,23 @@ description: <short trigger-oriented description>
 Rules:
 
 - `name` is required and must equal the skill directory name.
-- `description` is required and should describe when an agent should use the skill.
-- Keep the description concise and action-oriented, as in existing skills:
-  `Create, generate, or scaffold ...` for generators and
-  `Validate, lint, audit, or ...` for validators.
-- Put the operational workflow, trigger phrases, local file map, and fallback
-  behavior below the frontmatter in Markdown.
+- `description` is required and is a trigger for the model, not a human-facing
+  summary. Start it with `Use when ...` and name the concrete request or
+  artifact that should activate the skill.
+- Keep `SKILL.md` at 80 lines or fewer. It should contain the purpose, an
+  adaptable workflow, resource routing, safety and gotchas, validation, and
+  output expectations.
+- Move long examples, command matrices, and uncommon variants into focused
+  `references/`, `docs/`, `examples/`, `assets/`, or `scripts/` resources.
+- Preserve deep or compatibility guidance in `references/extended-guide.md` and
+  label it for selective use so its situational checklists do not override the
+  concise entry-point workflow.
+- Tell the agent when to open each supporting resource. Do not require every
+  reference for every request.
+- Prefer goals and constraints over a rigid universal sequence. Keep strict
+  ordering only where safety or tool correctness depends on it.
+- Put common failure modes in `Safety and gotchas`; do not repeat knowledge the
+  model can infer from the target files.
 
 ## Generator and Validator Pairing
 
@@ -88,6 +99,8 @@ generator and prefer adding a validator before expanding generation behavior.
 
 - Confirm the new directory is under `devops-skills-plugin/skills/`.
 - Confirm `SKILL.md` has `name` and `description` frontmatter.
+- Run `node scripts/validate_skills.js` to check the complete inventory,
+  entry-point structure, progressive-disclosure guide, and local Markdown links.
 - Run shell/Python syntax checks for new scripts.
 - Run the skill's tests or add focused regression coverage for new behavior.
 - Update `README.md` if the skill catalog or installation guidance changes.
